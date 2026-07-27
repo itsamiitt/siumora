@@ -1,4 +1,5 @@
 import type { CartLine, CartTotals } from "./cart.ts";
+import type { NdrReason } from "./ndr.ts";
 
 /**
  * Order model and its lifecycle.
@@ -91,6 +92,10 @@ export interface Order {
   readonly placedAt: string;
   /** Set when the courier confirms delivery. Starts the returns clock. */
   readonly deliveredAt?: string;
+  /** Failed delivery attempts so far. */
+  readonly deliveryAttempts?: number;
+  /** Why the most recent attempt failed. */
+  readonly ndrReason?: NdrReason;
   /** Shared analytics dedup id, persisted so retries reuse it. */
   readonly eventId: string;
   /** Invoice number, assigned once the order is confirmed. */

@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { hsnSummary, summariseInvoice } from "@siumora/core";
+import { MAX_DELIVERY_ATTEMPTS, hsnSummary, summariseInvoice } from "@siumora/core";
 import { formatPaise } from "@siumora/in-locale";
 import { CollectionTitle, Display, MicroLabel, SiumoraMark } from "@siumora/ui";
 
 import { ConfirmOrder } from "@/components/confirm-order";
+import { NdrRecovery } from "@/components/ndr-recovery";
 import { OrderProgress } from "@/components/order-progress";
 import { ReturnForm } from "@/components/return-form";
 import { TrackPurchase } from "@/components/track-purchase";
@@ -72,6 +73,33 @@ export default async function OrderPage({ params }: PageProps) {
 
       {order.status === "awaiting_cod_confirmation" && (
         <ConfirmOrder orderNumber={order.number} />
+      )}
+
+      {order.status === "ndr" && (
+        <NdrRecovery
+          orderNumber={order.number}
+          attempts={order.deliveryAttempts ?? 1}
+          reason={order.ndrReason ?? "customer_unavailable"}
+        />
+      )}
+
+      {/* An order that came back must say so on its own page. Leaving the
+          customer to infer it from a status word in a list is how a support
+          ticket starts. */}
+      {order.status === "rto" && (
+        <div className="mt-8 border border-mulberry/30 bg-mulberry/[0.04] p-5">
+          <MicroLabel tone="mulberry">On its way back to us</MicroLabel>
+          <p className="mt-2.5 text-sm text-ink-muted">
+            {order.ndrReason === "customer_refused"
+              ? "The parcel was refused at the door, so it is returning to us."
+              : `The courier tried ${order.deliveryAttempts ?? MAX_DELIVERY_ATTEMPTS} times and could not deliver, so the parcel is returning to us.`}{" "}
+            {order.paymentMethod === "cod"
+              ? "Nothing was charged."
+              : "Your refund is issued once it reaches us."}{" "}
+            Order again whenever you like — we will hold the piece for you if
+            you message us.
+          </p>
+        </div>
       )}
 
       {order.status === "delivered" && !openReturn && (

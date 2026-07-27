@@ -2,9 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 
-import type { OrderStatus, ReturnReason, ReturnResolution } from "@siumora/core";
+import type {
+  NdrAction,
+  NdrReason,
+  OrderStatus,
+  ReturnReason,
+  ReturnResolution,
+} from "@siumora/core";
 
-import { advanceOrder } from "@/lib/order-store";
+import { advanceOrder, resolveNdr } from "@/lib/order-store";
 import { startReturn } from "@/lib/return-store";
 
 export interface ActionResult {
@@ -22,8 +28,9 @@ export interface ActionResult {
 export async function advanceOrderStatus(
   orderNumber: string,
   to: OrderStatus,
+  ndrReason?: NdrReason,
 ): Promise<ActionResult> {
-  const result = await advanceOrder(orderNumber, to);
+  const result = await advanceOrder(orderNumber, to, ndrReason);
   if (!result.ok) return { ok: false, message: result.message };
 
   revalidatePath(`/orders/${orderNumber}`);
@@ -43,5 +50,23 @@ export async function requestReturn(input: {
   if (!result.ok) return { ok: false, message: result.message };
 
   revalidatePath(`/orders/${input.orderNumber}`);
+  return { ok: true };
+}
+
+/**
+ * Record the customer's answer to a failed delivery.
+ *
+ * WhatsApp buttons drive this in production; the on-site control is the same
+ * three choices, and the same state change.
+ */
+export async function answerNdr(
+  orderNumber: string,
+  action: NdrAction,
+): Promise<ActionResult> {
+  const result = await resolveNdr(orderNumber, action);
+  if (!result.ok) return { ok: false, message: result.message };
+
+  revalidatePath(`/orders/${orderNumber}`);
+  revalidatePath("/account");
   return { ok: true };
 }

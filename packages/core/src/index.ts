@@ -110,6 +110,20 @@ export {
 } from "./returns.ts";
 
 export {
+  MAX_DELIVERY_ATTEMPTS,
+  NDR_REASON_LABELS,
+  escalation,
+  isRefusal,
+  ndrState,
+  needsAddressFix,
+  outcomeFor,
+  type NdrAction,
+  type NdrEvent,
+  type NdrReason,
+  type NdrState,
+} from "./ndr.ts";
+
+export {
   collectionSchema,
   gstSlabSchema,
   imageSchema,

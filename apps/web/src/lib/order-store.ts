@@ -9,6 +9,10 @@ import {
   orderNumber,
   shippingFor,
   transition,
+  ndrState,
+  outcomeFor,
+  type NdrAction,
+  type NdrReason,
   type Order,
   type OrderStatus,
   type PaymentMethod,
@@ -149,6 +153,7 @@ function sequenceOf(orderNo: string): number {
 export async function advanceOrder(
   number: string,
   to: OrderStatus,
+  ndrReason?: NdrReason,
 ): Promise<{ ok: true; order: Order } | { ok: false; message: string }> {
   const existing = ORDERS.get(number);
   if (!existing) return { ok: false, message: "Order not found." };
@@ -160,12 +165,34 @@ export async function advanceOrder(
     };
   }
 
+  const attempts =
+    to === "ndr" ? (existing.deliveryAttempts ?? 0) + 1 : existing.deliveryAttempts;
+  const reason =
+    to === "ndr"
+      ? (ndrReason ?? existing.ndrReason ?? "customer_unavailable")
+      : existing.ndrReason;
+
+  let status = transition(existing.status, to);
+
+  // An attempt that cannot be recovered — the ceiling reached, or the parcel
+  // refused — goes straight on to RTO. Leaving it sitting in NDR would show
+  // "delivery attempted" on an order that is already travelling back, and the
+  // customer would keep being offered choices that no longer exist.
+  if (to === "ndr" && attempts !== undefined) {
+    const outcome = outcomeFor(attempts, reason ?? "customer_unavailable");
+    if (outcome === "rto" && canTransition(status, "rto")) {
+      status = transition(status, "rto");
+    }
+  }
+
   const next: Order = {
     ...existing,
-    status: transition(existing.status, to),
+    status,
     // The returns window runs from delivery, so the timestamp is recorded the
     // moment the courier says it landed.
     ...(to === "delivered" ? { deliveredAt: new Date().toISOString() } : {}),
+    ...(attempts !== undefined ? { deliveryAttempts: attempts } : {}),
+    ...(reason !== undefined ? { ndrReason: reason } : {}),
   };
 
   ORDERS.set(number, next);
@@ -194,4 +221,41 @@ export async function listOrders(): Promise<Order[]> {
   return [...ORDERS.values()].sort((a, b) =>
     b.placedAt.localeCompare(a.placedAt),
   );
+}
+
+/**
+ * Record the customer's answer to a failed delivery.
+ *
+ * `reattempt` and `update_address` put the parcel back out for delivery;
+ * `cancel` ends it. The attempt counter is not reset — the courier's ceiling
+ * is a real limit, and pretending otherwise would promise a delivery that
+ * cannot happen.
+ */
+export async function resolveNdr(
+  number: string,
+  action: NdrAction,
+): Promise<{ ok: true; order: Order } | { ok: false; message: string }> {
+  const existing = ORDERS.get(number);
+  if (!existing) return { ok: false, message: "Order not found." };
+  if (existing.status !== "ndr") {
+    return { ok: false, message: "This order is not awaiting a delivery answer." };
+  }
+
+  const state = ndrState(
+    existing.deliveryAttempts ?? 0,
+    existing.ndrReason ?? "customer_unavailable",
+  );
+
+  if (action === "cancel") {
+    return advanceOrder(number, "cancelled");
+  }
+
+  if (!state.recoverable) {
+    return {
+      ok: false,
+      message: "The courier cannot attempt this delivery again.",
+    };
+  }
+
+  return advanceOrder(number, "out_for_delivery");
 }

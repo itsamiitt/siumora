@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import type { OrderStatus } from "@siumora/core";
+import type { NdrReason, OrderStatus } from "@siumora/core";
 import { Button, MicroLabel } from "@siumora/ui";
 
 import { advanceOrderStatus } from "@/app/actions/returns";
@@ -39,6 +39,15 @@ export function OrderProgress({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  function fire(status: OrderStatus, ndrReason?: NdrReason) {
+    start(async () => {
+      setError(null);
+      const result = await advanceOrderStatus(orderNumber, status, ndrReason);
+      if (result.ok) router.refresh();
+      else setError(result.message ?? "Could not move the order.");
+    });
+  }
+
   if (next.length === 0) return null;
 
   return (
@@ -50,20 +59,36 @@ export function OrderProgress({
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        {next.map((status) => (
+        {/* Two NDR reasons, because they lead to different recovery advice:
+            a missed call is worth another attempt, a bad address is not. */}
+        {next.includes("ndr") && (
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={pending}
+              onClick={() => fire("ndr", "customer_unavailable")}
+            >
+              Failed · nobody home
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={pending}
+              onClick={() => fire("ndr", "address_incomplete")}
+            >
+              Failed · bad address
+            </Button>
+          </>
+        )}
+
+        {next.filter((s) => s !== "ndr").map((status) => (
           <Button
             key={status}
             variant="secondary"
             size="sm"
             disabled={pending}
-            onClick={() =>
-              start(async () => {
-                setError(null);
-                const result = await advanceOrderStatus(orderNumber, status);
-                if (result.ok) router.refresh();
-                else setError(result.message ?? "Could not move the order.");
-              })
-            }
+            onClick={() => fire(status)}
           >
             {LABEL[status] ?? status}
           </Button>
