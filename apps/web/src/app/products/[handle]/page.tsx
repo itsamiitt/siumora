@@ -9,9 +9,13 @@ import { CollectionTitle, Display, Price } from "@siumora/ui";
 import { AddToBag } from "@/components/add-to-bag";
 import { JsonLdScript } from "@/components/json-ld";
 import { PincodeChecker } from "@/components/pincode-checker";
+import { ReviewsBlock } from "@/components/reviews-block";
+import { WishlistButton } from "@/components/wishlist-button";
 import { TrackViewItem } from "@/components/track-view-item";
 import { itemFromProduct } from "@/lib/analytics-items";
 import { getProduct, listProducts } from "@/lib/catalog";
+import { listReviews } from "@/lib/reviews";
+import { isWishlisted } from "@/lib/wishlist-store";
 
 interface PageProps {
   params: Promise<{ handle: string }>;
@@ -39,6 +43,8 @@ export default async function ProductPage({ params }: PageProps) {
 
   const price = lowestPrice(product);
   const image = product.images[0]!;
+  const reviews = await listReviews(product.handle);
+  const saved = await isWishlisted(product.handle);
 
   const collectionHandle = product.collections[0];
 
@@ -46,7 +52,7 @@ export default async function ProductPage({ params }: PageProps) {
     <div className="mx-auto max-w-6xl px-5 py-12">
       <JsonLdScript
         data={[
-          productJsonLd(product),
+          productJsonLd(product, { reviews }),
           breadcrumbJsonLd([
             { name: "Home", path: "/" },
             ...(collectionHandle
@@ -106,6 +112,15 @@ export default async function ProductPage({ params }: PageProps) {
             <AddToBag variants={product.variants} productTitle={product.title} />
           </div>
 
+          <div className="mt-5">
+            <WishlistButton
+              handle={product.handle}
+              initiallySaved={saved}
+              item={itemFromProduct(product)}
+              value={price.selling / 100}
+            />
+          </div>
+
           <div className="mt-8 border-t border-[var(--color-rule)] pt-6">
             <PincodeChecker />
           </div>
@@ -122,6 +137,8 @@ export default async function ProductPage({ params }: PageProps) {
           </dl>
         </div>
       </div>
+
+      <ReviewsBlock reviews={reviews} />
     </div>
   );
 }

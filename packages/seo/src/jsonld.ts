@@ -1,4 +1,12 @@
-import { isInStock, lowestPrice, type Collection, type Product } from "@siumora/core";
+import {
+  canEmitAggregateRating,
+  isInStock,
+  lowestPrice,
+  summariseRatings,
+  type Collection,
+  type Product,
+  type Review,
+} from "@siumora/core";
 
 import { SITE } from "./site.ts";
 
@@ -40,12 +48,45 @@ function priceValidUntil(from: Date): string {
 
 export function productJsonLd(
   product: Product,
-  options: { now?: Date } = {},
+  options: { now?: Date; reviews?: readonly Review[] } = {},
 ): JsonLd {
   const price = lowestPrice(product);
   const available = isInStock(product);
 
+  // AggregateRating is only emitted when there is something to aggregate.
+  // Google treats an empty one as invalid and can drop the rich result for the
+  // whole page, so the guard lives here rather than at each call site.
+  const reviews = options.reviews ?? [];
+  const summary = summariseRatings(reviews);
+  const verified = reviews.filter((review) => review.verifiedBuyer);
+
+  const ratingFields = canEmitAggregateRating(summary)
+    ? {
+        aggregateRating: {
+          "@type": "AggregateRating",
+          ratingValue: summary.average,
+          reviewCount: summary.count,
+          bestRating: 5,
+          worstRating: 1,
+        },
+        review: verified.slice(0, 5).map((review) => ({
+          "@type": "Review",
+          reviewRating: {
+            "@type": "Rating",
+            ratingValue: review.rating,
+            bestRating: 5,
+            worstRating: 1,
+          },
+          author: { "@type": "Person", name: review.authorName },
+          name: review.title,
+          reviewBody: review.body,
+          datePublished: review.createdAt.slice(0, 10),
+        })),
+      }
+    : {};
+
   return {
+    ...ratingFields,
     "@context": "https://schema.org",
     "@type": "Product",
     name: product.title,

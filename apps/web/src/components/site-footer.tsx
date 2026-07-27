@@ -32,6 +32,7 @@ export function SiteFooter() {
               { href: "/shipping", label: "Shipping & delivery" },
               { href: "/returns", label: "Returns & exchange" },
               { href: "/care", label: "Care guide" },
+              { href: "/account", label: "Your orders" },
             ]}
           />
           <FooterColumn

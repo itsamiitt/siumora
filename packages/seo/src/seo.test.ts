@@ -140,3 +140,43 @@ test("llms.txt states the facts an engine needs", () => {
   assert.match(text, /include GST/);
   assert.match(text, /7 days/);
 });
+
+const review = (overrides: Record<string, unknown> = {}) => ({
+  id: "r1",
+  productHandle: "petal-studs",
+  rating: 5,
+  title: "Lovely",
+  body: "Wear it every day.",
+  authorName: "Asha",
+  verifiedBuyer: true,
+  createdAt: "2026-07-01T00:00:00Z",
+  ...overrides,
+});
+
+test("omits AggregateRating entirely when there are no reviews", () => {
+  // An empty AggregateRating is invalid structured data and can cost the rich
+  // result for the whole page.
+  const ld = productJsonLd(product) as unknown as Record<string, unknown>;
+  assert.equal("aggregateRating" in ld, false);
+  assert.equal("review" in ld, false);
+});
+
+test("omits AggregateRating when every review is unverified", () => {
+  const ld = productJsonLd(product, {
+    reviews: [review({ verifiedBuyer: false })] as never,
+  }) as unknown as Record<string, unknown>;
+  assert.equal("aggregateRating" in ld, false);
+});
+
+test("emits AggregateRating once a verified review exists", () => {
+  const ld = productJsonLd(product, {
+    reviews: [review(), review({ id: "r2", rating: 4 })] as never,
+  }) as unknown as {
+    aggregateRating: { ratingValue: number; reviewCount: number };
+    review: unknown[];
+  };
+
+  assert.equal(ld.aggregateRating.ratingValue, 4.5);
+  assert.equal(ld.aggregateRating.reviewCount, 2);
+  assert.equal(ld.review.length, 2);
+});

@@ -43,6 +43,9 @@ export function SiteHeader() {
             <MicroLabel>Search</MicroLabel>
           </Link>
           <PincodeChecker />
+          <Link href="/wishlist" className="transition-colors hover:text-mulberry">
+            <MicroLabel>Saved</MicroLabel>
+          </Link>
           <CartBadge />
         </div>
       </div>

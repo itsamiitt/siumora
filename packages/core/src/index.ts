@@ -83,6 +83,15 @@ export {
 } from "./order.ts";
 
 export {
+  canEmitAggregateRating,
+  reviewSchema,
+  sortByNewest,
+  summariseRatings,
+  type RatingSummary,
+  type Review,
+} from "./reviews.ts";
+
+export {
   collectionSchema,
   gstSlabSchema,
   imageSchema,

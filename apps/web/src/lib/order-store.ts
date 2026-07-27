@@ -136,3 +136,10 @@ function sequenceOf(orderNo: string): number {
   const digits = orderNo.replace(/\D/g, "");
   return Number.parseInt(digits, 10) || 1;
 }
+
+/** All orders, newest first. Stands in for a customer-scoped query. */
+export async function listOrders(): Promise<Order[]> {
+  return [...ORDERS.values()].sort((a, b) =>
+    b.placedAt.localeCompare(a.placedAt),
+  );
+}
