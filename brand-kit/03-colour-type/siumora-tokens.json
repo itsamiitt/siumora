@@ -1,0 +1,129 @@
+{
+  "name": "Siumora",
+  "edition": "01",
+  "year": 2026,
+  "colour": {
+    "ink": {
+      "hex": "#1C1917",
+      "rgb": [
+        28,
+        25,
+        23
+      ],
+      "pantone": "Black 6 C",
+      "role": "Type, mark stroke"
+    },
+    "plate": {
+      "hex": "#14110F",
+      "rgb": [
+        20,
+        17,
+        15
+      ],
+      "role": "Dark surfaces, packaging"
+    },
+    "mulberry": {
+      "hex": "#6B2942",
+      "rgb": [
+        107,
+        41,
+        66
+      ],
+      "pantone": "5115 C",
+      "role": "Single accent — kernel, buttons, labels"
+    },
+    "brass": {
+      "hex": "#C79A5C",
+      "rgb": [
+        199,
+        154,
+        92
+      ],
+      "role": "Foil only — never a fill or gradient"
+    },
+    "brassLight": {
+      "hex": "#E3C08A",
+      "rgb": [
+        227,
+        192,
+        138
+      ],
+      "role": "Foil highlight, kernel on dark"
+    },
+    "blush": {
+      "hex": "#EBDDD8",
+      "rgb": [
+        235,
+        221,
+        216
+      ],
+      "pantone": "7527 C",
+      "role": "Secondary ground"
+    },
+    "ivory": {
+      "hex": "#F7F3EA",
+      "rgb": [
+        247,
+        243,
+        234
+      ],
+      "role": "Primary ground, uncoated stock"
+    }
+  },
+  "proportion": {
+    "ivory": 0.62,
+    "blush": 0.2,
+    "ink": 0.11,
+    "mulberry": 0.05,
+    "brass": 0.02
+  },
+  "type": {
+    "display": {
+      "family": "Cormorant Garamond",
+      "weight": 300,
+      "use": "Wordmark, headlines 32–62px",
+      "tracking": "0.30–0.42em in caps"
+    },
+    "heading": {
+      "family": "Marcellus",
+      "use": "Collection names, packaging caps",
+      "tracking": "0.18–0.24em"
+    },
+    "body": {
+      "family": "Jost",
+      "weights": [
+        300,
+        500
+      ],
+      "use": "Interface, body 14–16px",
+      "lineHeight": 1.7
+    }
+  },
+  "mark": {
+    "name": "Petal & Kernel",
+    "grid": "1×1 square",
+    "circleDiameter": "0.5x",
+    "stroke": "0.0075x",
+    "kernelDiameter": "0.167x",
+    "clearSpace": "0.5x",
+    "minSize": {
+      "screen": "16px",
+      "print": "6mm",
+      "recommended": "24px+"
+    }
+  },
+  "voice": {
+    "line": "Something given, something kept.",
+    "never": [
+      "bridal",
+      "trousseau",
+      "dowry",
+      "investment",
+      "luxury",
+      "exclusive",
+      "premium",
+      "treat yourself",
+      "girl boss"
+    ]
+  }
+}

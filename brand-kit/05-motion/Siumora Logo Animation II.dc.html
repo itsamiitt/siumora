@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Jost:wght@300;400&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #14110F; }
+</style>
+<script>window.OM_SCENES = '[{"name":"Lattice","dur":3},{"name":"Chosen","dur":2.6},{"name":"Set","dur":3.2},{"name":"Signoff","dur":3.8}]';</script>
+<script>window.OM_PLAYBACK = '{"mode":"loop"}';</script>
+</helmet>
+
+<div style="display: flex; align-items: center; justify-content: center; padding: 32px; background: #14110F;">
+  <x-import component-from-global-scope="SiumoraStingTwo" from="./animations-v2.jsx ./siumora-sting-two.jsx" dc-props="{{ opts }}" hint-size="1280px,720px"></x-import>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;mood&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Brass on ink&quot;,&quot;Ink on ivory&quot;,&quot;Mulberry&quot;],&quot;default&quot;:&quot;Brass on ink&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Feel&quot;},&quot;energy&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:0.2,&quot;min&quot;:0.2,&quot;max&quot;:1.8,&quot;step&quot;:0.1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Feel&quot;},&quot;weave&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:56,&quot;min&quot;:56,&quot;max&quot;:200,&quot;step&quot;:8,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Feel&quot;},&quot;tagline&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Something given, something kept&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Copy&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      opts: {
+        mood: this.props.mood ?? 'Brass on ink',
+        weave: this.props.weave ?? 112,
+        energy: this.props.energy ?? 1,
+        tagline: this.props.tagline ?? 'Something given, something kept',
+      },
+    };
+  }
+}
+</script>
+</body>
+</html>

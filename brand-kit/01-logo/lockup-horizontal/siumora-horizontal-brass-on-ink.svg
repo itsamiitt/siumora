@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 100" width="520" height="100" role="img" aria-label="Siumora">
+  <rect width="520" height="100" fill="#14110F"></rect>
+  <g transform="translate(0 12) scale(0.76)">
+  <g fill="none" stroke="#C79A5C" stroke-width="0.75">
+    <circle cx="50" cy="25" r="25"></circle>
+    <circle cx="75" cy="50" r="25"></circle>
+    <circle cx="50" cy="75" r="25"></circle>
+    <circle cx="25" cy="50" r="25"></circle>
+  </g>
+  <circle cx="50" cy="50" r="8.35" fill="#E3C08A"></circle>
+  </g>
+  <text x="110" y="66" font-family="Cormorant Garamond, Cormorant, Garamond, serif" font-weight="300" font-size="42" letter-spacing="13" fill="#F7F3EA" xml:space="preserve">SIUMORA </text>
+</svg>

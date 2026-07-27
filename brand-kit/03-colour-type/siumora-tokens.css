@@ -1,0 +1,19 @@
+/* Siumora brand tokens — Edition 01 */
+:root {
+  --siumora-ink:        #1C1917; /* Kohl Ink      · Pantone Black 6 C */
+  --siumora-plate:      #14110F; /* Ink Plate     · dark surfaces     */
+  --siumora-mulberry:   #6B2942; /* Mulberry      · Pantone 5115 C    */
+  --siumora-brass:      #C79A5C; /* Brass Leaf    · gold matte foil   */
+  --siumora-brass-light:#E3C08A; /* Light Foil                        */
+  --siumora-blush:      #EBDDD8; /* Blush Mist    · Pantone 7527 C    */
+  --siumora-ivory:      #F7F3EA; /* Kagaz Ivory   · uncoated stock    */
+
+  --siumora-font-display: 'Cormorant Garamond', serif; /* 300 */
+  --siumora-font-heading: 'Marcellus', serif;
+  --siumora-font-body:    'Jost', sans-serif;          /* 300 / 500 */
+
+  --siumora-track-wordmark: 0.34em;
+  --siumora-track-caps:     0.20em;
+  --siumora-rule:           1px solid rgba(28,25,23,0.12);
+}
+/* Proportion rule per surface: ivory 62% · blush 20% · ink 11% · mulberry 5% · brass 2% */

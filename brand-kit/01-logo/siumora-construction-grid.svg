@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <rect width="200" height="200" fill="#F7F3EA"></rect>
+  <rect x="50" y="50" width="100" height="100" fill="none" stroke="#6B2942" stroke-width="0.4" stroke-dasharray="2 2"></rect>
+  <line x1="100" y1="50" x2="100" y2="150" stroke="#6B2942" stroke-width="0.4"></line>
+  <line x1="50" y1="100" x2="150" y2="100" stroke="#6B2942" stroke-width="0.4"></line>
+  <g transform="translate(50 50)">
+  <g fill="none" stroke="#1C1917" stroke-width="0.75">
+    <circle cx="50" cy="25" r="25"></circle>
+    <circle cx="75" cy="50" r="25"></circle>
+    <circle cx="50" cy="75" r="25"></circle>
+    <circle cx="25" cy="50" r="25"></circle>
+  </g>
+  <circle cx="50" cy="50" r="8.35" fill="#6B2942"></circle>
+  </g>
+  <text x="100" y="192" text-anchor="middle" font-family="Jost, sans-serif" font-size="6" letter-spacing="1.6" fill="#1C1917">CLEAR SPACE = 0.5x ON ALL SIDES</text>
+</svg>
