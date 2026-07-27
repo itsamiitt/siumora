@@ -35,6 +35,32 @@ export {
 } from "./cod.ts";
 
 export {
+  scoreAddress,
+  type AddressInput,
+  type AddressQuality,
+} from "./address.ts";
+
+export {
+  RTO_HIGH_THRESHOLD,
+  RTO_MEDIUM_THRESHOLD,
+  bandFor,
+  explainRto,
+  scoreRto,
+  type RtoContribution,
+  type RtoFactors,
+  type RtoScore,
+} from "./rto.ts";
+
+export {
+  SYNONYM_GROUPS,
+  editDistance,
+  expandTerm,
+  searchProducts,
+  tokenise,
+  type SearchHit,
+} from "./search.ts";
+
+export {
   collectionSchema,
   gstSlabSchema,
   imageSchema,

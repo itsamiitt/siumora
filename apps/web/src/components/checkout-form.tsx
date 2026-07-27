@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 
-import { evaluateCod, type CodDecision } from "@siumora/core";
+import {
+  evaluateCod,
+  scoreAddress,
+  scoreRto,
+  type AddressQuality,
+  type CodDecision,
+} from "@siumora/core";
 import {
   INDIAN_STATES,
   formatPaise,
@@ -29,6 +35,8 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
   const [stateCode, setStateCode] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("upi");
   const [cod, setCod] = useState<CodDecision | null>(null);
+  const [addressLine, setAddressLine] = useState("");
+  const [addressQuality, setAddressQuality] = useState<AddressQuality | null>(null);
   const [delivery, setDelivery] = useState<string | null>(null);
 
   const pincodeValid = isValidPincode(pincode);
@@ -46,12 +54,34 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
       if (cancelled) return;
 
       setDelivery(service.serviceable ? service.estimatedDays : null);
+
+      // Real RTO scoring from what the customer has actually entered. The
+      // address is scored as typed, so an incomplete one tightens COD before
+      // the order is placed rather than after the parcel comes back.
+      const quality = scoreAddress({
+        line1: addressLine,
+        landmark: "",
+        city: "",
+        stateCode,
+        pincode,
+      });
+
+      const risk = scoreRto({
+        paymentMethod: "cod",
+        orderValue: subtotal,
+        addressScore: quality.score,
+        // OTP verification happens after this step, so treat the phone as
+        // unverified while scoring.
+        phoneVerified: false,
+        isNewCustomer: true,
+      });
+
+      setAddressQuality(quality);
       setCod(
         evaluateCod({
           subtotal,
           pincodeCodServiceable: service.codAvailable,
-          // Risk scoring lands with the RTO module; low is the placeholder.
-          rtoRisk: "low",
+          rtoRisk: risk.risk,
         }),
       );
     })();
@@ -59,7 +89,7 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
     return () => {
       cancelled = true;
     };
-  }, [pincode, pincodeValid, subtotal]);
+  }, [pincode, pincodeValid, subtotal, addressLine, stateCode]);
 
   // A pincode change can withdraw COD while it is selected. Fall back to UPI
   // rather than leaving an unavailable method chosen.
@@ -138,10 +168,20 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
           <textarea
             id="address"
             rows={3}
+            value={addressLine}
+            onChange={(e) => setAddressLine(e.target.value)}
             autoComplete="street-address"
             placeholder="Flat, building, street, area"
             className="w-full border border-ink/20 p-3 text-sm outline-none focus:border-mulberry"
           />
+          {/* Surfaced as help, not as an error: the order is still allowed,
+              but a thin address quietly costs COD eligibility. */}
+          {addressQuality && addressQuality.needsReview && addressLine.length > 0 && (
+            <p className="mt-1.5 text-xs text-ink-muted">
+              Add {addressQuality.issues[0]?.toLowerCase()} so the courier can
+              find you.
+            </p>
+          )}
         </Field>
 
         {delivery && (

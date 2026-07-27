@@ -39,6 +39,9 @@ export function SiteHeader() {
         </nav>
 
         <div className="ml-auto flex items-center gap-6">
+          <Link href="/search" className="transition-colors hover:text-mulberry">
+            <MicroLabel>Search</MicroLabel>
+          </Link>
           <PincodeChecker />
           <CartBadge />
         </div>
