@@ -124,6 +124,17 @@ export {
 } from "./ndr.ts";
 
 export {
+  invoiceSeriesHealth,
+  ndrQueue,
+  rtoBreakdown,
+  statusCounts,
+  summariseRevenue,
+  type InvoiceSeriesHealth,
+  type RevenueSummary,
+  type RtoBreakdown,
+} from "./metrics.ts";
+
+export {
   collectionSchema,
   gstSlabSchema,
   imageSchema,

@@ -105,12 +105,12 @@ export function buildRobots({ isPreview = false } = {}): RobotsConfig {
       {
         userAgent: "*",
         allow: ["/"],
-        disallow: ["/cart", "/checkout", "/account", "/api/"],
+        disallow: ["/cart", "/checkout", "/account", "/orders", "/admin", "/api/"],
       },
       {
         userAgent: [...AI_CRAWLERS],
         allow: ["/"],
-        disallow: ["/cart", "/checkout", "/account", "/api/"],
+        disallow: ["/cart", "/checkout", "/account", "/orders", "/admin", "/api/"],
       },
     ],
     sitemap: absolute("/sitemap.xml"),

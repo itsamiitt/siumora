@@ -111,7 +111,7 @@ test("sitemap covers catalogue pages and excludes private ones", () => {
 
   assert.ok(urls.some((u) => u.endsWith("/products/petal-studs")));
   assert.ok(urls.some((u) => u.endsWith("/collections/everyday")));
-  for (const path of ["/cart", "/checkout", "/account"]) {
+  for (const path of ["/cart", "/checkout", "/account", "/admin", "/orders"]) {
     assert.ok(!urls.some((u) => u.includes(path)), `sitemap listed ${path}`);
   }
 });
@@ -119,7 +119,14 @@ test("sitemap covers catalogue pages and excludes private ones", () => {
 test("robots blocks private paths but allows AI crawlers", () => {
   const robots = buildRobots();
   const wildcard = robots.rules[0]!;
-  assert.deepEqual(wildcard.disallow, ["/cart", "/checkout", "/account", "/api/"]);
+  assert.deepEqual(wildcard.disallow, [
+    "/cart",
+    "/checkout",
+    "/account",
+    "/orders",
+    "/admin",
+    "/api/",
+  ]);
 
   const ai = robots.rules[1]!;
   assert.ok(Array.isArray(ai.userAgent) && ai.userAgent.includes("GPTBot"));
