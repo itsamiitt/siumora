@@ -49,8 +49,26 @@ export function buildSitemap(
       changeFrequency: "weekly" as const,
       priority: 0.7,
     })),
+    // Policy and guide pages. Indexable and worth indexing: they answer real
+    // questions, and the FAQ markup on them is what earns AI-engine citations.
+    ...CONTENT_PAGES.map((path) => ({
+      url: absolute(path),
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority: 0.4,
+    })),
   ];
 }
+
+/** Static pages that belong in the sitemap. */
+export const CONTENT_PAGES = [
+  "/shipping",
+  "/returns",
+  "/care",
+  "/privacy",
+  "/terms",
+  "/grievance",
+] as const;
 
 export interface RobotsRule {
   userAgent: string | string[];

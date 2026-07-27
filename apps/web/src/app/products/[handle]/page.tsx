@@ -14,6 +14,7 @@ import { WishlistButton } from "@/components/wishlist-button";
 import { TrackViewItem } from "@/components/track-view-item";
 import { itemFromProduct } from "@/lib/analytics-items";
 import { getProduct, listProducts } from "@/lib/catalog";
+import { COUNTRY_OF_ORIGIN } from "@/lib/legal";
 import { listReviews } from "@/lib/reviews";
 import { isWishlisted } from "@/lib/wishlist-store";
 
@@ -129,6 +130,11 @@ export default async function ProductPage({ params }: PageProps) {
             <div>
               <dt className="text-ink-muted">Material</dt>
               <dd className="mt-1">{product.material}</dd>
+            </div>
+            <div>
+              {/* Required on every listing under the Legal Metrology rules. */}
+              <dt className="text-ink-muted">Country of origin</dt>
+              <dd className="mt-1">{COUNTRY_OF_ORIGIN}</dd>
             </div>
             <div>
               <dt className="text-ink-muted">About</dt>
