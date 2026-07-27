@@ -18,7 +18,6 @@ export interface PageMetadata {
     description: string;
     url: string;
     type: "website" | "article";
-    images?: Array<{ url: string }>;
   };
   robots?: { index: boolean; follow: boolean };
 }
@@ -58,7 +57,9 @@ export function productMetadata(product: Product): PageMetadata {
       description: product.subtitle,
       url: canonical,
       type: "website",
-      images: product.images.map((image) => ({ url: url(image.url) })),
+      // Deliberately no `images`. Setting it here overrides the generated
+      // opengraph-image card, and the catalogue asset it pointed at is an SVG —
+      // which several platforms refuse to render in a preview at all.
     },
   };
 }

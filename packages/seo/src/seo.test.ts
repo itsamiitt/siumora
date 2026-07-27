@@ -180,3 +180,12 @@ test("emits AggregateRating once a verified review exists", () => {
   assert.equal(ld.aggregateRating.reviewCount, 2);
   assert.equal(ld.review.length, 2);
 });
+
+test("does not set og:image, so the generated card is used", () => {
+  // Setting images here overrides the file-based opengraph-image, and the
+  // catalogue asset is an SVG that several platforms will not render.
+  const meta = productMetadata(product) as unknown as {
+    openGraph: Record<string, unknown>;
+  };
+  assert.equal("images" in meta.openGraph, false);
+});
