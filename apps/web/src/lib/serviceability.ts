@@ -1,44 +1,33 @@
-import { isValidPincode } from "@siumora/in-locale";
+import "server-only";
+
+import { api } from "./api";
 
 export interface Serviceability {
   readonly pincode: string;
   readonly serviceable: boolean;
-  /** Estimated delivery window in days. */
   readonly estimatedDays: string;
-  /**
-   * Whether COD is offered here. Gated by the RTO engine in production — a
-   * high-risk pincode is prepaid-only even when the courier serves it.
-   */
   readonly codAvailable: boolean;
 }
 
 /**
- * Serviceability lookup.
+ * Pincode serviceability.
  *
- * Phase 1 answers from the pincode prefix so the UX can be built and reviewed.
- * In production this calls the courier aggregator through apps/api, which also
- * applies COD/RTO gating (see plan/05-orders-logistics.md).
+ * Answered by the API from the courier serviceability table. An unknown
+ * pincode reads as not serviceable rather than optimistically available — an
+ * over-promised delivery is worse than an honest no.
  */
 export async function checkServiceability(
   pincode: string,
 ): Promise<Serviceability> {
-  if (!isValidPincode(pincode)) {
+  try {
+    const row = await api().getPincode(pincode);
     return {
       pincode,
-      serviceable: false,
-      estimatedDays: "—",
-      codAvailable: false,
+      serviceable: row.serviceable,
+      estimatedDays: row.estimatedDays,
+      codAvailable: row.codAvailable,
     };
+  } catch {
+    return { pincode, serviceable: false, estimatedDays: "—", codAvailable: false };
   }
-
-  // Metro prefixes get the faster window; everything else is the standard one.
-  const metroPrefixes = ["40", "11", "56", "60", "70", "50", "38", "41"];
-  const isMetro = metroPrefixes.some((prefix) => pincode.startsWith(prefix));
-
-  return {
-    pincode,
-    serviceable: true,
-    estimatedDays: isMetro ? "2–3" : "4–6",
-    codAvailable: isMetro,
-  };
 }

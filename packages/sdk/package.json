@@ -1,0 +1,21 @@
+{
+  "name": "@siumora/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types src/*.test.ts"
+  },
+  "dependencies": {
+    "@siumora/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@siumora/config-ts": "workspace:*",
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3"
+  }
+}

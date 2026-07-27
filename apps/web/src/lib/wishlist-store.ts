@@ -2,27 +2,17 @@ import "server-only";
 
 import { cookies } from "next/headers";
 
+import { api } from "./api";
+
 /**
  * Wishlist.
  *
- * Held per visitor by the same cookie-plus-server-map arrangement as the cart,
- * and pinned to globalThis for the same reason: Next bundles route handlers
- * separately from pages, so a plain module constant is instantiated twice and
- * the two copies silently diverge.
- *
- * Stores product handles rather than variant ids. Saving something for later is
- * an intent about the piece, not about the size or finish, and forcing a
- * variant choice at save time loses saves.
+ * Stored in the database and keyed by an id in an HTTP-only cookie, the same
+ * arrangement as the cart. Saves therefore survive a browser change once
+ * sign-in links the id to a customer.
  */
 
 const WISHLIST_COOKIE = "siumora_wishlist";
-
-const globalForWishlists = globalThis as typeof globalThis & {
-  __siumoraWishlists?: Map<string, Set<string>>;
-};
-
-const WISHLISTS: Map<string, Set<string>> = (globalForWishlists.__siumoraWishlists ??=
-  new Map());
 
 async function readId(): Promise<string | undefined> {
   return (await cookies()).get(WISHLIST_COOKIE)?.value;
@@ -47,25 +37,20 @@ async function ensureId(): Promise<string> {
 export async function listWishlist(): Promise<string[]> {
   const id = await readId();
   if (!id) return [];
-  return [...(WISHLISTS.get(id) ?? [])];
+  try {
+    return await api().getWishlist(id);
+  } catch {
+    return [];
+  }
 }
 
 export async function isWishlisted(handle: string): Promise<boolean> {
-  const id = await readId();
-  return id ? (WISHLISTS.get(id)?.has(handle) ?? false) : false;
+  return (await listWishlist()).includes(handle);
 }
 
-/** Toggle and report the resulting state, so the caller needs no second read. */
 export async function toggleWishlist(
   handle: string,
 ): Promise<{ wishlisted: boolean; count: number }> {
   const id = await ensureId();
-  const set = WISHLISTS.get(id) ?? new Set<string>();
-
-  const wishlisted = !set.has(handle);
-  if (wishlisted) set.add(handle);
-  else set.delete(handle);
-
-  WISHLISTS.set(id, set);
-  return { wishlisted, count: set.size };
+  return api().toggleWishlist(id, handle);
 }

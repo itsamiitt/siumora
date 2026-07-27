@@ -28,7 +28,9 @@ before(async () => {
   testDb = await createTestDatabase("db_schema");
   pool = createPool({ connectionString: testDb!.url });
   await migrate(pool);
-  await pool.query("DELETE FROM order_lines; DELETE FROM orders;");
+  await pool.query(
+    "DELETE FROM order_lines; DELETE FROM orders; DELETE FROM tracking_events; DELETE FROM reviews; DELETE FROM variants; DELETE FROM products;",
+  );
 });
 
 after(async () => {
@@ -130,17 +132,20 @@ describeDb("refuses an invalid GST slab on a product", async () => {
 });
 
 describeDb("refuses a selling price above MRP", async () => {
+  // Fresh handle each run: a fixed one collides on the unique index the second
+  // time and the insert throws before the assertion is ever reached.
   const { rows } = await pool.query<{ id: string }>(
     `INSERT INTO products (handle, title, hsn, gst_slab)
-     VALUES ('price-check', 'x', '7113', 5) RETURNING id`,
+     VALUES ($1, 'x', '7113', 5) RETURNING id`,
+    [`price-check-${crypto.randomUUID()}`],
   );
 
   await assert.rejects(
     () =>
       pool.query(
         `INSERT INTO variants (product_id, sku, title, mrp, price)
-         VALUES ($1, 'SKU-BAD', 'x', 1000, 2000)`,
-        [rows[0]!.id],
+         VALUES ($1, $2, 'x', 1000, 2000)`,
+        [rows[0]!.id, `SKU-BAD-${crypto.randomUUID()}`],
       ),
     /variants_price_not_above_mrp/,
   );
@@ -149,7 +154,8 @@ describeDb("refuses a selling price above MRP", async () => {
 describeDb("refuses a rating outside one to five", async () => {
   const { rows } = await pool.query<{ id: string }>(
     `INSERT INTO products (handle, title, hsn, gst_slab)
-     VALUES ('rating-check', 'x', '7113', 5) RETURNING id`,
+     VALUES ($1, 'x', '7113', 5) RETURNING id`,
+    [`rating-check-${crypto.randomUUID()}`],
   );
 
   await assert.rejects(
@@ -165,7 +171,7 @@ describeDb("refuses a rating outside one to five", async () => {
 
 describeDb("refuses a duplicate tracking send to one destination", async () => {
   // A retry that minted a new id would be counted as a second conversion.
-  const eventId = "11111111-1111-1111-1111-111111111111";
+  const eventId = crypto.randomUUID();
   await pool.query(
     `INSERT INTO tracking_events (event_id, event_name, destination)
      VALUES ($1, 'purchase', 'meta')`,

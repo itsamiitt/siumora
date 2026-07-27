@@ -16,7 +16,6 @@ import { itemFromProduct } from "@/lib/analytics-items";
 import { getProduct, listProducts } from "@/lib/catalog";
 import { COUNTRY_OF_ORIGIN } from "@/lib/legal";
 import { listReviews } from "@/lib/reviews";
-import { isWishlisted } from "@/lib/wishlist-store";
 
 interface PageProps {
   params: Promise<{ handle: string }>;
@@ -45,7 +44,6 @@ export default async function ProductPage({ params }: PageProps) {
   const price = lowestPrice(product);
   const image = product.images[0]!;
   const reviews = await listReviews(product.handle);
-  const saved = await isWishlisted(product.handle);
 
   const collectionHandle = product.collections[0];
 
@@ -116,7 +114,6 @@ export default async function ProductPage({ params }: PageProps) {
           <div className="mt-5">
             <WishlistButton
               handle={product.handle}
-              initiallySaved={saved}
               item={itemFromProduct(product)}
               value={price.selling / 100}
             />

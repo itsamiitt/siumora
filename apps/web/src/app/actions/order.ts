@@ -28,7 +28,15 @@ export async function submitOrder(input: {
   eventId: string;
   codFee?: number;
 }): Promise<PlaceOrderResult> {
-  const result = await placeOrder(input);
+  // The event id doubles as the idempotency key: it is already unique per
+  // checkout attempt and already travels with the order, so a resubmitted form
+  // collides rather than placing a second order.
+  const result = await placeOrder({
+    address: input.address,
+    paymentMethod: input.paymentMethod,
+    eventId: input.eventId,
+    idempotencyKey: input.eventId,
+  });
   if (!result.ok) return { ok: false, message: result.message };
 
   // The cart is emptied only after the order exists, so a failure mid-flight
@@ -37,7 +45,7 @@ export async function submitOrder(input: {
   revalidatePath("/cart");
   revalidatePath("/", "layout");
 
-  return { ok: true, orderNumber: result.order.number };
+  return { ok: true, orderNumber: result.orderNumber };
 }
 
 /**

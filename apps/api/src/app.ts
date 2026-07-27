@@ -8,6 +8,7 @@ import { registerCheckoutRoutes } from "./routes/checkout.ts";
 import { registerOrderRoutes } from "./routes/orders.ts";
 import { registerWebhookRoutes } from "./routes/webhooks.ts";
 import { registerAdminRoutes } from "./routes/admin.ts";
+import { registerWishlistRoutes } from "./routes/wishlist.ts";
 
 export interface AppConfig {
   connectionString: string;
@@ -102,6 +103,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
   await registerCheckoutRoutes(server);
   await registerOrderRoutes(server);
   await registerWebhookRoutes(server);
+  await registerWishlistRoutes(server);
   await registerAdminRoutes(server);
 
   return { server, db, pool };

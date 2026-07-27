@@ -6,77 +6,119 @@ Single-vendor e-commerce platform for the Indian market. Demi-fine jewellery,
 
 ## Status
 
-Phase 0 (foundation) and the storefront half of Phase 1 are in. The commerce
-engine, payments, and logistics are not built yet — see
-[`plan/12-roadmap-costs.md`](plan/12-roadmap-costs.md) for the full phasing.
-
 | Area | State |
 |---|---|
 | Turborepo + pnpm monorepo | done |
-| Design system from brand kit | done |
-| ₹ formatting, pincode, GST math | done, unit-tested |
-| Storefront: home, PLP, PDP | done, renders from a typed fixture |
-| Cart / checkout / Razorpay | not started (Phase 2) |
-| Medusa API, orders, logistics | not started (Phase 2–3) |
+| Design system from the brand kit | done |
+| ₹ formatting, GST, RTO, NDR, returns, search | done, unit-tested |
+| Postgres schema, migrations, seed | done, constraint-tested |
+| Commerce API (catalog, cart, checkout, orders, returns, webhooks) | done, integration-tested |
+| Storefront on the API | done |
+| Razorpay, Shiprocket, WhatsApp | not connected — needs credentials |
+| Auth (phone OTP), admin sign-in | not built |
 
 ## Layout
 
 ```
 apps/
-  web/            Next.js 16 storefront (App Router, React Compiler, Tailwind v4)
+  api/            Fastify commerce API over Postgres
+  web/            Next.js 16 storefront
 packages/
-  ui/             Design system — brand tokens, logo lockups, primitives
-  core/           Domain types, Zod schemas, GST engine
+  core/           Domain logic — GST, RTO, NDR, returns, search, metrics
+  db/             Drizzle schema, migrations, repositories
+  sdk/            Typed client for the API
+  ui/             Design system — brand tokens, logo, primitives
+  analytics/      Typed event contract (GA4 / Meta / PostHog adapters)
+  seo/            JSON-LD, metadata, sitemap, robots, llms.txt
   in-locale/      ₹ formatting, Indian states, pincode validation
   config-ts/      Shared tsconfig bases
+tooling/          Local Postgres helper
 plan/             Architecture and roadmap documents
 brand-kit/        Brand guidelines, logo, tokens, pattern, motion
 ```
 
-## Getting started
+## Running it
 
-Requires Node 22+ and pnpm 10+.
+Requires Node 22+, pnpm 10+, and Postgres.
 
 ```bash
 pnpm install
-pnpm dev          # storefront on http://localhost:3000
+./tooling/postgres.sh start          # prints the DATABASE_URL to use
+cp .env.example .env                 # then fill in DATABASE_URL
+
+pnpm --filter @siumora/db migrate
+pnpm --filter @siumora/db seed
+
+pnpm --filter @siumora/api start     # API on :4000
+pnpm --filter @siumora/web dev       # storefront on :3000
 ```
+
+The storefront calls the API during static generation as well as at request
+time, so **the API must be reachable when `apps/web` builds**.
 
 ```bash
-pnpm build        # production build, all workspaces
-pnpm typecheck    # strict tsc across the monorepo
-pnpm test         # unit tests
+pnpm build       # all workspaces
+pnpm typecheck   # strict tsc
+pnpm test        # unit + integration
 ```
 
-## Brand rules that are enforced in code
+Database-backed tests skip when `DATABASE_URL` is unset, so the suite still
+runs without a server. With one set, each suite provisions its own database —
+they run in parallel and would otherwise delete each other's rows.
 
-The design system encodes the guidelines so they cannot drift:
+## Decisions that are load-bearing
 
-- **Body is always Kohl Ink on Kagaz Ivory** — set in the base layer, not per page.
-- **Mulberry is the one accent per view.** It is the only colour on buttons, the
-  focus ring, and the discount chip.
-- **Brass is foil only** — a hairline rule or the kernel of the mark. Never a
-  large fill, never a gradient.
-- **The mark swaps below 24px.** `SiumoraMark` thickens the stroke and grows the
-  kernel automatically so small sizes stay legible. 16px is the floor.
-- **The lattice never carries the logo.** The jaali band is the pattern the mark
-  is made of, so it holds copy instead.
-- **Tracked caps settings are for capitals only.** `MicroLabel` and
-  `CollectionTitle` bundle the tracking with `uppercase` so the two cannot separate.
+**Money is integer paise, everywhere.** Never numeric, never float. A rupee
+value through a float loses paise, and a tax total out by one is a mismatched
+invoice. Formatting happens only at the edge.
+
+**Displayed prices include GST**, so tax is extracted *out of* the price rather
+than added on top. Getting that direction wrong overcharges the customer.
+
+**A parcel in transit is not revenue.** Booked, recognised, in-flight and lost
+are four separate numbers. Collapsing them is how RTO silently inflates the
+books.
+
+**Invariants that would corrupt an invoice live in the database**, not in
+application code — a CHECK constraint cannot be bypassed by a migration script
+or a future service. Postgres refuses an order whose tax does not sum to its
+total, one charged both IGST and CGST, and a duplicate invoice number within a
+financial year.
+
+**Every money decision is made server-side.** COD eligibility, the handling fee
+and the RTO band are re-derived at checkout from the address submitted; a
+client-supplied fee is ignored.
+
+**Webhooks are signed and idempotent.** Without a signature check anyone who
+learns the payment URL can mark any order paid. Providers retry for days, so a
+replayed capture must not issue a second invoice number.
+
+**Checkout is idempotent.** A retried tap would otherwise create a second order
+and charge again.
+
+## Brand rules enforced in code
+
+- Body is always Kohl Ink on Kagaz Ivory — set in the base layer, not per page.
+- Mulberry is the one accent per view: buttons, focus ring, discount chip.
+- Brass is foil only — a hairline rule or the kernel of the mark.
+- The mark swaps to a sturdier cut below 24px automatically. 16px is the floor.
+- The jaali band never carries the logo; the pattern is what the mark is made of.
+- Tracked caps settings are bundled with `uppercase` so the two cannot separate.
+- A test asserts generated metadata never uses the words the guidelines forbid.
 
 Colour and type values live in
 [`brand-kit/03-colour-type/siumora-tokens.json`](brand-kit/03-colour-type/siumora-tokens.json)
 and are mirrored into `packages/ui/src/theme.css`. Change the brand kit first.
 
-## Money
+One caveat found while building: **Jost has no rupee glyph** at any weight. In a
+browser the font stack falls back per glyph and it is invisible; anywhere
+without a stack — print, packaging, generated images — it needs a deliberate
+choice. The OG cards set prices in Cormorant for that reason.
 
-All money is **paise** (integer minor units) end to end; formatting happens only
-at the edge via `@siumora/in-locale`. Displayed prices are **inclusive of GST** —
-`extractGst` pulls the tax back out of the price rather than adding it on top,
-which is what the invoice and the Legal Metrology rules require.
+## Not yet safe to publish
 
-## Catalog data
-
-`apps/web/src/lib/catalog.ts` reads a local fixture, validated by the Zod schemas
-in `@siumora/core` at module load. It is the seam for Medusa: when `apps/api`
-comes up, those function bodies call the SDK and every caller keeps working.
+- `/admin` has **no authentication**. It says so on the page.
+- The statutory disclosures — registered entity, GSTIN, CIN, grievance officer —
+  are unset. Any page carrying them renders a "not ready to publish" notice.
+  They are deliberately not invented; a plausible GSTIN is a false regulatory
+  disclosure.

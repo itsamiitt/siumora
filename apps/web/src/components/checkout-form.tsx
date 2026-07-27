@@ -6,13 +6,7 @@ import { useEffect, useState, useTransition } from "react";
 import { mintEventId } from "@siumora/analytics";
 import { track } from "@siumora/analytics/client";
 
-import {
-  evaluateCod,
-  scoreAddress,
-  scoreRto,
-  type AddressQuality,
-  type CodDecision,
-} from "@siumora/core";
+import type { CodDecision } from "@siumora/core";
 import {
   INDIAN_STATES,
   formatPaise,
@@ -22,7 +16,8 @@ import {
 import { Button, MicroLabel } from "@siumora/ui";
 
 import { submitOrder } from "@/app/actions/order";
-import { checkServiceability } from "@/lib/serviceability";
+import { quoteCheckout } from "@/app/actions/checkout";
+
 
 /**
  * Single-page checkout, mobile-first.
@@ -41,7 +36,11 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
   const [method, setMethod] = useState<PaymentMethod>("upi");
   const [cod, setCod] = useState<CodDecision | null>(null);
   const [addressLine, setAddressLine] = useState("");
-  const [addressQuality, setAddressQuality] = useState<AddressQuality | null>(null);
+  const [addressQuality, setAddressQuality] = useState<{
+    score: number;
+    issues: string[];
+    needsReview: boolean;
+  } | null>(null);
   const [delivery, setDelivery] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
@@ -60,40 +59,20 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
 
     let cancelled = false;
     void (async () => {
-      const service = await checkServiceability(pincode);
-      if (cancelled) return;
-
-      setDelivery(service.serviceable ? service.estimatedDays : null);
-
-      // Real RTO scoring from what the customer has actually entered. The
-      // address is scored as typed, so an incomplete one tightens COD before
-      // the order is placed rather than after the parcel comes back.
-      const quality = scoreAddress({
-        line1: addressLine,
-        landmark: "",
+      // The API decides serviceability, address quality, the RTO band and the
+      // COD fee together, from the address as typed. None of that belongs in
+      // the browser, where a customer could edit the fee to zero.
+      const quote = await quoteCheckout({
+        pincode,
+        address: addressLine,
         city,
         stateCode,
-        pincode,
       });
+      if (cancelled) return;
 
-      const risk = scoreRto({
-        paymentMethod: "cod",
-        orderValue: subtotal,
-        addressScore: quality.score,
-        // OTP verification happens after this step, so treat the phone as
-        // unverified while scoring.
-        phoneVerified: false,
-        isNewCustomer: true,
-      });
-
-      setAddressQuality(quality);
-      setCod(
-        evaluateCod({
-          subtotal,
-          pincodeCodServiceable: service.codAvailable,
-          rtoRisk: risk.risk,
-        }),
-      );
+      setDelivery(quote.serviceable ? quote.estimatedDays : null);
+      setAddressQuality(quote.addressQuality);
+      setCod(quote.cod);
     })();
 
     return () => {

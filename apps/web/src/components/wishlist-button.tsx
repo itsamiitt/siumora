@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { mintEventId } from "@siumora/analytics";
 import { track } from "@siumora/analytics/client";
@@ -18,17 +18,38 @@ import { toggleWishlistItem } from "@/app/actions/wishlist";
  */
 export function WishlistButton({
   handle,
-  initiallySaved,
   item,
   value,
 }: {
   handle: string;
-  initiallySaved: boolean;
   item: AnalyticsItem;
   value: number;
 }) {
-  const [saved, setSaved] = useState(initiallySaved);
+  const [saved, setSaved] = useState(false);
   const [pending, start] = useTransition();
+
+  // Resolved after hydration rather than during render. Reading the wishlist
+  // cookie on the server would make the product page dynamic and drop it out
+  // of the static tier, which is where the LCP budget lives.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/wishlist", {
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const data = (await response.json()) as { handles: string[] };
+        setSaved(data.handles.includes(handle));
+      } catch {
+        // Offline or aborted — the button still works, it just starts unsaved.
+      }
+    })();
+
+    return () => controller.abort();
+  }, [handle]);
 
   return (
     <button

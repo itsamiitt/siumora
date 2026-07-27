@@ -21,7 +21,8 @@
       "env": [
         "NEXT_PUBLIC_*",
         "VERCEL_ENV",
-        "DATABASE_URL"
+        "DATABASE_URL",
+        "API_URL"
       ]
     },
     "dev": {
@@ -61,7 +62,8 @@
         "build"
       ],
       "env": [
-        "DATABASE_URL"
+        "DATABASE_URL",
+        "API_URL"
       ]
     }
   },

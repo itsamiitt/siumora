@@ -83,6 +83,9 @@ export async function registerAdminRoutes(server: FastifyInstance) {
       })),
       statuses: statusCounts(orders),
       invoiceSeries: invoiceSeriesHealth(orders),
+      // The account page needs a listing and this is the only one the API
+      // exposes. It becomes a customer-scoped query once sign-in exists.
+      recentOrders: rows.slice(0, 50),
     };
   });
 }

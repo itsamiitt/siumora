@@ -54,6 +54,9 @@ importers:
       '@siumora/in-locale':
         specifier: workspace:*
         version: link:../../packages/in-locale
+      '@siumora/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@siumora/seo':
         specifier: workspace:*
         version: link:../../packages/seo
@@ -155,6 +158,22 @@ importers:
         version: 5.9.3
 
   packages/in-locale:
+    devDependencies:
+      '@siumora/config-ts':
+        specifier: workspace:*
+        version: link:../config-ts
+      '@types/node':
+        specifier: ^22.19.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/sdk:
+    dependencies:
+      '@siumora/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@siumora/config-ts':
         specifier: workspace:*

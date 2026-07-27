@@ -5,7 +5,7 @@ import { useState } from "react";
 import { isValidPincode, normalisePincodeInput } from "@siumora/in-locale";
 import { Button, MicroLabel } from "@siumora/ui";
 
-import { checkServiceability, type Serviceability } from "@/lib/serviceability";
+import { checkPincode } from "@/app/actions/checkout";
 
 /**
  * Pincode checker — serviceability, estimated delivery, and COD availability.
@@ -16,7 +16,11 @@ import { checkServiceability, type Serviceability } from "@/lib/serviceability";
 export function PincodeChecker() {
   const [open, setOpen] = useState(false);
   const [pincode, setPincode] = useState("");
-  const [result, setResult] = useState<Serviceability | null>(null);
+  const [result, setResult] = useState<{
+    serviceable: boolean;
+    estimatedDays: string;
+    codAvailable: boolean;
+  } | null>(null);
   const [pending, setPending] = useState(false);
 
   const valid = isValidPincode(pincode);
@@ -25,7 +29,7 @@ export function PincodeChecker() {
     if (!valid) return;
     setPending(true);
     try {
-      const next = await checkServiceability(pincode);
+      const next = await checkPincode(pincode);
       setResult(next);
       window.localStorage.setItem("siumora.pincode", pincode);
     } finally {
