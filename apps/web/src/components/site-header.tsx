@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { MicroLabel, SiumoraLockupHorizontal } from "@siumora/ui";
 
+import { CartBadge } from "./cart-badge";
 import { PincodeChecker } from "./pincode-checker";
 
 const NAV = [
@@ -39,9 +40,7 @@ export function SiteHeader() {
 
         <div className="ml-auto flex items-center gap-6">
           <PincodeChecker />
-          <Link href="/cart" className="transition-colors hover:text-mulberry">
-            <MicroLabel>Bag</MicroLabel>
-          </Link>
+          <CartBadge />
         </div>
       </div>
     </header>

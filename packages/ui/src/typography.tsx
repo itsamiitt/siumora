@@ -24,10 +24,10 @@ export function Display({
   size?: "sm" | "md" | "lg";
   as?: "h1" | "h2" | "h3" | "p";
 }) {
-  // These are the utilities Tailwind generates from the --text-display-*
-  // tokens in theme.css. Do not rewrite them as text-[var(--text-display-*)]:
-  // that form is ambiguous and Tailwind resolves it as a colour, silently
-  // leaving the heading at the inherited 16px.
+  // These are the utilities Tailwind generates from the display font-size
+  // tokens in theme.css. Do not rewrite them into the arbitrary-value form
+  // wrapping the CSS variable: that form is ambiguous, Tailwind resolves it as
+  // a colour, and the heading silently falls back to the inherited 16px.
   const sizes = {
     sm: "text-display-sm",
     md: "text-display-md",

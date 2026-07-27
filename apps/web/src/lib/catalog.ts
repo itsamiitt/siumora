@@ -1,6 +1,11 @@
 import "server-only";
 
-import { productSchema, type Collection, type Product } from "@siumora/core";
+import {
+  productSchema,
+  type Collection,
+  type Product,
+  type Variant,
+} from "@siumora/core";
 
 /**
  * Catalog source.
@@ -202,4 +207,15 @@ export async function listProductsInCollection(
   handle: string,
 ): Promise<Product[]> {
   return PRODUCTS.filter((product) => product.collections.includes(handle));
+}
+
+/** Resolve a variant and the product carrying it. Used by the cart. */
+export async function findVariant(
+  variantId: string,
+): Promise<{ product: Product; variant: Variant } | undefined> {
+  for (const product of PRODUCTS) {
+    const variant = product.variants.find((v) => v.id === variantId);
+    if (variant) return { product, variant };
+  }
+  return undefined;
 }

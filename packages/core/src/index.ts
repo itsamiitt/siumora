@@ -9,6 +9,32 @@ export {
 } from "./gst.ts";
 
 export {
+  FREE_SHIPPING_THRESHOLD,
+  STANDARD_SHIPPING,
+  amountToFreeShipping,
+  calculateTotals,
+  lineTotal,
+  principalSlab,
+  shippingFor,
+  type CartLine,
+  type CartTotals,
+  type TotalsOptions,
+} from "./cart.ts";
+
+export {
+  COD_FEE,
+  COD_MAX_ORDER,
+  COD_MIN_ORDER,
+  COD_PARTIAL_PAYMENT,
+  COD_TRUSTED_ORDER_COUNT,
+  evaluateCod,
+  prepaidIncentive,
+  type CodDecision,
+  type CodInput,
+  type RtoRisk,
+} from "./cod.ts";
+
+export {
   collectionSchema,
   gstSlabSchema,
   imageSchema,
