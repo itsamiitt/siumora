@@ -1,0 +1,25 @@
+{
+  "name": "@siumora/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --experimental-strip-types src/server.ts",
+    "start": "node --experimental-strip-types src/server.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@siumora/analytics": "workspace:*",
+    "@siumora/core": "workspace:*",
+    "@siumora/db": "workspace:*",
+    "fastify": "^5.10.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@siumora/config-ts": "workspace:*",
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3"
+  }
+}

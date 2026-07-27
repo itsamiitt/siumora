@@ -4,6 +4,7 @@ import { after, before, test } from "node:test";
 import type pg from "pg";
 
 import { createPool } from "./client.ts";
+import { createTestDatabase, type TestDatabase } from "./testing.ts";
 import { migrate } from "./migrate.ts";
 
 /**
@@ -17,13 +18,15 @@ import { migrate } from "./migrate.ts";
  * Skipped when DATABASE_URL is unset so the suite still runs without a server.
  */
 const url = process.env.DATABASE_URL;
+let testDb: TestDatabase | undefined;
 const describeDb = url ? test : test.skip;
 
 let pool: pg.Pool;
 
 before(async () => {
   if (!url) return;
-  pool = createPool({ connectionString: url });
+  testDb = await createTestDatabase("db_schema");
+  pool = createPool({ connectionString: testDb!.url });
   await migrate(pool);
   await pool.query("DELETE FROM order_lines; DELETE FROM orders;");
 });

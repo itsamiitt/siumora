@@ -152,9 +152,9 @@ const PINCODES = [
   { pincode: "781001", city: "Guwahati", stateCode: "18", codAvailable: false, estimatedDays: "5-7", rtoRateBps: 2200 },
 ];
 
-export async function seed() {
+export async function seed(databaseUrl?: string) {
   const pool = createPool({
-    connectionString: connectionStringFromEnv(),
+    connectionString: databaseUrl ?? connectionStringFromEnv(),
     ssl: process.env.DATABASE_SSL === "true",
   });
 

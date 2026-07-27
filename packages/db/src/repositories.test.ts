@@ -4,6 +4,7 @@ import { after, before, beforeEach, test } from "node:test";
 import type pg from "pg";
 
 import { createDb, createPool, type Database } from "./client.ts";
+import { createTestDatabase, type TestDatabase } from "./testing.ts";
 import { migrate } from "./migrate.ts";
 import {
   addCartLine,
@@ -26,6 +27,7 @@ import { eq } from "drizzle-orm";
  * database is real here.
  */
 const url = process.env.DATABASE_URL;
+let testDb: TestDatabase | undefined;
 const dbTest = url ? test : test.skip;
 
 let pool: pg.Pool;
@@ -42,7 +44,8 @@ const ADDRESS = {
 
 before(async () => {
   if (!url) return;
-  pool = createPool({ connectionString: url });
+  testDb = await createTestDatabase("db_repos");
+  pool = createPool({ connectionString: testDb!.url });
   await migrate(pool);
   db = createDb(pool);
 });
@@ -50,7 +53,7 @@ before(async () => {
 beforeEach(async () => {
   if (!url) return;
   await pool.query("DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts;");
-  await seed();
+  await seed(testDb!.url);
 });
 
 after(async () => {
