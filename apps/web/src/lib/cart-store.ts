@@ -103,6 +103,7 @@ async function resolveLine(entry: StoredLine): Promise<CartLine | null> {
     quantity: entry.quantity,
     gstSlab: product.gstSlab,
     hsn: product.hsn,
+    piercedJewellery: product.piercedJewellery,
   };
 }
 

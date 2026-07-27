@@ -7,8 +7,11 @@ import { formatPaise } from "@siumora/in-locale";
 import { CollectionTitle, Display, MicroLabel, SiumoraMark } from "@siumora/ui";
 
 import { ConfirmOrder } from "@/components/confirm-order";
+import { OrderProgress } from "@/components/order-progress";
+import { ReturnForm } from "@/components/return-form";
 import { TrackPurchase } from "@/components/track-purchase";
-import { getOrder } from "@/lib/order-store";
+import { getOrder, nextStatuses } from "@/lib/order-store";
+import { getReturnForOrder } from "@/lib/return-store";
 
 export const metadata: Metadata = {
   title: "Order confirmed",
@@ -26,6 +29,7 @@ export default async function OrderPage({ params }: PageProps) {
   const order = await getOrder(number);
   if (!order) notFound();
 
+  const openReturn = await getReturnForOrder(order.number);
   const rows = hsnSummary(order.lines, { interState: order.interState });
   const invoice = summariseInvoice(rows);
 
@@ -69,6 +73,29 @@ export default async function OrderPage({ params }: PageProps) {
       {order.status === "awaiting_cod_confirmation" && (
         <ConfirmOrder orderNumber={order.number} />
       )}
+
+      {order.status === "delivered" && !openReturn && (
+        <ReturnForm orderNumber={order.number} lines={order.lines} />
+      )}
+
+      {openReturn && (
+        <div className="mt-8 border border-mulberry/25 bg-mulberry/[0.04] p-5">
+          <MicroLabel tone="mulberry">Return {openReturn.status}</MicroLabel>
+          <p className="mt-2 text-sm text-ink-muted">
+            {openReturn.freeReturnShipping
+              ? "We are covering return shipping."
+              : "Return shipping is deducted from the refund."}{" "}
+            {openReturn.refundTo === "upi"
+              ? "Your refund goes back by UPI."
+              : "Your refund goes back to the original payment method."}
+          </p>
+        </div>
+      )}
+
+      <OrderProgress
+        orderNumber={order.number}
+        next={nextStatuses(order.status)}
+      />
 
       <div className="mt-12 border border-[var(--color-rule)] p-6">
         <div className="flex flex-wrap items-baseline justify-between gap-3">

@@ -23,6 +23,7 @@ function line(overrides: Partial<CartLine> = {}): CartLine {
     quantity: 1,
     gstSlab: 5,
     hsn: "7113",
+    piercedJewellery: false,
     ...overrides,
   };
 }

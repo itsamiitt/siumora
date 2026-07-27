@@ -92,6 +92,24 @@ export {
 } from "./reviews.ts";
 
 export {
+  DAMAGE_REPORT_HOURS,
+  REFUND_WORKING_DAYS,
+  RETURN_REASON_LABELS,
+  RETURN_WINDOW_DAYS,
+  canTransitionRma,
+  daysSince,
+  evaluateReturn,
+  isFault,
+  transitionRma,
+  type ReturnEligibility,
+  type ReturnEligibilityInput,
+  type ReturnReason,
+  type ReturnRequest,
+  type ReturnResolution,
+  type RmaStatus,
+} from "./returns.ts";
+
+export {
   collectionSchema,
   gstSlabSchema,
   imageSchema,

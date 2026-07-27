@@ -89,6 +89,8 @@ export interface Order {
   /** True when the delivery state differs from Maharashtra. */
   readonly interState: boolean;
   readonly placedAt: string;
+  /** Set when the courier confirms delivery. Starts the returns clock. */
+  readonly deliveredAt?: string;
   /** Shared analytics dedup id, persisted so retries reuse it. */
   readonly eventId: string;
   /** Invoice number, assigned once the order is confirmed. */

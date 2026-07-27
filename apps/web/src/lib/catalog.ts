@@ -29,6 +29,7 @@ const RAW_PRODUCTS: unknown[] = [
     hsn: "7113",
     gstSlab: 5,
     material: "925 sterling silver · 18k gold PVD",
+    piercedJewellery: true,
     images: [
       {
         url: "/catalog/petal-studs.svg",
@@ -94,6 +95,7 @@ const RAW_PRODUCTS: unknown[] = [
     hsn: "7113",
     gstSlab: 5,
     material: "925 sterling silver · 18k gold PVD",
+    piercedJewellery: true,
     images: [
       {
         url: "/catalog/jaali-hoops.svg",

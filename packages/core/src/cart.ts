@@ -27,6 +27,8 @@ export interface CartLine {
   readonly quantity: number;
   readonly gstSlab: GstSlab;
   readonly hsn: string;
+  /** Drives the returns hygiene exception. */
+  readonly piercedJewellery: boolean;
 }
 
 export interface CartTotals {

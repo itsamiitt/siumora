@@ -10,6 +10,7 @@ import {
   shippingFor,
   transition,
   type Order,
+  type OrderStatus,
   type PaymentMethod,
   type ShippingAddress,
 } from "@siumora/core";
@@ -135,6 +136,57 @@ export async function confirmOrder(
 function sequenceOf(orderNo: string): number {
   const digits = orderNo.replace(/\D/g, "");
   return Number.parseInt(digits, 10) || 1;
+}
+
+/**
+ * Advance an order to the next state.
+ *
+ * Stands in for the courier webhook — Shiprocket drives these transitions in
+ * production. Exposed so the lifecycle, and everything gated on it such as
+ * returns, can be exercised without a courier account. The transition itself
+ * is validated by the same rules the real webhook would go through.
+ */
+export async function advanceOrder(
+  number: string,
+  to: OrderStatus,
+): Promise<{ ok: true; order: Order } | { ok: false; message: string }> {
+  const existing = ORDERS.get(number);
+  if (!existing) return { ok: false, message: "Order not found." };
+
+  if (!canTransition(existing.status, to)) {
+    return {
+      ok: false,
+      message: `Cannot move ${number} from ${existing.status} to ${to}.`,
+    };
+  }
+
+  const next: Order = {
+    ...existing,
+    status: transition(existing.status, to),
+    // The returns window runs from delivery, so the timestamp is recorded the
+    // moment the courier says it landed.
+    ...(to === "delivered" ? { deliveredAt: new Date().toISOString() } : {}),
+  };
+
+  ORDERS.set(number, next);
+  return { ok: true, order: next };
+}
+
+/** The next states an order may legally move to. Drives the admin control. */
+export function nextStatuses(status: OrderStatus): OrderStatus[] {
+  return (
+    [
+      "confirmed",
+      "processing",
+      "shipped",
+      "out_for_delivery",
+      "delivered",
+      "ndr",
+      "rto",
+      "cancelled",
+      "returned",
+    ] as OrderStatus[]
+  ).filter((candidate) => canTransition(status, candidate));
 }
 
 /** All orders, newest first. Stands in for a customer-scoped query. */

@@ -56,6 +56,12 @@ export const productSchema = z.object({
   hsn: z.string().min(4),
   gstSlab: gstSlabSchema,
   material: z.string(),
+  /**
+   * Pierced jewellery — earrings and nose pins. The returns policy refuses
+   * these once the hygiene seal is broken, so the catalogue has to say which
+   * pieces they are rather than the rule guessing from the title.
+   */
+  piercedJewellery: z.boolean().default(false),
   images: z.array(imageSchema).min(1),
   variants: z.array(variantSchema).min(1),
   collections: z.array(handle),
