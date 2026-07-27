@@ -1,0 +1,138 @@
+import "server-only";
+
+import {
+  calculateTotals,
+  canTransition,
+  initialStatus,
+  invoiceNumber,
+  isInterState,
+  orderNumber,
+  shippingFor,
+  transition,
+  type Order,
+  type PaymentMethod,
+  type ShippingAddress,
+} from "@siumora/core";
+
+import { getCartLines } from "./cart-store";
+
+/**
+ * Order persistence.
+ *
+ * Medusa owns this in production. Held in a global map for now for the same
+ * reason as the cart: Next instantiates a module more than once across route
+ * handler and page bundles, so a plain module constant silently splits in two.
+ */
+
+const globalForOrders = globalThis as typeof globalThis & {
+  __siumoraOrders?: Map<string, Order>;
+  __siumoraOrderSeq?: { value: number };
+};
+
+const ORDERS: Map<string, Order> = (globalForOrders.__siumoraOrders ??= new Map());
+
+/**
+ * Order and invoice sequences.
+ *
+ * A real deployment takes these from a database sequence, not a counter in
+ * memory: invoice numbers must be gapless and unique per financial year, and
+ * two processes sharing a process-local counter would issue the same number
+ * twice.
+ */
+const SEQUENCE = (globalForOrders.__siumoraOrderSeq ??= { value: 0 });
+
+export interface PlaceOrderInput {
+  readonly address: ShippingAddress;
+  readonly paymentMethod: PaymentMethod;
+  readonly requiresCodConfirmation: boolean;
+  readonly eventId: string;
+  readonly codFee?: number;
+}
+
+export async function placeOrder(
+  input: PlaceOrderInput,
+): Promise<{ ok: true; order: Order } | { ok: false; message: string }> {
+  const lines = await getCartLines();
+  if (lines.length === 0) return { ok: false, message: "Your bag is empty." };
+
+  const interState = isInterState(input.address.stateCode);
+  const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
+
+  const totals = calculateTotals(lines, {
+    interState,
+    shipping: shippingFor(subtotal),
+    codFee: input.codFee ?? 0,
+  });
+
+  const sequence = ++SEQUENCE.value;
+  const placedAt = new Date();
+
+  const status = initialStatus(input.paymentMethod, {
+    requiresCodConfirmation: input.requiresCodConfirmation,
+  });
+
+  const order: Order = {
+    id: crypto.randomUUID(),
+    number: orderNumber(sequence),
+    status,
+    lines,
+    totals,
+    paymentMethod: input.paymentMethod,
+    address: input.address,
+    interState,
+    placedAt: placedAt.toISOString(),
+    eventId: input.eventId,
+    // The invoice is only raised once the order is actually confirmed. Issuing
+    // one for an order still awaiting COD confirmation would burn a number in
+    // a sequence that has to stay gapless.
+    ...(status === "confirmed"
+      ? { invoiceNumber: invoiceNumber(sequence, placedAt) }
+      : {}),
+  };
+
+  ORDERS.set(order.number, order);
+  return { ok: true, order };
+}
+
+export async function getOrder(number: string): Promise<Order | undefined> {
+  return ORDERS.get(number);
+}
+
+/**
+ * Confirm an order that was held for COD verification.
+ *
+ * Stands in for the WhatsApp OTP callback described in plan/06 — the transport
+ * differs, the state change does not. The invoice number is assigned here
+ * rather than at placement because a held order that is never confirmed must
+ * not burn a number out of a sequence that has to stay gapless.
+ */
+export async function confirmOrder(
+  number: string,
+): Promise<{ ok: true; order: Order } | { ok: false; message: string }> {
+  const existing = ORDERS.get(number);
+  if (!existing) return { ok: false, message: "Order not found." };
+
+  if (!canTransition(existing.status, "confirmed")) {
+    return {
+      ok: false,
+      message: `Order ${number} cannot be confirmed from ${existing.status}.`,
+    };
+  }
+
+  const confirmed: Order = {
+    ...existing,
+    status: transition(existing.status, "confirmed"),
+    invoiceNumber:
+      existing.invoiceNumber ??
+      invoiceNumber(sequenceOf(existing.number), new Date(existing.placedAt)),
+  };
+
+  ORDERS.set(number, confirmed);
+  return { ok: true, order: confirmed };
+}
+
+/** Recover the numeric sequence from a customer-facing order number. */
+function sequenceOf(orderNo: string): number {
+  const digits = orderNo.replace(/\D/g, "");
+  return Number.parseInt(digits, 10) || 1;
+}

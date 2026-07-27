@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+
+import { mintEventId } from "@siumora/analytics";
+import { track } from "@siumora/analytics/client";
 
 import {
   evaluateCod,
@@ -17,6 +21,7 @@ import {
 } from "@siumora/in-locale";
 import { Button, MicroLabel } from "@siumora/ui";
 
+import { submitOrder } from "@/app/actions/order";
 import { checkServiceability } from "@/lib/serviceability";
 
 /**
@@ -38,6 +43,11 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
   const [addressLine, setAddressLine] = useState("");
   const [addressQuality, setAddressQuality] = useState<AddressQuality | null>(null);
   const [delivery, setDelivery] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [city, setCity] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [placing, startPlacing] = useTransition();
+  const router = useRouter();
 
   const pincodeValid = isValidPincode(pincode);
 
@@ -61,7 +71,7 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
       const quality = scoreAddress({
         line1: addressLine,
         landmark: "",
-        city: "",
+        city,
         stateCode,
         pincode,
       });
@@ -89,7 +99,7 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
     return () => {
       cancelled = true;
     };
-  }, [pincode, pincodeValid, subtotal, addressLine, stateCode]);
+  }, [pincode, pincodeValid, subtotal, addressLine, stateCode, city]);
 
   // A pincode change can withdraw COD while it is selected. Fall back to UPI
   // rather than leaving an unavailable method chosen.
@@ -105,9 +115,58 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
       className="space-y-10"
       onSubmit={(e) => {
         e.preventDefault();
+        if (!canPay || placing) return;
+        setError(null);
+
+        startPlacing(async () => {
+          // Minted here and persisted on the order so the browser purchase
+          // pixel and the server-side send share one id and dedupe.
+          const eventId = mintEventId();
+
+          track("add_payment_info", {
+            event_id: mintEventId(),
+            currency: "INR",
+            value: subtotal / 100,
+            payment_type: method,
+            items: [],
+          });
+
+          const result = await submitOrder({
+            address: {
+              name: name.trim() || "Customer",
+              phone: phone,
+              line1: addressLine,
+              city: city.trim(),
+              stateCode,
+              pincode,
+            },
+            paymentMethod: method,
+            requiresCodConfirmation:
+              method === "cod" && cod?.verification !== "none",
+            eventId,
+            codFee: method === "cod" ? (cod?.fee ?? 0) : 0,
+          });
+
+          if (result.ok && result.orderNumber) {
+            router.push(`/orders/${result.orderNumber}`);
+          } else {
+            setError(result.message ?? "Could not place the order.");
+          }
+        });
       }}
     >
       <Section step="1" title="Contact">
+        <Field label="Full name" htmlFor="name" className="mb-4">
+          <input
+            id="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoComplete="name"
+            placeholder="Asha Menon"
+            className="h-11 w-full border border-ink/20 px-3 text-sm outline-none focus:border-mulberry"
+          />
+        </Field>
+
         <Field label="Phone number" htmlFor="phone">
           <div className="flex">
             <span className="flex h-11 items-center border border-r-0 border-ink/20 px-3 text-sm text-ink-muted">
@@ -163,6 +222,17 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
             </select>
           </Field>
         </div>
+
+        <Field label="City" htmlFor="city" className="mt-4">
+          <input
+            id="city"
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            autoComplete="address-level2"
+            placeholder="Mumbai"
+            className="h-11 w-full border border-ink/20 px-3 text-sm outline-none focus:border-mulberry"
+          />
+        </Field>
 
         <Field label="Address" htmlFor="address" className="mt-4">
           <textarea
@@ -254,13 +324,29 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
       </Section>
 
       <div>
-        <Button size="lg" type="submit" className="w-full" disabled={!canPay}>
-          {method === "cod" ? "Place order" : "Pay now"}
+        <Button
+          size="lg"
+          type="submit"
+          className="w-full"
+          disabled={!canPay || placing}
+        >
+          {placing
+            ? "Placing…"
+            : method === "cod"
+              ? "Place order"
+              : "Pay now"}
         </Button>
-        {/* The gateway is not connected yet; saying so beats a button that
-            silently does nothing. */}
+
+        {error && (
+          <p aria-live="polite" className="mt-2 text-center text-xs text-mulberry">
+            {error}
+          </p>
+        )}
+
+        {/* The order is recorded and invoiced, but no money moves: Razorpay is
+            not connected. Saying so beats implying a payment was taken. */}
         <p className="mt-2 text-center text-xs text-ink-faint">
-          Razorpay is not connected yet — no payment is taken.
+          Razorpay is not connected — the order is recorded, no payment is taken.
         </p>
       </div>
     </form>
