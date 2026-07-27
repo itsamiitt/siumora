@@ -1,6 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Jost, Marcellus } from "next/font/google";
 
+import { SITE, organizationJsonLd, websiteJsonLd } from "@siumora/seo";
+
+import { ConsentBanner } from "@/components/consent-banner";
+import { JsonLdScript } from "@/components/json-ld";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
@@ -36,9 +40,8 @@ export const metadata: Metadata = {
     default: "Siumora · Something given, something kept",
     template: "%s · Siumora",
   },
-  description:
-    "Demi-fine jewellery in 925 sterling silver and 18k gold PVD. Made to be worn every day. Every piece leaves here wrapped as a gift.",
-  metadataBase: new URL("https://siumora.com"),
+  description: SITE.description,
+  metadataBase: new URL(SITE.url),
   openGraph: {
     type: "website",
     locale: "en_IN",
@@ -59,9 +62,11 @@ export default function RootLayout({
       className={`${cormorant.variable} ${marcellus.variable} ${jost.variable}`}
     >
       <body className="flex min-h-dvh flex-col">
+        <JsonLdScript data={[organizationJsonLd(), websiteJsonLd()]} />
         <SiteHeader />
         <main className="flex-1">{children}</main>
         <SiteFooter />
+        <ConsentBanner />
       </body>
     </html>
   );

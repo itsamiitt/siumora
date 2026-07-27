@@ -10,6 +10,11 @@ import { extractGst, type GstBreakup, type GstSlab } from "./gst.ts";
 
 export interface CartLine {
   readonly variantId: string;
+  /**
+   * The SKU. Carried on the line because it is the id the Merchant Center and
+   * Meta catalog feeds key on — analytics must send this, not the variant id.
+   */
+  readonly sku: string;
   readonly productHandle: string;
   readonly title: string;
   /** Variant name, e.g. "Gold". */

@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { collectionJsonLd, collectionMetadata } from "@siumora/seo";
 import { Display } from "@siumora/ui";
 
+import { JsonLdScript } from "@/components/json-ld";
 import { ProductCard } from "@/components/product-card";
 import {
   getCollection,
@@ -26,10 +28,7 @@ export async function generateMetadata({
   const collection = await getCollection(handle);
   if (!collection) return {};
 
-  return {
-    title: collection.title,
-    description: collection.description,
-  };
+  return collectionMetadata(collection);
 }
 
 export default async function CollectionPage({ params }: PageProps) {
@@ -41,6 +40,8 @@ export default async function CollectionPage({ params }: PageProps) {
 
   return (
     <div className="mx-auto max-w-6xl px-5 py-16">
+      <JsonLdScript data={collectionJsonLd(collection, products)} />
+
       <header className="border-b border-[var(--color-rule)] pb-10 text-center">
         <Display as="h1" size="md">
           {collection.title}

@@ -1,0 +1,145 @@
+import { z } from "zod";
+
+/**
+ * The event catalog — one contract feeding GA4, Meta and PostHog.
+ *
+ * Product code calls `track()` with one of these; it never touches `gtag` or
+ * `fbq`. Destinations are adapters, so a tag change cannot drift from what the
+ * product actually does.
+ *
+ * Prices are **rupees as decimals**, not paise. This is the one boundary where
+ * that conversion happens: GA4 and Meta both expect a decimal currency value,
+ * and sending paise would report every order as 100x its real value.
+ */
+
+export const CURRENCY = "INR" as const;
+
+/**
+ * Item payload. `item_id` is the SKU and must match the Merchant Center and
+ * Meta catalog feeds exactly — a mismatch silently breaks Advantage+ catalog
+ * ads, which fail by serving nothing rather than by erroring.
+ */
+export const analyticsItemSchema = z.object({
+  item_id: z.string().min(1),
+  item_name: z.string().min(1),
+  /** GST-inclusive unit price in rupees. */
+  price: z.number().nonnegative(),
+  quantity: z.number().int().positive(),
+  item_category: z.string().optional(),
+  item_variant: z.string().optional(),
+  item_brand: z.string().default("Siumora"),
+});
+
+export type AnalyticsItem = z.infer<typeof analyticsItemSchema>;
+
+const base = z.object({
+  /** Shared dedup id. Same value on the browser and server send. */
+  event_id: z.string().min(1),
+});
+
+const withItems = base.extend({
+  items: z.array(analyticsItemSchema).min(1),
+  /** Order-level total in rupees, GST-inclusive. */
+  value: z.number().nonnegative(),
+  currency: z.literal(CURRENCY).default(CURRENCY),
+});
+
+export const viewItemSchema = withItems;
+export const viewItemListSchema = base.extend({
+  item_list_id: z.string(),
+  item_list_name: z.string(),
+  items: z.array(analyticsItemSchema),
+});
+export const selectItemSchema = withItems;
+export const searchSchema = base.extend({ search_term: z.string() });
+export const addToCartSchema = withItems;
+export const removeFromCartSchema = withItems;
+export const viewCartSchema = withItems;
+export const addToWishlistSchema = withItems;
+export const beginCheckoutSchema = withItems;
+export const addShippingInfoSchema = withItems.extend({
+  shipping_tier: z.string(),
+});
+export const addPaymentInfoSchema = withItems.extend({
+  payment_type: z.enum(["upi", "card", "netbanking", "wallet", "cod"]),
+});
+
+export const purchaseSchema = withItems.extend({
+  /** The order number shown to the customer. */
+  transaction_id: z.string().min(1),
+  /** Tax contained in `value`, in rupees — from the GST engine. */
+  tax: z.number().nonnegative(),
+  shipping: z.number().nonnegative(),
+  coupon: z.string().optional(),
+});
+
+export const refundSchema = purchaseSchema;
+
+export const signUpSchema = base.extend({
+  method: z.enum(["otp", "truecaller"]),
+});
+
+/**
+ * COD delivered — the truth event for finance.
+ *
+ * Emitted server-side only, when the courier confirms delivery. Order-placed
+ * `purchase` fires for COD too (Pattern A), so platforms learn fast; this event
+ * is what the RTO-adjusted revenue reporting actually trusts.
+ */
+export const codDeliveredSchema = purchaseSchema;
+
+export const EVENT_SCHEMAS = {
+  view_item: viewItemSchema,
+  view_item_list: viewItemListSchema,
+  select_item: selectItemSchema,
+  search: searchSchema,
+  add_to_cart: addToCartSchema,
+  remove_from_cart: removeFromCartSchema,
+  view_cart: viewCartSchema,
+  add_to_wishlist: addToWishlistSchema,
+  begin_checkout: beginCheckoutSchema,
+  add_shipping_info: addShippingInfoSchema,
+  add_payment_info: addPaymentInfoSchema,
+  purchase: purchaseSchema,
+  refund: refundSchema,
+  sign_up: signUpSchema,
+  cod_delivered: codDeliveredSchema,
+} as const;
+
+export type EventName = keyof typeof EVENT_SCHEMAS;
+export type EventPayload<N extends EventName> = z.infer<
+  (typeof EVENT_SCHEMAS)[N]
+>;
+
+/** GA4 event name → Meta standard event. Absent means "GA4 only". */
+export const META_EVENT_MAP: Partial<Record<EventName, string>> = {
+  view_item: "ViewContent",
+  search: "Search",
+  add_to_cart: "AddToCart",
+  add_to_wishlist: "AddToWishlist",
+  begin_checkout: "InitiateCheckout",
+  add_payment_info: "AddPaymentInfo",
+  purchase: "Purchase",
+  refund: "Refund",
+  sign_up: "CompleteRegistration",
+};
+
+/** Events that must never be sent from the browser. */
+export const SERVER_ONLY_EVENTS: ReadonlySet<EventName> = new Set([
+  "refund",
+  "cod_delivered",
+]);
+
+/** Convert paise to the decimal rupee value GA4 and Meta expect. */
+export function toRupees(paise: number): number {
+  return Math.round(paise) / 100;
+}
+
+/** Map GA4 `items[]` to the Meta `contents[]` shape. */
+export function toMetaContents(items: readonly AnalyticsItem[]) {
+  return items.map((item) => ({
+    id: item.item_id,
+    quantity: item.quantity,
+    item_price: item.price,
+  }));
+}

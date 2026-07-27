@@ -17,12 +17,18 @@ importers:
 
   apps/web:
     dependencies:
+      '@siumora/analytics':
+        specifier: workspace:*
+        version: link:../../packages/analytics
       '@siumora/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@siumora/in-locale':
         specifier: workspace:*
         version: link:../../packages/in-locale
+      '@siumora/seo':
+        specifier: workspace:*
+        version: link:../../packages/seo
       '@siumora/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -61,6 +67,22 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/analytics:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@siumora/config-ts':
+        specifier: workspace:*
+        version: link:../config-ts
+      '@types/node':
+        specifier: ^22.19.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/config-ts: {}
 
   packages/core:
@@ -80,6 +102,22 @@ importers:
         version: 5.9.3
 
   packages/in-locale:
+    devDependencies:
+      '@siumora/config-ts':
+        specifier: workspace:*
+        version: link:../config-ts
+      '@types/node':
+        specifier: ^22.19.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/seo:
+    dependencies:
+      '@siumora/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@siumora/config-ts':
         specifier: workspace:*

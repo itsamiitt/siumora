@@ -93,6 +93,7 @@ async function resolveLine(entry: StoredLine): Promise<CartLine | null> {
   const { product, variant } = found;
   return {
     variantId: variant.id,
+    sku: variant.sku,
     productHandle: product.handle,
     title: product.title,
     variantTitle: variant.title,

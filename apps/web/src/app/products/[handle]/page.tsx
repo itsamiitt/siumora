@@ -3,11 +3,14 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 
 import { lowestPrice } from "@siumora/core";
-import { formatPaise } from "@siumora/in-locale";
+import { breadcrumbJsonLd, productJsonLd, productMetadata } from "@siumora/seo";
 import { CollectionTitle, Display, Price } from "@siumora/ui";
 
 import { AddToBag } from "@/components/add-to-bag";
+import { JsonLdScript } from "@/components/json-ld";
 import { PincodeChecker } from "@/components/pincode-checker";
+import { TrackViewItem } from "@/components/track-view-item";
+import { itemFromProduct } from "@/lib/analytics-items";
 import { getProduct, listProducts } from "@/lib/catalog";
 
 interface PageProps {
@@ -26,16 +29,7 @@ export async function generateMetadata({
   const product = await getProduct(handle);
   if (!product) return {};
 
-  const price = lowestPrice(product);
-  return {
-    title: product.title,
-    description: product.subtitle,
-    openGraph: {
-      title: `${product.title} · ${formatPaise(price.selling)}`,
-      description: product.subtitle,
-      images: product.images.map((image) => ({ url: image.url })),
-    },
-  };
+  return productMetadata(product);
 }
 
 export default async function ProductPage({ params }: PageProps) {
@@ -46,8 +40,33 @@ export default async function ProductPage({ params }: PageProps) {
   const price = lowestPrice(product);
   const image = product.images[0]!;
 
+  const collectionHandle = product.collections[0];
+
   return (
     <div className="mx-auto max-w-6xl px-5 py-12">
+      <JsonLdScript
+        data={[
+          productJsonLd(product),
+          breadcrumbJsonLd([
+            { name: "Home", path: "/" },
+            ...(collectionHandle
+              ? [
+                  {
+                    name: collectionHandle.replace(/-/g, " "),
+                    path: `/collections/${collectionHandle}`,
+                  },
+                ]
+              : []),
+            { name: product.title, path: `/products/${product.handle}` },
+          ]),
+        ]}
+      />
+
+      <TrackViewItem
+        item={itemFromProduct(product)}
+        value={price.selling / 100}
+      />
+
       <div className="grid gap-12 lg:grid-cols-2">
         {/* Held at the catalogue's 4:5 ratio so the plate never stretches to
             match whatever the detail column happens to be. */}
@@ -84,7 +103,7 @@ export default async function ProductPage({ params }: PageProps) {
           />
 
           <div className="mt-9">
-            <AddToBag variants={product.variants} />
+            <AddToBag variants={product.variants} productTitle={product.title} />
           </div>
 
           <div className="mt-8 border-t border-[var(--color-rule)] pt-6">

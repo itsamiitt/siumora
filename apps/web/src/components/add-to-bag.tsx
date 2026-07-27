@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { mintEventId } from "@siumora/analytics";
+import { track } from "@siumora/analytics/client";
 import type { Variant } from "@siumora/core";
 import { Button, MicroLabel } from "@siumora/ui";
 
@@ -16,7 +18,13 @@ import { notifyCartChanged } from "./cart-badge";
  * Sold-out variants stay visible but unselectable — hiding them makes the range
  * look thinner than it is, and shoppers look for the size that was there before.
  */
-export function AddToBag({ variants }: { variants: readonly Variant[] }) {
+export function AddToBag({
+  variants,
+  productTitle,
+}: {
+  variants: readonly Variant[];
+  productTitle: string;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
@@ -34,6 +42,23 @@ export function AddToBag({ variants }: { variants: readonly Variant[] }) {
     startTransition(async () => {
       const result = await addToCart(selected.id);
       if (result.ok) {
+        track("add_to_cart", {
+          // Minted here and reused if this is ever echoed server-side, so the
+          // two sends dedupe into one conversion.
+          event_id: mintEventId(),
+          currency: "INR",
+          value: selected.price.selling / 100,
+          items: [
+            {
+              item_id: selected.sku,
+              item_name: productTitle,
+              price: selected.price.selling / 100,
+              quantity: 1,
+              item_variant: selected.title,
+              item_brand: "Siumora",
+            },
+          ],
+        });
         notifyCartChanged(result.count);
         router.refresh();
         setMessage("Added to bag");

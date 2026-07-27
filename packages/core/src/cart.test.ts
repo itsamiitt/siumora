@@ -12,6 +12,7 @@ import {
 function line(overrides: Partial<CartLine> = {}): CartLine {
   return {
     variantId: "v1",
+    sku: "SIU-PS-GLD",
     productHandle: "petal-studs",
     title: "Petal Studs",
     variantTitle: "Gold",
