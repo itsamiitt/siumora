@@ -1,0 +1,66 @@
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+
+import { Display } from "@siumora/ui";
+
+import { ProductCard } from "@/components/product-card";
+import {
+  getCollection,
+  listCollections,
+  listProductsInCollection,
+} from "@/lib/catalog";
+
+interface PageProps {
+  params: Promise<{ handle: string }>;
+}
+
+export async function generateStaticParams() {
+  const collections = await listCollections();
+  return collections.map((collection) => ({ handle: collection.handle }));
+}
+
+export async function generateMetadata({
+  params,
+}: PageProps): Promise<Metadata> {
+  const { handle } = await params;
+  const collection = await getCollection(handle);
+  if (!collection) return {};
+
+  return {
+    title: collection.title,
+    description: collection.description,
+  };
+}
+
+export default async function CollectionPage({ params }: PageProps) {
+  const { handle } = await params;
+  const collection = await getCollection(handle);
+  if (!collection) notFound();
+
+  const products = await listProductsInCollection(handle);
+
+  return (
+    <div className="mx-auto max-w-6xl px-5 py-16">
+      <header className="border-b border-[var(--color-rule)] pb-10 text-center">
+        <Display as="h1" size="md">
+          {collection.title}
+        </Display>
+        <p className="mx-auto mt-4 max-w-md text-ink-muted">
+          {collection.description}
+        </p>
+      </header>
+
+      {products.length > 0 ? (
+        <div className="mt-14 grid grid-cols-2 gap-x-6 gap-y-12 lg:grid-cols-4">
+          {products.map((product) => (
+            <ProductCard key={product.id} product={product} />
+          ))}
+        </div>
+      ) : (
+        <p className="mt-16 text-center text-ink-muted">
+          Nothing here yet. Something is on its way.
+        </p>
+      )}
+    </div>
+  );
+}

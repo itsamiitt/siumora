@@ -1,0 +1,108 @@
+/**
+ * Siumora design tokens — Brand Kit Edition 01.
+ *
+ * Tailwind v4 CSS-first theme. Values are copied verbatim from
+ * brand-kit/03-colour-type/siumora-tokens.json; change them there first.
+ *
+ * Surface proportion to hold on any view:
+ *   ivory 62% · blush 20% · ink 11% · mulberry 5% · brass 2%
+ */
+
+@theme {
+  /* ── Colour ─────────────────────────────────────────────────── */
+  --color-ink: #1c1917; /* Kohl Ink · type, mark stroke */
+  --color-plate: #14110f; /* Ink Plate · dark surfaces */
+  --color-mulberry: #6b2942; /* the single accent */
+  --color-brass: #c79a5c; /* foil only — never a fill */
+  --color-brass-light: #e3c08a; /* foil highlight, kernel on dark */
+  --color-blush: #ebddd8; /* secondary ground */
+  --color-ivory: #f7f3ea; /* primary ground */
+
+  /* Ink at reduced strength, for rules and muted copy. Kept as explicit
+     tokens so nobody invents a new grey. */
+  --color-ink-muted: rgb(28 25 23 / 0.62);
+  --color-ink-faint: rgb(28 25 23 / 0.34);
+  --color-rule: rgb(28 25 23 / 0.12);
+
+  /* ── Type ───────────────────────────────────────────────────── */
+  --font-display: var(--font-cormorant), "Cormorant Garamond", serif;
+  --font-heading: var(--font-marcellus), "Marcellus", serif;
+  --font-body: var(--font-jost), "Jost", ui-sans-serif, system-ui, sans-serif;
+
+  /* Tracking. Caps-only settings — never apply these to lowercase. */
+  --tracking-wordmark: 0.34em;
+  --tracking-caps: 0.2em;
+  --tracking-collection: 0.22em;
+
+  /* Display sizes stay inside the 32–62px band the guidelines specify. */
+  --text-display-sm: 2rem; /* 32px */
+  --text-display-md: 2.75rem; /* 44px */
+  --text-display-lg: 3.875rem; /* 62px */
+
+  /* ── Motion ─────────────────────────────────────────────────── */
+  --ease-siumora: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/**
+ * Base layer. Body is always Kohl Ink on Kagaz Ivory — the guidelines make
+ * this unconditional, so it lives here rather than on each page.
+ */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-ivory);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    font-weight: 300;
+    font-size: 1rem;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Display type is Cormorant Light. Never bold, never italic. */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 300;
+  }
+
+  ::selection {
+    background-color: var(--color-mulberry);
+    color: var(--color-ivory);
+  }
+
+  /* Focus ring uses mulberry, the one accent, so it never competes with brass. */
+  :focus-visible {
+    outline: 2px solid var(--color-mulberry);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /**
+   * The jaali tile — the mark repeated into a lattice.
+   * One tile size per surface: 44px at screen scale, per the guidelines.
+   * Never place the logo on top of this; the pattern is what the logo is made of.
+   */
+  .siumora-jaali {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' width='100' height='100'%3E%3Cg fill='none' stroke='%231C1917' stroke-width='0.75' opacity='0.5'%3E%3Ccircle cx='50' cy='0' r='25'/%3E%3Ccircle cx='100' cy='50' r='25'/%3E%3Ccircle cx='50' cy='100' r='25'/%3E%3Ccircle cx='0' cy='50' r='25'/%3E%3Ccircle cx='50' cy='50' r='25'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: 44px 44px;
+    background-repeat: repeat;
+  }
+}
