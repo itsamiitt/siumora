@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
@@ -11,9 +13,8 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export const dynamic = "force-dynamic";
 
-export default async function SignInPage({
+async function SignInPageContents({
   searchParams,
 }: {
   searchParams: Promise<{ next?: string }>;
@@ -40,5 +41,20 @@ export default async function SignInPage({
         <SignInForm next={destination} />
       </div>
     </div>
+  );
+}
+
+/**
+ * Static shell. The dynamic read — cookies, and the session behind them —
+ * happens inside the boundary, so the rest of the route still prerenders and
+ * the hole streams in.
+ */
+export default function SignInPage(props: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  return (
+    <Suspense fallback={null}>
+      <SignInPageContents {...props} />
+    </Suspense>
   );
 }

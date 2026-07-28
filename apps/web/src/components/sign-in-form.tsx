@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
-import { OTP_LENGTH, maskPhone, normalisePhone } from "@siumora/core";
+import { OTP_LENGTH, maskPhone, normalisePhone } from "@siumora/core/auth";
 import { Button, MicroLabel } from "@siumora/ui";
 
 import { requestCode, verifyCode } from "@/app/actions/auth";

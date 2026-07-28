@@ -16,6 +16,7 @@ Single-vendor e-commerce platform for the Indian market. Demi-fine jewellery,
 | Storefront on the API | done |
 | Razorpay, Shiprocket, WhatsApp | not connected — needs credentials |
 | Phone-OTP sign-in, operator access, order ownership | done, integration-tested |
+| Dark theme, PDP gallery, PWA, i18n scaffolding, Cache Components | done, measured in a browser |
 | Second factor for operators, back-in-stock, recommendations | not built |
 
 ## Layout

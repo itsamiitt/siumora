@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -14,9 +16,8 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-export const dynamic = "force-dynamic";
 
-export default async function CheckoutPage() {
+async function CheckoutPageContents() {
   const lines = await getCartLines();
   if (lines.length === 0) redirect("/cart");
 
@@ -49,5 +50,18 @@ export default async function CheckoutPage() {
         </aside>
       </div>
     </div>
+  );
+}
+
+/**
+ * Static shell. The dynamic read — cookies, and the session behind them —
+ * happens inside the boundary, so the rest of the route still prerenders and
+ * the hole streams in.
+ */
+export default function CheckoutPage() {
+  return (
+    <Suspense fallback={null}>
+      <CheckoutPageContents />
+    </Suspense>
   );
 }

@@ -3,8 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
-import { mintEventId } from "@siumora/analytics";
-import { track } from "@siumora/analytics/client";
+import { track, mintEventId } from "@siumora/analytics/client";
 import type { Variant } from "@siumora/core";
 import { formatPaise } from "@siumora/in-locale";
 import { Button, MicroLabel } from "@siumora/ui";

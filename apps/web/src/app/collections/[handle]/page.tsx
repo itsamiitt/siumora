@@ -53,8 +53,12 @@ export default async function CollectionPage({ params }: PageProps) {
 
       {products.length > 0 ? (
         <div className="mt-14 grid grid-cols-2 gap-x-6 gap-y-12 lg:grid-cols-4">
-          {products.map((product) => (
-            <ProductCard key={product.id} product={product} />
+          {products.map((product, index) => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              priority={index < 4}
+            />
           ))}
         </div>
       ) : (

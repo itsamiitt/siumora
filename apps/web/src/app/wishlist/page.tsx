@@ -1,4 +1,7 @@
+import { Suspense } from "react";
+
 import type { Metadata } from "next";
+import Loading from "./loading";
 import Link from "next/link";
 
 import { Display, MicroLabel } from "@siumora/ui";
@@ -12,9 +15,8 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export const dynamic = "force-dynamic";
 
-export default async function WishlistPage() {
+async function WishlistPageContents() {
   const handles = await listWishlist();
   const products = (
     await Promise.all(handles.map((handle) => getProduct(handle)))
@@ -51,5 +53,18 @@ export default async function WishlistPage() {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * Static shell. The dynamic read — cookies, and the session behind them —
+ * happens inside the boundary, so the rest of the route still prerenders and
+ * the hole streams in.
+ */
+export default function WishlistPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <WishlistPageContents />
+    </Suspense>
   );
 }

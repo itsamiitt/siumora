@@ -4,8 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { mintEventId } from "@siumora/analytics";
-import { track } from "@siumora/analytics/client";
+import { track, mintEventId } from "@siumora/analytics/client";
 
 import type { CodDecision } from "@siumora/core";
 import {

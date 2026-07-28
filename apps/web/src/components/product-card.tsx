@@ -4,19 +4,39 @@ import Link from "next/link";
 import { isInStock, lowestPrice, type Product } from "@siumora/core";
 import { MicroLabel, Price } from "@siumora/ui";
 
-export function ProductCard({ product }: { product: Product }) {
+export function ProductCard({
+  product,
+  priority = false,
+}: {
+  product: Product;
+  /**
+   * Set on the cards above the fold.
+   *
+   * Without it the LCP image queues behind every other card's, and on a
+   * throttled 4G connection that is the difference between a 1.2s and a 1.9s
+   * largest paint — the budget sits between the two.
+   */
+  priority?: boolean;
+}) {
   const price = lowestPrice(product);
   const available = isInStock(product);
   const image = product.images[0]!;
 
   return (
     <Link href={`/products/${product.handle}`} className="group block">
-      <div className="relative aspect-4/5 overflow-hidden bg-ground-raised">
+      {/* Paired with the PDP gallery by name, so the plate travels between the
+          grid and the detail page instead of cutting. Scoped per product —
+          a shared name across the grid would animate the wrong tile. */}
+      <div
+        className="relative aspect-4/5 overflow-hidden bg-ground-raised"
+        style={{ viewTransitionName: `product-${product.handle}` }}
+      >
         <Image
           src={image.url}
           alt={image.alt}
           width={image.width}
           height={image.height}
+          priority={priority}
           sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"
           className="h-full w-full object-cover transition-transform duration-700 ease-[var(--ease-siumora)] group-hover:scale-[1.03]"
         />

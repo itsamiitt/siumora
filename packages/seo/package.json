@@ -11,7 +11,8 @@
     "test": "node --test --experimental-strip-types src/*.test.ts"
   },
   "dependencies": {
-    "@siumora/core": "workspace:*"
+    "@siumora/core": "workspace:*",
+    "@siumora/in-locale": "workspace:*"
   },
   "devDependencies": {
     "@siumora/config-ts": "workspace:*",

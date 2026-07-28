@@ -1,4 +1,7 @@
+import { Suspense } from "react";
+
 import type { Metadata } from "next";
+import Loading from "./loading";
 import Link from "next/link";
 
 import { calculateTotals, shippingFor } from "@siumora/core";
@@ -14,10 +17,8 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-// The cart is per-visitor, so it can never be cached or prerendered.
-export const dynamic = "force-dynamic";
 
-export default async function CartPage() {
+async function CartPageContents() {
   const lines = await getCartLines();
 
   if (lines.length === 0) {
@@ -77,5 +78,18 @@ export default async function CartPage() {
         </aside>
       </div>
     </div>
+  );
+}
+
+/**
+ * Static shell. The dynamic read — cookies, and the session behind them —
+ * happens inside the boundary, so the rest of the route still prerenders and
+ * the hole streams in.
+ */
+export default function CartPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <CartPageContents />
+    </Suspense>
   );
 }

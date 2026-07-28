@@ -2,9 +2,11 @@
 
 import { useEffect, useState, useTransition } from "react";
 
-import { mintEventId } from "@siumora/analytics";
-import { track } from "@siumora/analytics/client";
-import type { AnalyticsItem } from "@siumora/analytics";
+import {
+  track,
+  mintEventId,
+  type AnalyticsItem,
+} from "@siumora/analytics/client";
 import { MicroLabel } from "@siumora/ui";
 
 import { toggleWishlistItem } from "@/app/actions/wishlist";

@@ -4,14 +4,31 @@ import {
   analyticsAllowed,
   type ConsentState,
 } from "./consent.ts";
+import type { EventName, EventPayload } from "./events.ts";
 import {
-  EVENT_SCHEMAS,
   META_EVENT_MAP,
   SERVER_ONLY_EVENTS,
   toMetaContents,
-  type EventName,
-  type EventPayload,
-} from "./events.ts";
+} from "./routing.ts";
+
+/**
+ * Payload validation, in development only.
+ *
+ * The schemas are a guard against a mistake at the call site, and TypeScript
+ * already refuses the same mistake at compile time. Shipping Zod to every
+ * visitor to re-check it costs roughly 20 kB gzip — against a 150 kB budget —
+ * to catch nothing a developer has not already seen.
+ *
+ * A dynamic import inside this guard is dropped entirely from a production
+ * bundle; a static one would pull Zod in whatever the branch said at runtime.
+ */
+let schemas: typeof import("./events.ts").EVENT_SCHEMAS | undefined;
+if (process.env.NODE_ENV !== "production") {
+  // Awaited, not fired-and-forgotten: the first `track()` can run in the same
+  // tick this module is imported, and a promise that had not settled yet would
+  // wave the very payload the guard exists to catch straight through.
+  ({ EVENT_SCHEMAS: schemas } = await import("./events.ts"));
+}
 
 /**
  * Browser-side `track()`.
@@ -94,16 +111,16 @@ export function track<N extends EventName>(
     return;
   }
 
-  // Validate before dispatch so a malformed payload fails here rather than
-  // silently landing as an unusable row in GA4.
-  const parsed = EVENT_SCHEMAS[name].safeParse(payload);
-  if (!parsed.success) {
-    if (process.env.NODE_ENV !== "production") {
+  // In development a malformed payload fails loudly here rather than landing
+  // as an unusable row in GA4. In production the compiler is the contract.
+  if (process.env.NODE_ENV !== "production" && schemas) {
+    const parsed = schemas[name].safeParse(payload);
+    if (!parsed.success) {
       console.error(`[analytics] invalid "${name}" payload`, parsed.error.issues);
+      return;
     }
-    return;
   }
-  const data = parsed.data as EventPayload<N>;
+  const data = payload as EventPayload<N>;
 
   // Hold until the banner is answered, then replay or drop.
   if (!decided) {
@@ -150,3 +167,21 @@ function dispatch<N extends EventName>(
     );
   }
 }
+
+/**
+ * Re-exported for the browser.
+ *
+ * These live in zod-free modules. Reaching them through the package barrel
+ * instead would pull `events.ts` — and Zod with it — into every client chunk
+ * that mints an event id.
+ */
+export { mintEventId } from "./identity.ts";
+export { toRupees } from "./routing.ts";
+export type { AnalyticsItem, EventName, EventPayload } from "./events.ts";
+export {
+  DEFAULT_CONSENT,
+  FULL_CONSENT,
+  consentFromChoice,
+  type ConsentChoice,
+  type ConsentState,
+} from "./consent.ts";

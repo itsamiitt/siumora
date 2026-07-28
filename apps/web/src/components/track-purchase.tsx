@@ -2,8 +2,7 @@
 
 import { useEffect } from "react";
 
-import { toRupees } from "@siumora/analytics";
-import { track } from "@siumora/analytics/client";
+import { track, toRupees } from "@siumora/analytics/client";
 import type { Order } from "@siumora/core";
 
 /**

@@ -6,8 +6,10 @@ import { SITE, organizationJsonLd, websiteJsonLd } from "@siumora/seo";
 import { ConsentBanner } from "@/components/consent-banner";
 import { JsonLdScript } from "@/components/json-ld";
 import { SiteFooter } from "@/components/site-footer";
+import { FestivalBanner } from "@/components/festival-banner";
+import { ServiceWorker } from "@/components/service-worker";
 import { SiteHeader } from "@/components/site-header";
-import { THEME_SCRIPT } from "@/components/theme-toggle";
+import { PRE_PAINT_SCRIPT } from "@/lib/pre-paint";
 
 import "./globals.css";
 
@@ -70,14 +72,16 @@ export default function RootLayout({
     >
       <head>
         {/* Before paint, so a dark-theme visitor never sees an ivory flash. */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: PRE_PAINT_SCRIPT }} />
       </head>
       <body className="flex min-h-dvh flex-col">
         <JsonLdScript data={[organizationJsonLd(), websiteJsonLd()]} />
+        <FestivalBanner />
         <SiteHeader />
         <main className="flex-1">{children}</main>
         <SiteFooter />
         <ConsentBanner />
+        <ServiceWorker />
       </body>
     </html>
   );

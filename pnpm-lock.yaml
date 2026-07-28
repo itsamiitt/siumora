@@ -190,6 +190,9 @@ importers:
       '@siumora/core':
         specifier: workspace:*
         version: link:../core
+      '@siumora/in-locale':
+        specifier: workspace:*
+        version: link:../in-locale
     devDependencies:
       '@siumora/config-ts':
         specifier: workspace:*

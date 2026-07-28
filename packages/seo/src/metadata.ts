@@ -1,4 +1,5 @@
 import { lowestPrice, type Collection, type Product } from "@siumora/core";
+import { alternates } from "@siumora/in-locale";
 
 import { SITE } from "./site.ts";
 
@@ -12,7 +13,7 @@ import { SITE } from "./site.ts";
 export interface PageMetadata {
   title: string;
   description: string;
-  alternates: { canonical: string };
+  alternates: { canonical: string; languages: Record<string, string> };
   openGraph: {
     title: string;
     description: string;
@@ -20,6 +21,16 @@ export interface PageMetadata {
     type: "website" | "article";
   };
   robots?: { index: boolean; follow: boolean };
+}
+
+/**
+ * The path part of an absolute URL.
+ *
+ * hreflang is built per path, and the builders already hold the canonical, so
+ * this avoids threading the path through every signature a second time.
+ */
+function pathOf(absolute: string): string {
+  return absolute.slice(SITE.url.length) || "/";
 }
 
 /** Titles are truncated on the SERP past roughly this width. */
@@ -51,7 +62,7 @@ export function productMetadata(product: Product): PageMetadata {
       `${product.subtitle} ${product.material}. ₹${rupees}, inclusive of all taxes.`,
       DESCRIPTION_LIMIT,
     ),
-    alternates: { canonical },
+    alternates: { canonical, languages: alternates(pathOf(canonical), SITE.url) },
     openGraph: {
       title: product.title,
       description: product.subtitle,
@@ -73,7 +84,7 @@ export function collectionMetadata(collection: Collection): PageMetadata {
       `${collection.description} ${SITE.description}`,
       DESCRIPTION_LIMIT,
     ),
-    alternates: { canonical },
+    alternates: { canonical, languages: alternates(pathOf(canonical), SITE.url) },
     openGraph: {
       title: collection.title,
       description: collection.description,
@@ -94,7 +105,7 @@ export function noindexMetadata(title: string): PageMetadata {
   return {
     title: truncate(`${title} · ${SITE.name}`, TITLE_LIMIT),
     description: SITE.description,
-    alternates: { canonical },
+    alternates: { canonical, languages: alternates(pathOf(canonical), SITE.url) },
     openGraph: {
       title,
       description: SITE.description,

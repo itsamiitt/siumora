@@ -5,7 +5,7 @@ import { productSchema, type Collection, type Product } from "@siumora/core";
 
 import { buildLlmsTxt, buildRobots, buildSitemap } from "./discovery.ts";
 import { breadcrumbJsonLd, productJsonLd } from "./jsonld.ts";
-import { productMetadata, truncate } from "./metadata.ts";
+import { collectionMetadata, productMetadata, truncate } from "./metadata.ts";
 
 const product: Product = productSchema.parse({
   id: "prod_1",
@@ -124,6 +124,7 @@ test("robots blocks private paths but allows AI crawlers", () => {
     "/checkout",
     "/account",
     "/signin",
+    "/offline",
     "/orders",
     "/admin",
     "/api/",
@@ -196,4 +197,28 @@ test("does not set og:image, so the generated card is used", () => {
     openGraph: Record<string, unknown>;
   };
   assert.equal("images" in meta.openGraph, false);
+});
+
+test("declares hreflang alternates alongside the canonical", () => {
+  const metadata = productMetadata(product);
+  const languages = metadata.alternates.languages;
+
+  // Only locales actually served. An alternate that resolves to English is a
+  // broken signal, not a helpful one.
+  assert.deepEqual(Object.keys(languages).sort(), ["en-IN", "x-default"]);
+  assert.equal(languages["en-IN"], metadata.alternates.canonical);
+});
+
+test("hreflang points at the page's own path, not the site root", () => {
+  const forProduct = productMetadata(product);
+  const forCollection = collectionMetadata(collection);
+
+  assert.notEqual(
+    forProduct.alternates.languages["x-default"],
+    forCollection.alternates.languages["x-default"],
+  );
+  assert.match(
+    forProduct.alternates.languages["x-default"] ?? "",
+    /\/products\/petal-studs$/,
+  );
 });

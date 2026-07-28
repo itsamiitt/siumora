@@ -2,8 +2,7 @@
 
 import { useEffect } from "react";
 
-import { mintEventId, type AnalyticsItem } from "@siumora/analytics";
-import { track } from "@siumora/analytics/client";
+import { track, mintEventId, type AnalyticsItem } from "@siumora/analytics/client";
 
 /**
  * Fires `view_item` once per PDP mount.

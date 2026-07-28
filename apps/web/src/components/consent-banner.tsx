@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import {
   DEFAULT_CONSENT,
   consentFromChoice,
+  setConsent,
   type ConsentChoice,
   type ConsentState,
-} from "@siumora/analytics";
-import { setConsent } from "@siumora/analytics/client";
+} from "@siumora/analytics/client";
 import { Button, MicroLabel } from "@siumora/ui";
+
+import { CONSENT_STORAGE_KEY as STORAGE_KEY } from "@/lib/pre-paint";
 
 /**
  * Consent banner — DPDP-aligned, driving Google Consent Mode v2.
@@ -22,7 +24,7 @@ import { Button, MicroLabel } from "@siumora/ui";
  * is hidden or styled as secondary is not freely given consent.
  */
 
-const STORAGE_KEY = "siumora.consent";
+
 
 const ALL: ConsentChoice = {
   analytics: true,
@@ -45,8 +47,6 @@ function applyConsent(state: ConsentState, decided = true) {
 }
 
 export function ConsentBanner() {
-  const [visible, setVisible] = useState(false);
-
   useEffect(() => {
     let stored: ConsentChoice | null = null;
     try {
@@ -56,13 +56,11 @@ export function ConsentBanner() {
       // Corrupt or unavailable storage — ask again rather than assume consent.
     }
 
-    if (stored) {
-      applyConsent(consentFromChoice(stored));
-    } else {
-      // Not an answer — events queue until the visitor chooses.
-      applyConsent(DEFAULT_CONSENT, false);
-      setVisible(true);
-    }
+    // Visibility is not React's to decide — see the note on the markup below.
+    // This effect only tells the analytics layer what state to be in.
+    if (stored) applyConsent(consentFromChoice(stored));
+    // Not an answer: events queue until the visitor chooses.
+    else applyConsent(DEFAULT_CONSENT, false);
   }, []);
 
   function choose(choice: ConsentChoice) {
@@ -72,16 +70,24 @@ export function ConsentBanner() {
       // Storage denied — honour the choice for this session anyway.
     }
     applyConsent(consentFromChoice(choice));
-    setVisible(false);
+    document.documentElement.removeAttribute("data-consent");
   }
 
-  if (!visible) return null;
-
+  // Always rendered, never conditionally.
+  //
+  // Mounting this from an effect put it on screen 2.6s into a throttled phone
+  // load — late enough that it became the page's Largest Contentful Paint, and
+  // late enough to slide over something a shopper had started reading.
+  //
+  // So visibility is CSS, driven by an attribute an inline script sets before
+  // the first paint. A first-time visitor gets the banner in the initial paint;
+  // a returning one never sees it at all, with no flash either way, and React
+  // has nothing to hydrate that could disagree with the server.
   return (
     <div
       role="dialog"
       aria-label="Cookie choices"
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-rule)] bg-ground/97 backdrop-blur-sm"
+      className="siumora-consent fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-rule)] bg-ground/97 backdrop-blur-sm"
     >
       <div className="mx-auto flex max-w-6xl flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center">
         <div className="flex-1">
@@ -104,3 +110,4 @@ export function ConsentBanner() {
     </div>
   );
 }
+

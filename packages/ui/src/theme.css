@@ -212,6 +212,20 @@
 
 @layer components {
   /**
+   * The consent banner is in the markup on every page and hidden by default.
+   * An inline script sets data-consent="ask" before the first paint when there
+   * is no stored choice, so a first-time visitor sees it in the initial paint
+   * and a returning one never sees it flash.
+   */
+  .siumora-consent {
+    display: none;
+  }
+
+  :root[data-consent="ask"] .siumora-consent {
+    display: block;
+  }
+
+  /**
    * The jaali tile — the mark repeated into a lattice.
    * One tile size per surface: 44px at screen scale, per the guidelines.
    * Never place the logo on top of this; the pattern is what the logo is made of.

@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useOptimistic, useTransition } from "react";
 
-import { type CartLine } from "@siumora/core";
+import type { CartLine } from "@siumora/core";
 import { formatPaise } from "@siumora/in-locale";
 import { MicroLabel } from "@siumora/ui";
 

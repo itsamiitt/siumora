@@ -18,3 +18,22 @@ export {
 } from "./states.ts";
 
 export { isValidPincode, normalisePincodeInput } from "./pincode.ts";
+
+export {
+  FESTIVALS,
+  activeFestival,
+  daysRemaining,
+  istDate,
+  type Festival,
+} from "./festivals.ts";
+
+export {
+  DEFAULT_LOCALE,
+  LIVE_LOCALES,
+  LOCALES,
+  alternates,
+  dictionary,
+  isLive,
+  type Dictionary,
+  type Locale,
+} from "./i18n.ts";

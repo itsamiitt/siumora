@@ -3,9 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { mintEventId } from "@siumora/analytics";
-import { track } from "@siumora/analytics/client";
+import { track, mintEventId } from "@siumora/analytics/client";
 import { Button } from "@siumora/ui";
+
+import { VoiceSearch } from "./voice-search";
 
 /**
  * Search box.
@@ -19,13 +20,17 @@ export function SearchInput({ initialQuery = "" }: { initialQuery?: string }) {
   const router = useRouter();
   const [value, setValue] = useState(initialQuery);
 
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    const query = value.trim();
+  function run(raw: string) {
+    const query = raw.trim();
     if (!query) return;
 
     track("search", { event_id: mintEventId(), search_term: query });
     router.push(`/search?q=${encodeURIComponent(query)}`);
+  }
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    run(value);
   }
 
   return (
@@ -38,6 +43,14 @@ export function SearchInput({ initialQuery = "" }: { initialQuery?: string }) {
         aria-label="Search"
         placeholder="Try “jhumka” or “gift under 2000”"
         className="h-11 min-w-0 flex-1 border border-content/20 bg-transparent px-3 text-sm outline-none focus:border-accent-ink"
+      />
+      {/* Speaking a query runs it straight away. Filling the box and waiting
+          for a second tap loses the speed that made voice worth offering. */}
+      <VoiceSearch
+        onResult={(transcript) => {
+          setValue(transcript);
+          run(transcript);
+        }}
       />
       <Button type="submit" size="sm">
         Search

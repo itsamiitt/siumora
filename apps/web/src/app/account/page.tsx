@@ -1,4 +1,7 @@
+import { Suspense } from "react";
+
 import type { Metadata } from "next";
+import Loading from "./loading";
 import Link from "next/link";
 
 import type { OrderStatus } from "@siumora/core";
@@ -14,7 +17,6 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export const dynamic = "force-dynamic";
 
 /** Plain-language status. The internal names are for the code, not the customer. */
 const STATUS_LABEL: Record<OrderStatus, string> = {
@@ -31,7 +33,7 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   returned: "Returned",
 };
 
-export default async function AccountPage() {
+async function AccountPageContents() {
   const viewer = await currentViewer();
 
   if (!viewer) {
@@ -128,5 +130,18 @@ export default async function AccountPage() {
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * Static shell. The dynamic read — cookies, and the session behind them —
+ * happens inside the boundary, so the rest of the route still prerenders and
+ * the hole streams in.
+ */
+export default function AccountPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <AccountPageContents />
+    </Suspense>
   );
 }

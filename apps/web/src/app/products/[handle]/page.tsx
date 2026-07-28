@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cacheLife } from "next/cache";
 import { notFound } from "next/navigation";
 
 import { lowestPrice } from "@siumora/core";
@@ -48,6 +49,12 @@ export async function generateMetadata({
 }
 
 export default async function ProductPage({ params }: PageProps) {
+  // The whole page is cacheable: nothing on it is per-visitor. Saying so
+  // explicitly is what lets the product JSON-LD read the clock for
+  // priceValidUntil — an uncached read would pin it to the build.
+  "use cache";
+  cacheLife("days");
+
   const { handle } = await params;
   const product = await getProduct(handle);
   if (!product) notFound();
@@ -83,7 +90,11 @@ export default async function ProductPage({ params }: PageProps) {
       />
 
       <div className="grid gap-12 lg:grid-cols-2">
-        <ProductGallery images={product.images} title={product.title} />
+        <ProductGallery
+          images={product.images}
+          title={product.title}
+          handle={product.handle}
+        />
 
         <div className="lg:py-6">
           <CollectionTitle className="text-xs">

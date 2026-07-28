@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { connection } from "next/server";
 
 import { MAX_DELIVERY_ATTEMPTS, hsnSummary, summariseInvoice } from "@siumora/core";
 import { formatPaise } from "@siumora/in-locale";
@@ -15,17 +16,38 @@ import { getOrder, nextStatuses } from "@/lib/order-store";
 import { getReturnForOrder } from "@/lib/return-store";
 
 export const metadata: Metadata = {
-  title: "Order confirmed",
+  // Not "Order confirmed" — the title is the same for every state of every
+  // order, and asserting a state the order may not be in is a promise the page
+  // itself then contradicts.
+  title: "Your order",
   robots: { index: false, follow: false },
 };
 
-export const dynamic = "force-dynamic";
+/**
+ * Request-time only, and a known soft 404.
+ *
+ * Partial prerendering commits the response status before the ownership check
+ * has run, so `notFound()` from inside the stream cannot take it back: this
+ * route answers 200 whether or not the order exists. That is a soft 404, and it
+ * is accepted here for one reason — it is *uniform*. A real order the caller
+ * cannot see and an order number that was never issued render byte-identical
+ * bodies with the same status, so walking SIU-00001 upward still learns
+ * nothing. The enforcement point is the API, which answers a real 404.
+ *
+ * The route is noindex and disallowed in robots.txt, so the soft 404 costs
+ * nothing in search either.
+ */
 
 interface PageProps {
   params: Promise<{ number: string }>;
 }
 
 export default async function OrderPage({ params }: PageProps) {
+  // Renders at request time rather than from a prerendered shell. It does not
+  // restore the status code — see above — but it keeps the page from being
+  // built against whatever the session happened to be at build time.
+  await connection();
+
   const { number } = await params;
   const order = await getOrder(number);
   if (!order) notFound();

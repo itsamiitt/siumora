@@ -21,9 +21,11 @@ import { MicroLabel } from "@siumora/ui";
 export function ProductGallery({
   images,
   title,
+  handle,
 }: {
   images: readonly ProductImage[];
   title: string;
+  handle: string;
 }) {
   const [active, setActive] = useState(0);
   const [zoomed, setZoomed] = useState(false);
@@ -51,6 +53,7 @@ export function ProductGallery({
         // Held at the catalogue's 4:5 ratio so the plate never stretches to
         // match whatever the detail column happens to be.
         className="relative aspect-4/5 cursor-zoom-in overflow-hidden bg-ground-raised"
+        style={{ viewTransitionName: `product-${handle}` }}
         onPointerDown={(event) => {
           setZoomed(true);
           track(event);

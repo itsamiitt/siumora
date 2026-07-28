@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 
 import { MicroLabel } from "@siumora/ui";
 
+import { THEME_STORAGE_KEY as STORAGE_KEY } from "@/lib/pre-paint";
+
 /**
  * Light / dark switch.
  *
@@ -15,7 +17,7 @@ import { MicroLabel } from "@siumora/ui";
 
 export type ThemeChoice = "system" | "light" | "dark";
 
-const STORAGE_KEY = "siumora.theme";
+
 
 /**
  * Applied before paint by the inline script in the layout, and again here on
@@ -72,14 +74,3 @@ export function ThemeToggle() {
   );
 }
 
-/**
- * Runs before the first paint, so a dark-theme visitor never sees an ivory
- * flash. Inlined in the document head: a module in the bundle would already be
- * too late.
- */
-export const THEME_SCRIPT = `
-try {
-  var t = localStorage.getItem(${JSON.stringify(STORAGE_KEY)});
-  if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
-} catch (e) {}
-`.trim();

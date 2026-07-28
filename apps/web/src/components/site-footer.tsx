@@ -1,3 +1,4 @@
+import { cacheLife } from "next/cache";
 import Link from "next/link";
 
 import { MicroLabel, SiumoraLockupStacked } from "@siumora/ui";
@@ -6,7 +7,13 @@ import { MicroLabel, SiumoraLockupStacked } from "@siumora/ui";
  * Footer carries the stacked lockup — the primary lockup, used wherever there
  * is room. Ink Plate ground, so the mark is set in ivory with a brass kernel.
  */
-export function SiteFooter() {
+export async function SiteFooter() {
+  // Cached for a day. The only moving part is the copyright year, and under
+  // Cache Components an uncached read of the clock would pin every prerendered
+  // page to the date the build ran.
+  "use cache";
+  cacheLife("days");
+
   // Plate in both themes — it is the kit's named dark surface, not a role that
   // flips. The brass hairline is what keeps it distinct on a dark page, where a
   // plate block on a plate ground would otherwise have no edge.

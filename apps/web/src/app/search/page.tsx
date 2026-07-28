@@ -46,8 +46,12 @@ export default async function SearchPage({ searchParams }: PageProps) {
 
       {hits.length > 0 && (
         <div className="mt-10 grid grid-cols-2 gap-x-6 gap-y-12 lg:grid-cols-4">
-          {hits.map((hit) => (
-            <ProductCard key={hit.product.id} product={hit.product} />
+          {hits.map((hit, index) => (
+            <ProductCard
+              key={hit.product.id}
+              product={hit.product}
+              priority={index < 4}
+            />
           ))}
         </div>
       )}

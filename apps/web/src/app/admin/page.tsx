@@ -1,4 +1,7 @@
+import { Suspense } from "react";
+
 import type { Metadata } from "next";
+import Loading from "./loading";
 import Link from "next/link";
 
 import {
@@ -22,9 +25,8 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export const dynamic = "force-dynamic";
 
-export default async function AdminPage() {
+async function AdminPageContents() {
   const viewer = await currentViewer();
 
   // Checked here so the page does not render, and again by the API before it
@@ -279,5 +281,18 @@ function HsnTable({ orders }: { orders: readonly Order[] }) {
         </tr>
       </tbody>
     </table>
+  );
+}
+
+/**
+ * Static shell. The dynamic read — cookies, and the session behind them —
+ * happens inside the boundary, so the rest of the route still prerenders and
+ * the hole streams in.
+ */
+export default function AdminPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <AdminPageContents />
+    </Suspense>
   );
 }
