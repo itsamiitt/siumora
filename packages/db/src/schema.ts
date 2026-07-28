@@ -367,6 +367,50 @@ export const trackingEvents = pgTable(
 );
 
 /**
+ * COD remittance ledger.
+ *
+ * One row per line of a courier's remittance file, kept after reconciliation
+ * rather than only reported: the outcome is the evidence a shortfall was
+ * claimed, and the row is what stops a later batch crediting the same order a
+ * second time.
+ */
+export const codRemittances = pgTable(
+  "cod_remittances",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** The courier's own batch or UTR reference. */
+    batchId: text("batch_id").notNull(),
+    courier: text("courier").notNull(),
+    /** Kept as text: a file may name an order this shop never sold. */
+    orderNumber: text("order_number").notNull(),
+    orderId: uuid("order_id").references(() => orders.id, { onDelete: "set null" }),
+    /** Cash taken at the door, in paise. */
+    collected: integer("collected").notNull(),
+    /** Freight plus the courier's COD charge, in paise. */
+    deductions: integer("deductions").notNull().default(0),
+    /** What actually landed in the bank, in paise. */
+    remitted: integer("remitted").notNull(),
+    declaredWeightGrams: integer("declared_weight_grams"),
+    chargedWeightGrams: integer("charged_weight_grams"),
+    outcome: text("outcome").notNull(),
+    /** Collected minus expected. Negative is money to chase. */
+    variance: integer("variance").notNull().default(0),
+    note: text("note"),
+    /** The date the courier says it paid, which is not when we reconciled. */
+    remittedOn: timestamp("remitted_on", { withTimezone: true }),
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Re-uploading a file must not book the money twice, and couriers resend
+    // files routinely.
+    uniqueIndex("cod_remittance_batch_order_key").on(table.batchId, table.orderNumber),
+    index("cod_remittance_order_idx").on(table.orderNumber),
+  ],
+);
+
+/**
  * Idempotency keys.
  *
  * A retried checkout — a flaky network, an impatient tap — must not create two

@@ -468,6 +468,18 @@ export class SiumoraClient {
   async getMetrics(): Promise<Record<string, unknown>> {
     return this.request("GET", "/admin/metrics", undefined, { cache: "no-store" });
   }
+
+  /**
+   * COD remittance batches, open exceptions and the cash position.
+   *
+   * Read-only. Ingesting a courier's file is an operator action against the API
+   * directly, not something the storefront proxies.
+   */
+  async getRemittanceReport(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/admin/remittances", undefined, {
+      cache: "no-store",
+    });
+  }
 }
 
 /**

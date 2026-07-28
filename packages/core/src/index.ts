@@ -199,6 +199,20 @@ export {
 } from "./facets.ts";
 
 export {
+  DEDUCTION_ALARM_RATIO,
+  cashPosition,
+  overDeducted,
+  reconcileRemittance,
+  type CashPosition,
+  type CashPositionOrder,
+  type ExpectedOrder,
+  type ReconciledRow,
+  type ReconciliationSummary,
+  type RemittanceOutcome,
+  type RemittanceRow,
+} from "./remittance.ts";
+
+export {
   B2CL_THRESHOLD,
   buildGstr1,
   gstinStateCode,

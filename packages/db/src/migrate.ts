@@ -363,6 +363,60 @@ ALTER TABLE orders ADD CONSTRAINT orders_buyer_gstin_shape
 CREATE INDEX orders_b2b_idx ON orders(financial_year) WHERE buyer_gstin IS NOT NULL;
 `,
   },
+  {
+    id: "0007_cod_remittances",
+    sql: `
+-- COD is the majority of orders and the courier holds the cash for a week. Up
+-- to now nothing recorded what came back, so a short collection or a silently
+-- inflated deduction was invisible.
+--
+-- The row is kept after reconciliation rather than only reported: it is the
+-- evidence a shortfall was claimed, and it is what stops a later batch
+-- crediting the same order a second time.
+CREATE TABLE cod_remittances (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id text NOT NULL,
+  courier text NOT NULL,
+  -- Text, not a foreign key alone: a file may name an order this shop never
+  -- sold, and refusing to store that row would hide the very error worth seeing.
+  order_number text NOT NULL,
+  order_id uuid REFERENCES orders(id) ON DELETE SET NULL,
+  collected integer NOT NULL,
+  deductions integer NOT NULL DEFAULT 0,
+  remitted integer NOT NULL,
+  declared_weight_grams integer,
+  charged_weight_grams integer,
+  outcome text NOT NULL,
+  variance integer NOT NULL DEFAULT 0,
+  note text,
+  remitted_on timestamptz,
+  reconciled_at timestamptz NOT NULL DEFAULT now(),
+
+  -- Money never moves backwards at the door, and a negative deduction would
+  -- quietly turn a courier's charge into income.
+  CONSTRAINT cod_remittance_amounts_non_negative
+    CHECK (collected >= 0 AND deductions >= 0),
+
+  CONSTRAINT cod_remittance_outcome_known CHECK (
+    outcome IN ('matched', 'short', 'over', 'unknown_order',
+                'not_cod', 'not_delivered', 'duplicate')
+  ),
+
+  -- An order with no matching sale has nothing to be short of, so a variance
+  -- there would be a number with no meaning.
+  CONSTRAINT cod_remittance_variance_needs_order
+    CHECK (outcome <> 'duplicate' OR variance = 0)
+);
+
+-- Couriers resend files routinely. Re-uploading one must not book the money
+-- twice, so the batch line is the idempotency key.
+CREATE UNIQUE INDEX cod_remittance_batch_order_key
+  ON cod_remittances(batch_id, order_number);
+
+-- "Has this order already been paid for?" — asked once per row of every batch.
+CREATE INDEX cod_remittance_order_idx ON cod_remittances(order_number);
+`,
+  },
 ];
 
 /**

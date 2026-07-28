@@ -250,3 +250,46 @@ export async function getTrackingReport(): Promise<TrackingReport | undefined> {
     return undefined;
   }
 }
+
+export interface RemittanceReport {
+  readonly batches: Array<{
+    batchId: string;
+    courier: string;
+    rows: number;
+    collected: number;
+    deductions: number;
+    remitted: number;
+    shortfall: number;
+    exceptions: number;
+  }>;
+  readonly exceptions: Array<{
+    id: string;
+    orderNumber: string;
+    outcome: string;
+    variance: number;
+    note: string | null;
+  }>;
+  readonly cash: {
+    prepaidSettled: number;
+    codInTransit: number;
+    codAwaitingRemittance: number;
+    codRemitted: number;
+  };
+}
+
+/**
+ * COD remittances, for the ops dashboard.
+ *
+ * The distinction the panel exists to draw is between cash the shop has and
+ * cash a courier is holding: COD delivered but not remitted is revenue on the
+ * books and nothing in the bank.
+ */
+export async function getRemittanceReport(): Promise<
+  RemittanceReport | undefined
+> {
+  try {
+    return (await (await apiAs()).getRemittanceReport()) as unknown as RemittanceReport;
+  } catch {
+    return undefined;
+  }
+}

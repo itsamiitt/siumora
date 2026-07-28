@@ -45,7 +45,7 @@ before(async () => {
 beforeEach(async () => {
   if (!url) return;
   await app.pool.query(
-    "DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
+    "DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM cod_remittances; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
   );
   await seed(testDb!.url);
 });
@@ -1561,4 +1561,325 @@ apiTest("keeps the return away from a customer", async () => {
     headers: shopper.headers,
   });
   assert.equal(response.statusCode, 403);
+});
+
+// ── COD remittance desk ───────────────────────────────────────
+
+/** A delivered COD order, plus the amount the courier should have collected. */
+async function deliveredCod(sku = "SIU-TB-12") {
+  const placed = await placeAndMove("cod", sku, [
+    "confirmed",
+    "processing",
+    "shipped",
+    "out_for_delivery",
+    "delivered",
+  ]);
+  const { rows } = await app.pool.query(
+    "SELECT total, status FROM orders WHERE number = $1",
+    [placed.orderNumber],
+  );
+  assert.equal(rows[0].status, "delivered", "the COD order reached delivery");
+  return { number: placed.orderNumber as string, total: rows[0].total as number };
+}
+
+function batch(
+  rows: Array<Record<string, unknown>>,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    batchId: "BLUEDART-2026-07-28",
+    courier: "Bluedart",
+    rows,
+    ...overrides,
+  };
+}
+
+apiTest("passes a remittance line that collected the invoice", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const order = await deliveredCod();
+
+  const result = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/admin/remittances",
+      headers: operator.headers,
+      payload: batch([
+        {
+          orderNumber: order.number,
+          collected: order.total,
+          // The courier keeps freight and its COD charge. That gap is not a
+          // shortfall, and treating it as one flags every line in the file.
+          deductions: 6500,
+          remitted: order.total - 6500,
+        },
+      ]),
+    }),
+  );
+
+  assert.equal(result.counts.matched, 1);
+  assert.equal(result.shortfall, 0);
+  assert.equal(result.exceptions.length, 0);
+  assert.equal(result.deductions, 6500);
+  assert.equal(result.recorded, 1);
+});
+
+apiTest("names the money a short collection left behind", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const order = await deliveredCod();
+
+  const result = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/admin/remittances",
+      headers: operator.headers,
+      payload: batch([
+        {
+          orderNumber: order.number,
+          collected: order.total - 4900,
+          deductions: 6500,
+          remitted: order.total - 4900 - 6500,
+        },
+      ]),
+    }),
+  );
+
+  assert.equal(result.shortfall, 4900);
+  assert.equal(result.exceptions[0].outcome, "short");
+  assert.equal(result.exceptions[0].variance, -4900);
+});
+
+apiTest("re-uploading a file books nothing twice", async () => {
+  // Couriers resend files routinely. Without the batch key the same collection
+  // is credited again and the cash position drifts upward with nobody noticing.
+  const operator = await signIn(OPERATOR_PHONE);
+  const order = await deliveredCod();
+  const payload = batch([
+    {
+      orderNumber: order.number,
+      collected: order.total,
+      deductions: 6500,
+      remitted: order.total - 6500,
+    },
+  ]);
+
+  const first = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/admin/remittances",
+      headers: operator.headers,
+      payload,
+    }),
+  );
+  const second = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/admin/remittances",
+      headers: operator.headers,
+      payload,
+    }),
+  );
+
+  assert.equal(first.recorded, 1);
+  assert.equal(second.recorded, 0);
+  assert.equal(second.replayed, true);
+  // The replay reports what the original said, not a wall of duplicates.
+  assert.equal(second.counts.matched, 1);
+
+  const stored = await app.pool.query(
+    "SELECT count(*)::int AS n FROM cod_remittances WHERE order_number = $1",
+    [order.number],
+  );
+  assert.equal(stored.rows[0].n, 1);
+});
+
+apiTest("refuses to pay for the same order in a second batch", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const order = await deliveredCod();
+  const line = {
+    orderNumber: order.number,
+    collected: order.total,
+    deductions: 6500,
+    remitted: order.total - 6500,
+  };
+
+  await app.server.inject({
+    method: "POST",
+    url: "/admin/remittances",
+    headers: operator.headers,
+    payload: batch([line]),
+  });
+
+  const again = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/admin/remittances",
+      headers: operator.headers,
+      payload: batch([line], { batchId: "BLUEDART-2026-08-04" }),
+    }),
+  );
+
+  assert.equal(again.counts.duplicate, 1);
+  // A duplicate contributes nothing, or the expected total doubles — the exact
+  // double-count this check exists to catch.
+  assert.equal(again.expected, 0);
+});
+
+apiTest("refuses a collection nobody was owed", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const prepaid = await placeAndMove("upi", "SIU-PS-GLD", ["confirmed"]);
+  const inFlight = await placeAndMove("cod", "SIU-TB-12", ["confirmed", "processing", "shipped"]);
+
+  const result = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/admin/remittances",
+      headers: operator.headers,
+      payload: batch([
+        { orderNumber: "SIU-99999", collected: 100000, deductions: 0, remitted: 100000 },
+        { orderNumber: prepaid.orderNumber, collected: 100000, deductions: 0, remitted: 100000 },
+        { orderNumber: inFlight.orderNumber, collected: 100000, deductions: 0, remitted: 100000 },
+      ]),
+    }),
+  );
+
+  assert.equal(result.counts.unknown_order, 1);
+  assert.equal(result.counts.not_cod, 1);
+  assert.equal(result.counts.not_delivered, 1);
+  // Worst first: an order that does not exist outranks one that was prepaid.
+  assert.deepEqual(
+    result.exceptions.map((entry: { outcome: string }) => entry.outcome),
+    ["unknown_order", "not_delivered", "not_cod"],
+  );
+});
+
+apiTest("spots a parcel billed on more weight than it was booked at", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const order = await deliveredCod();
+
+  const result = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/admin/remittances",
+      headers: operator.headers,
+      payload: batch([
+        {
+          orderNumber: order.number,
+          collected: order.total,
+          // A third of the order kept as freight on a piece of jewellery is a
+          // mis-weigh, not a rate.
+          deductions: Math.round(order.total * 0.4),
+          remitted: order.total - Math.round(order.total * 0.4),
+          declaredWeightGrams: 200,
+          chargedWeightGrams: 500,
+        },
+      ]),
+    }),
+  );
+
+  assert.equal(result.weightDisputes[0].excessWeightGrams, 300);
+  assert.equal(result.deductionAlarms.length, 1);
+});
+
+apiTest("separates cash in the bank from cash the courier is holding", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const settled = await deliveredCod();
+  const awaiting = await deliveredCod("SIU-JH-GLD");
+
+  await app.server.inject({
+    method: "POST",
+    url: "/admin/remittances",
+    headers: operator.headers,
+    payload: batch([
+      {
+        orderNumber: settled.number,
+        collected: settled.total,
+        deductions: 6500,
+        remitted: settled.total - 6500,
+      },
+    ]),
+  });
+
+  const cash = json(
+    await app.server.inject({
+      method: "GET",
+      url: "/admin/cash-position",
+      headers: operator.headers,
+    }),
+  );
+
+  assert.equal(cash.codRemitted, settled.total);
+  // Revenue on the books, nothing in the bank. Reading order status alone would
+  // count both as paid, which is the number that is wrong.
+  assert.equal(cash.codAwaitingRemittance, awaiting.total);
+});
+
+apiTest("reports batches and the open exception queue", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const order = await deliveredCod();
+
+  await app.server.inject({
+    method: "POST",
+    url: "/admin/remittances",
+    headers: operator.headers,
+    payload: batch([
+      {
+        orderNumber: order.number,
+        collected: order.total - 4900,
+        deductions: 6500,
+        remitted: order.total - 4900 - 6500,
+      },
+    ]),
+  });
+
+  const report = json(
+    await app.server.inject({
+      method: "GET",
+      url: "/admin/remittances?batchId=BLUEDART-2026-07-28",
+      headers: operator.headers,
+    }),
+  );
+
+  assert.equal(report.batches.length, 1);
+  assert.equal(report.batches[0].courier, "Bluedart");
+  assert.equal(report.batches[0].shortfall, 4900);
+  assert.equal(report.exceptions.length, 1);
+  assert.equal(report.exceptions[0].outcome, "short");
+  // Named, not just counted. Raw SQL comes back in the database's snake_case,
+  // and an operator handed a queue of blank rows cannot work it.
+  assert.equal(report.exceptions[0].orderNumber, order.number);
+  assert.equal(report.exceptions[0].variance, -4900);
+  assert.equal(report.ledger.length, 1);
+});
+
+apiTest("refuses a batch with no rows rather than recording an empty one", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const response = await app.server.inject({
+    method: "POST",
+    url: "/admin/remittances",
+    headers: operator.headers,
+    payload: batch([]),
+  });
+  assert.equal(response.statusCode, 500);
+});
+
+apiTest("keeps the remittance desk away from a customer", async () => {
+  const shopper = await signIn("9812340002");
+  for (const url of ["/admin/remittances", "/admin/cash-position"]) {
+    const response = await app.server.inject({
+      method: "GET",
+      url,
+      headers: shopper.headers,
+    });
+    assert.equal(response.statusCode, 403, url);
+  }
+
+  const write = await app.server.inject({
+    method: "POST",
+    url: "/admin/remittances",
+    headers: shopper.headers,
+    payload: batch([
+      { orderNumber: "SIU-00001", collected: 1, deductions: 0, remitted: 1 },
+    ]),
+  });
+  assert.equal(write.statusCode, 403);
 });

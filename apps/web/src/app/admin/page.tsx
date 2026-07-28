@@ -17,7 +17,12 @@ import {
 import { formatPaise } from "@siumora/in-locale";
 import { CollectionTitle, Display, MicroLabel } from "@siumora/ui";
 
-import { getTrackingReport, listAllOrders } from "@/lib/order-store";
+import {
+  getRemittanceReport,
+  getTrackingReport,
+  listAllOrders,
+  type RemittanceReport,
+} from "@/lib/order-store";
 import { currentViewer } from "@/lib/session";
 
 export const metadata: Metadata = {
@@ -54,9 +59,10 @@ async function AdminPageContents() {
     );
   }
 
-  const [orders, tracking] = await Promise.all([
+  const [orders, tracking, remittances] = await Promise.all([
     listAllOrders(),
     getTrackingReport(),
+    getRemittanceReport(),
   ]);
 
   const revenue = summariseRevenue(orders);
@@ -139,6 +145,10 @@ async function AdminPageContents() {
           </span>
         </div>
         <HsnTable orders={orders} />
+      </Section>
+
+      <Section title="COD remittances">
+        <RemittancePanel report={remittances} />
       </Section>
 
       <Section title="Marketing health">
@@ -282,6 +292,130 @@ function RtoTable({
         ))}
       </tbody>
     </table>
+  );
+}
+
+/** Plain-language names for the outcomes; the raw enum is not for reading. */
+const OUTCOME_LABELS: Record<string, string> = {
+  short: "Short collection",
+  over: "Overcollected",
+  unknown_order: "No such order",
+  not_cod: "Prepaid order",
+  not_delivered: "Never delivered",
+  duplicate: "Already paid",
+};
+
+function RemittancePanel({ report }: { report?: RemittanceReport }) {
+  if (!report) return <Empty>Remittance figures are unavailable.</Empty>;
+
+  const { cash, batches, exceptions } = report;
+  const owed = batches.reduce((total, batch) => total + batch.shortfall, 0);
+
+  return (
+    <>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* The distinction the whole panel exists to draw: cash the shop has
+            against cash somebody else is holding. */}
+        <Stat
+          label="In the bank"
+          value={formatPaise(cash.prepaidSettled + cash.codRemitted)}
+          note="Prepaid and remitted"
+        />
+        <Stat
+          label="With the courier"
+          value={formatPaise(cash.codAwaitingRemittance)}
+          note="Delivered, not yet paid"
+          accent={cash.codAwaitingRemittance > 0}
+        />
+        <Stat
+          label="In transit"
+          value={formatPaise(cash.codInTransit)}
+          note="Nothing collected yet"
+        />
+        <Stat
+          label="Short"
+          value={formatPaise(owed)}
+          note={owed > 0 ? "Money to chase" : "Nothing outstanding"}
+          accent={owed > 0}
+        />
+      </div>
+
+      {batches.length === 0 ? (
+        <p className="mt-6 text-sm text-content-muted">
+          No remittance file has been reconciled yet.
+        </p>
+      ) : (
+        <table className="mt-6 w-full text-sm">
+          <thead className="text-content-muted">
+            <tr className="text-left">
+              <th className="pb-2 font-normal">Batch</th>
+              <th className="pb-2 text-right font-normal">Collected</th>
+              {/* Freight and the COD charge. Expected to be non-zero — it is
+                  only a problem when it outgrows the rate card. */}
+              <th className="pb-2 text-right font-normal">Kept</th>
+              <th className="pb-2 text-right font-normal">Remitted</th>
+              <th className="pb-2 text-right font-normal">Open</th>
+            </tr>
+          </thead>
+          <tbody>
+            {batches.map((batch) => (
+              <tr key={batch.batchId} className="border-t border-[var(--color-rule)]">
+                <td className="py-2">
+                  {batch.batchId}{" "}
+                  <span className="text-content-faint">
+                    {batch.courier} · {batch.rows} rows
+                  </span>
+                </td>
+                <td className="py-2 text-right tabular-nums">
+                  {formatPaise(batch.collected)}
+                </td>
+                <td className="py-2 text-right tabular-nums text-content-muted">
+                  {formatPaise(batch.deductions)}
+                </td>
+                <td className="py-2 text-right tabular-nums">
+                  {formatPaise(batch.remitted)}
+                </td>
+                <td
+                  className={`py-2 text-right tabular-nums ${batch.exceptions > 0 ? "text-accent-ink" : ""}`}
+                >
+                  {batch.exceptions}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {exceptions.length > 0 && (
+        <ul className="mt-6 divide-y divide-[var(--color-rule)] border-y border-[var(--color-rule)]">
+          {/* Worst first, as the API ordered them: money missing outranks a
+              keying error. */}
+          {exceptions.slice(0, 10).map((entry) => (
+            <li
+              key={entry.id}
+              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3"
+            >
+              <Link
+                href={`/orders/${entry.orderNumber}`}
+                className="hover:text-accent-ink"
+              >
+                <MicroLabel>{entry.orderNumber}</MicroLabel>
+              </Link>
+              <span className="text-sm text-content-muted">
+                {OUTCOME_LABELS[entry.outcome] ?? entry.outcome}
+                {entry.variance !== 0 && (
+                  <span className="text-accent-ink">
+                    {" "}
+                    {entry.variance < 0 ? "−" : "+"}
+                    {formatPaise(Math.abs(entry.variance))}
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
 
