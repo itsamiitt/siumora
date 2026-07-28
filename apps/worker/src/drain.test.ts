@@ -357,3 +357,206 @@ test("treats a network failure as retryable", async () => {
   // A dropped socket says nothing about the payload.
   assert.equal(outcome.kind, "retry");
 });
+
+// ── Notification outbox ───────────────────────────────────────
+
+import {
+  enqueueNotification,
+  notificationHealth,
+  setNotificationPreference,
+} from "@siumora/db";
+
+import { drainNotifications, unconfiguredTransport, type MessageTransport } from "./messages.ts";
+
+const SHIPPED = {
+  templateKey: "order_shipped",
+  recipient: "9876543210",
+  variables: {
+    name: "Asha",
+    orderNumber: "SIU-00001",
+    courier: "Bluedart",
+    trackingId: "BD123",
+  },
+};
+
+/** A transport that answers however the test says, and records what it saw. */
+function messenger(
+  channels: Channel[],
+  answer: (channel: Channel, n: number) => Awaited<ReturnType<MessageTransport["send"]>>,
+) {
+  const calls: Array<{ channel: string; recipient: string; body: string }> = [];
+  const transport: MessageTransport = {
+    channels,
+    async send(channel, recipient, body) {
+      calls.push({ channel, recipient, body });
+      return answer(channel, calls.length);
+    },
+  };
+  return { transport, calls };
+}
+
+type Channel = "whatsapp" | "sms" | "push" | "email";
+
+workerTest("sends a queued message and renders it in full", async () => {
+  await pool.query("DELETE FROM notifications; DELETE FROM notification_preferences");
+  await enqueueNotification(db, { eventKey: crypto.randomUUID(), ...SHIPPED });
+
+  const { transport, calls } = messenger(["whatsapp"], () => ({
+    kind: "sent",
+    providerMessageId: "wamid.1",
+  }));
+
+  const report = await drainNotifications(db, transport);
+
+  assert.equal(report.sent, 1);
+  assert.equal(calls[0]?.recipient, "9876543210");
+  assert.match(calls[0]?.body ?? "", /Asha/);
+  assert.match(calls[0]?.body ?? "", /Bluedart/);
+  // Nothing left unfilled — WhatsApp rejects an empty parameter.
+  assert.equal(/\{\{/.test(calls[0]?.body ?? ""), false);
+
+  const { rows } = await pool.query("SELECT * FROM notifications");
+  assert.equal(rows[0].status, "sent");
+  assert.equal(rows[0].channel, "whatsapp");
+  assert.equal(rows[0].provider_message_id, "wamid.1");
+});
+
+workerTest("falls through to the next channel when the first refuses", async () => {
+  // A template pending re-approval must not cost somebody their delivery
+  // notice — but the customer must not get the same message twice either.
+  await pool.query("DELETE FROM notifications; DELETE FROM notification_preferences");
+  await enqueueNotification(db, { eventKey: crypto.randomUUID(), ...SHIPPED });
+
+  const { transport, calls } = messenger(["whatsapp", "push", "email"], (channel) =>
+    channel === "whatsapp"
+      ? { kind: "permanent", error: "template not approved" }
+      : { kind: "sent" },
+  );
+
+  const report = await drainNotifications(db, transport);
+
+  assert.equal(report.sent, 1);
+  assert.deepEqual(calls.map((call) => call.channel), ["whatsapp", "push"]);
+});
+
+workerTest("skips a message no configured channel can carry", async () => {
+  // The honest state of this environment: the rows exist, they say what they
+  // wanted, and the gap between orders and messages stays visible.
+  await pool.query("DELETE FROM notifications; DELETE FROM notification_preferences");
+  await enqueueNotification(db, { eventKey: crypto.randomUUID(), ...SHIPPED });
+
+  const report = await drainNotifications(db, unconfiguredTransport());
+
+  assert.equal(report.skipped, 1);
+  assert.equal(report.sent, 0);
+  const { rows } = await pool.query("SELECT status, last_error FROM notifications");
+  assert.equal(rows[0].status, "skipped");
+  assert.match(rows[0].last_error, /no configured channel/);
+});
+
+workerTest("does not queue the same event twice", async () => {
+  // A replayed courier webhook is one dispatch, not two notices.
+  await pool.query("DELETE FROM notifications; DELETE FROM notification_preferences");
+  const eventKey = crypto.randomUUID();
+
+  const first = await enqueueNotification(db, { eventKey, ...SHIPPED });
+  const second = await enqueueNotification(db, { eventKey, ...SHIPPED });
+
+  assert.equal(first.queued, true);
+  assert.equal(second.queued, false);
+  assert.equal(second.reason, "duplicate");
+
+  const { rows } = await pool.query("SELECT count(*)::int AS n FROM notifications");
+  assert.equal(rows[0].n, 1);
+});
+
+workerTest("queues nothing for someone who asked to be left alone", async () => {
+  await pool.query("DELETE FROM notifications; DELETE FROM notification_preferences");
+  await setNotificationPreference(db, "9876543210", { optedOut: true });
+
+  const result = await enqueueNotification(db, {
+    eventKey: crypto.randomUUID(),
+    ...SHIPPED,
+  });
+
+  assert.equal(result.queued, false);
+  assert.equal(result.reason, "opted_out");
+  // No row at all: a queue full of messages nobody may send is a queue nobody
+  // reads.
+  const { rows } = await pool.query("SELECT count(*)::int AS n FROM notifications");
+  assert.equal(rows[0].n, 0);
+});
+
+workerTest("records an unrenderable message rather than dropping it", async () => {
+  await pool.query("DELETE FROM notifications; DELETE FROM notification_preferences");
+
+  const result = await enqueueNotification(db, {
+    eventKey: crypto.randomUUID(),
+    templateKey: "order_shipped",
+    recipient: "9876543210",
+    variables: { name: "Asha", orderNumber: "SIU-00001" },
+  });
+
+  assert.equal(result.queued, false);
+  assert.equal(result.reason, "unrenderable");
+  // A bug upstream, and it should be visible rather than silently gone.
+  const { rows } = await pool.query("SELECT status, last_error FROM notifications");
+  assert.equal(rows[0].status, "failed");
+  assert.match(rows[0].last_error, /courier/);
+});
+
+workerTest("holds a marketing message until the morning", async () => {
+  await pool.query("DELETE FROM notifications; DELETE FROM notification_preferences");
+  await setNotificationPreference(db, "9876543210", { marketingConsent: true });
+
+  const night = new Date("2026-07-15T18:00:00Z"); // 23:30 IST
+  const result = await enqueueNotification(db, {
+    eventKey: crypto.randomUUID(),
+    templateKey: "back_in_stock",
+    recipient: "9876543210",
+    variables: { name: "Asha", product: "Petal Studs" },
+    now: night,
+  });
+
+  assert.equal(result.queued, true);
+  const { rows } = await pool.query("SELECT next_attempt_at FROM notifications");
+  // Held, not dropped: still owed, just not at half past eleven at night.
+  assert.ok(rows[0].next_attempt_at > night);
+
+  const nothingYet = await drainNotifications(db, unconfiguredTransport(), { now: night });
+  assert.equal(nothingYet.claimed, 0);
+});
+
+workerTest("does not hand the same message to two workers", async () => {
+  await pool.query("DELETE FROM notifications; DELETE FROM notification_preferences");
+  for (let n = 0; n < 2; n += 1) {
+    await enqueueNotification(db, { eventKey: crypto.randomUUID(), ...SHIPPED });
+  }
+
+  const a = messenger(["whatsapp"], () => ({ kind: "sent" }));
+  const b = messenger(["whatsapp"], () => ({ kind: "sent" }));
+
+  const [first, second] = await Promise.all([
+    drainNotifications(db, a.transport),
+    drainNotifications(db, b.transport),
+  ]);
+
+  assert.equal(first.claimed + second.claimed, 2);
+  // Two messages, two sends. A duplicate here is a customer told twice.
+  assert.equal(a.calls.length + b.calls.length, 2);
+});
+
+workerTest("reports what is queued, sent and stuck", async () => {
+  await pool.query("DELETE FROM notifications; DELETE FROM notification_preferences");
+  await enqueueNotification(db, { eventKey: crypto.randomUUID(), ...SHIPPED });
+
+  const before = await notificationHealth(db);
+  assert.equal(before.pending, 1);
+  assert.equal(before.sent, 0);
+
+  await drainNotifications(db, messenger(["whatsapp"], () => ({ kind: "sent" })).transport);
+
+  const after = await notificationHealth(db);
+  assert.equal(after.sent, 1);
+  assert.equal(after.pending, 0);
+});

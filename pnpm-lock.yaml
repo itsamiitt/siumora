@@ -103,6 +103,9 @@ importers:
       '@siumora/analytics':
         specifier: workspace:*
         version: link:../../packages/analytics
+      '@siumora/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@siumora/db':
         specifier: workspace:*
         version: link:../../packages/db

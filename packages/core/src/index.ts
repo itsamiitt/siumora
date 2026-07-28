@@ -217,6 +217,29 @@ export {
 export { renderInvoicePdf } from "./invoice-pdf.ts";
 
 export {
+  QUIET_FROM_HOUR,
+  QUIET_UNTIL_HOUR,
+  TEMPLATES,
+  evaluateSend,
+  inQuietHours,
+  istHour,
+  nextSendableAt,
+  renderTemplate,
+  sendableOn,
+  templateFor,
+  templateForStatus,
+  templateHygiene,
+  type Channel,
+  type HygieneProblem,
+  type RenderResult,
+  type SendContext,
+  type SendDecision,
+  type SendRefusal,
+  type Template,
+  type TemplateCategory,
+} from "./notifications.ts";
+
+export {
   ACTION_PERMISSION,
   AUDIT_ACTIONS,
   ROLES,

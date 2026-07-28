@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@siumora/analytics": "workspace:*",
+    "@siumora/core": "workspace:*",
     "@siumora/db": "workspace:*"
   },
   "devDependencies": {

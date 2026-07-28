@@ -1,5 +1,6 @@
 import { connectionStringFromEnv, createDb, createPool } from "@siumora/db";
 
+import { unconfiguredTransport } from "./messages.ts";
 import { configuredDestinations, httpTransport } from "./transport.ts";
 import { runWorker } from "./worker.ts";
 
@@ -48,12 +49,23 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   });
 }
 
+// No WhatsApp or SMS provider is wired up yet — plan/06 needs a BSP account and
+// a DLT registration, neither of which exists. The queue still drains: every
+// message is marked skipped with the channel it wanted, so the gap between
+// orders and messages stays visible rather than looking like nothing happened.
+const messages = unconfiguredTransport();
+
 await runWorker(createDb(pool), httpTransport(transportConfig), {
   intervalMs: Number(process.env.WORKER_INTERVAL_MS ?? 15_000),
   signal: controller.signal,
+  messages,
   log: (report) =>
     console.log(
-      `[worker] claimed=${report.claimed} sent=${report.sent} retrying=${report.retrying} failed=${report.failed} reclaimed=${report.reclaimed}`,
+      `[worker] conversions claimed=${report.claimed} sent=${report.sent} retrying=${report.retrying} failed=${report.failed} reclaimed=${report.reclaimed}`,
+    ),
+  logMessages: (report) =>
+    console.log(
+      `[worker] messages claimed=${report.claimed} sent=${report.sent} skipped=${report.skipped} retrying=${report.retrying} failed=${report.failed}`,
     ),
 });
 

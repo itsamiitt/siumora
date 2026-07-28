@@ -130,8 +130,20 @@ export async function claimPendingTrackingEvents(
         SET status = 'sending'
         FROM due
         WHERE t.id = due.id
-        RETURNING t.*`,
+        RETURNING t.id,
+                  t.event_id   AS "eventId",
+                  t.event_name AS "eventName",
+                  t.order_id   AS "orderId",
+                  t.destination,
+                  t.status,
+                  t.attempts,
+                  t.payload,
+                  t.next_attempt_at AS "nextAttemptAt",
+                  t.created_at      AS "createdAt"`,
   );
+  // Aliased rather than `t.*`. The columns this drain happens to read are all
+  // single words, so `*` worked by luck; a caller reaching for `eventName`
+  // would have got undefined and no error.
   return claimed.rows as TrackingRow[];
 }
 

@@ -553,6 +553,70 @@ CREATE RULE audit_log_no_update AS ON UPDATE TO audit_log DO INSTEAD NOTHING;
 CREATE RULE audit_log_no_delete AS ON DELETE TO audit_log DO INSTEAD NOTHING;
 `,
   },
+  {
+    id: "0011_notifications",
+    sql: `
+-- The notification outbox (plan/06). Enqueued by whatever moved the order and
+-- drained by the worker, so a checkout never waits on WhatsApp — and a message
+-- that fails to send is a row somebody can find rather than a log line nobody
+-- read.
+CREATE TABLE notifications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- What caused this, and the reason a retried webhook cannot double-send: one
+  -- row per event per template, enforced below.
+  event_key text NOT NULL,
+  template_key text NOT NULL,
+  category text NOT NULL,
+  -- Ten digits, or an email address. Kept denormalised because a message is
+  -- addressed to where it was sent, not to wherever the customer row points now.
+  recipient text NOT NULL,
+  order_id uuid REFERENCES orders(id) ON DELETE SET NULL,
+  customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
+  -- The template variables. Stored so a retry renders the same message rather
+  -- than re-deriving it from an order that has since moved on.
+  variables jsonb NOT NULL DEFAULT '{}'::jsonb,
+  channel text,
+  status text NOT NULL DEFAULT 'pending',
+  attempts integer NOT NULL DEFAULT 0,
+  -- Quiet hours push this forward; so does a backoff after a refusal.
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  -- The provider's id, which is what a delivery receipt arrives against.
+  provider_message_id text,
+  last_error text,
+  sent_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT notification_category_known CHECK (category IN ('utility', 'marketing')),
+  CONSTRAINT notification_status_known CHECK (
+    status IN ('pending', 'sending', 'sent', 'failed', 'skipped')
+  ),
+  CONSTRAINT notification_attempts_nonneg CHECK (attempts >= 0)
+);
+
+-- A retried webhook, a double-clicked status change, a replayed courier
+-- callback: all of them must produce one message.
+CREATE UNIQUE INDEX notification_event_template_key
+  ON notifications(event_key, template_key);
+
+CREATE INDEX notification_due_idx
+  ON notifications(next_attempt_at)
+  WHERE status IN ('pending', 'sending');
+
+CREATE INDEX notification_recipient_idx ON notifications(recipient, created_at DESC);
+
+-- Who has asked not to be messaged, and what they still agreed to. Keyed on the
+-- number rather than the customer: a guest who never signed in can still opt
+-- out, and their wish has to outlive the order.
+CREATE TABLE notification_preferences (
+  recipient text PRIMARY KEY,
+  -- Marketing is opt-in. Utility rides on having placed an order.
+  marketing_consent boolean NOT NULL DEFAULT false,
+  -- Stops everything, including utility. It is a person asking to be left alone.
+  opted_out boolean NOT NULL DEFAULT false,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+`,
+  },
 ];
 
 /**

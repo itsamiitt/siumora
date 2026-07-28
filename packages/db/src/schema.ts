@@ -434,6 +434,64 @@ export const auditLog = pgTable(
 );
 
 /**
+ * The notification outbox.
+ *
+ * Enqueued by whatever moved the order and drained by the worker, so a checkout
+ * never waits on WhatsApp — and a message that failed is a row somebody can
+ * find rather than a log line nobody read.
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** What caused this. One row per event per template, enforced below. */
+    eventKey: text("event_key").notNull(),
+    templateKey: text("template_key").notNull(),
+    category: text("category").notNull(),
+    /** Where it was sent — not wherever the customer row points now. */
+    recipient: text("recipient").notNull(),
+    orderId: uuid("order_id").references(() => orders.id, { onDelete: "set null" }),
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
+    /** Stored so a retry renders the same message, not a re-derived one. */
+    variables: jsonb("variables").notNull().default({}),
+    channel: text("channel"),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** What a delivery receipt will arrive against. */
+    providerMessageId: text("provider_message_id"),
+    lastError: text("last_error"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("notification_event_template_key").on(
+      table.eventKey,
+      table.templateKey,
+    ),
+    index("notification_recipient_idx").on(table.recipient, table.createdAt),
+  ],
+);
+
+/**
+ * Who has asked not to be messaged.
+ *
+ * Keyed on the number rather than the customer: a guest who never signed in can
+ * still opt out, and their wish has to outlive the order.
+ */
+export const notificationPreferences = pgTable("notification_preferences", {
+  recipient: text("recipient").primaryKey(),
+  marketingConsent: boolean("marketing_consent").notNull().default(false),
+  /** Stops everything, including utility. It is a person asking. */
+  optedOut: boolean("opted_out").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * COD remittance ledger.
  *
  * One row per line of a courier's remittance file, kept after reconciliation
