@@ -18,6 +18,7 @@ import {
   ordersMissingConversion,
   readAudit,
   schema,
+  totpState,
   trackingHealth,
 } from "@siumora/db";
 
@@ -132,6 +133,9 @@ export async function registerAdminRoutes(server: FastifyInstance) {
       // 403s on click is worse than one that is not there.
       role: viewer.role,
       permissions: viewer.role ? permissionsFor(viewer.role) : [],
+      // Rendered on the dashboard so an operator without one can see that, and
+      // an owner can see who on the team still needs to set it up.
+      twoFactor: await totpState(server.db, viewer.customer.id),
       revenue: summariseRevenue(orders),
       byPincode: rtoBreakdown(orders, (order) => order.address.pincode),
       byPayment: rtoBreakdown(orders, (order) => order.paymentMethod),

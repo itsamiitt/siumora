@@ -24,6 +24,9 @@ const { server, pool } = await buildApp({
   ga4Configured: process.env.GA4_API_SECRET !== undefined,
   metaConfigured: process.env.META_CAPI_TOKEN !== undefined,
   hsts: process.env.NODE_ENV === "production",
+  ...(process.env.TOTP_ENCRYPTION_KEY
+    ? { totpEncryptionKey: process.env.TOTP_ENCRYPTION_KEY }
+    : {}),
   seller: {
     ...(process.env.SELLER_NAME ? { name: process.env.SELLER_NAME } : {}),
     ...(process.env.SELLER_ADDRESS ? { address: process.env.SELLER_ADDRESS } : {}),

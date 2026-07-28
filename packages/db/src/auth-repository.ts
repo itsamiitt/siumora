@@ -261,6 +261,8 @@ export interface ResolvedSession {
   readonly sessionId: string;
   readonly customer: CustomerRow;
   readonly expiresAt: Date;
+  /** When this session last passed the second factor, if ever. */
+  readonly twoFactorAt: Date | null;
 }
 
 /**
@@ -291,6 +293,7 @@ export async function findSession(
     sessionId: row.session.id,
     customer: row.customer,
     expiresAt: row.session.expiresAt,
+    twoFactorAt: row.session.twoFactorAt,
   };
 }
 

@@ -217,6 +217,34 @@ export {
 export { renderInvoicePdf } from "./invoice-pdf.ts";
 
 export {
+  RECOVERY_CODE_COUNT,
+  STEP_UP_TTL_SECONDS,
+  TOTP_DIGITS,
+  TOTP_DRIFT_STEPS,
+  TOTP_STEP_SECONDS,
+  base32Decode,
+  base32Encode,
+  generateRecoveryCodes,
+  generateTotpSecret,
+  normaliseRecoveryCode,
+  otpauthUri,
+  stepFor,
+  stepUpValid,
+  totpCode,
+  totpCodeAtStep,
+  verifyTotp,
+  type TotpFailure,
+  type TotpResult,
+} from "./totp.ts";
+
+export {
+  deriveKey,
+  hashRecoveryCode,
+  open,
+  seal,
+} from "./secret-box.ts";
+
+export {
   QUIET_FROM_HOUR,
   QUIET_UNTIL_HOUR,
   TEMPLATES,

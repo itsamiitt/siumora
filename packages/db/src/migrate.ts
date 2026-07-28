@@ -617,6 +617,39 @@ CREATE TABLE notification_preferences (
 );
 `,
   },
+  {
+    id: "0012_admin_2fa",
+    sql: `
+-- A second factor for operators (plan/11 §4). Not SMS: the first factor here is
+-- already a code sent to a phone number, and a SIM swap that takes the number
+-- would otherwise take both.
+CREATE TABLE admin_totp (
+  customer_id uuid PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,
+  -- Encrypted with a key from the environment, not from this database. A dump
+  -- that leaks this table also carries the hashed session tokens, so a
+  -- plaintext secret would fall at the same moment as the thing it protects.
+  secret_sealed text NOT NULL,
+  -- Null until a code has been typed back. An enrolment that was started and
+  -- abandoned must not lock anybody out.
+  confirmed_at timestamptz,
+  -- The counter of the last code accepted. This is what makes a TOTP one-time
+  -- rather than thirty-seconds-long: without it, a code read over a shoulder
+  -- works twice.
+  last_used_step bigint,
+  -- SHA-256 of each single-use recovery code. Fifty bits of machine entropy, so
+  -- there is no dictionary to run and a slow hash would only punish the
+  -- operator typing them.
+  recovery_hashes jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- When this session last passed the second factor. On the session rather than
+-- the account, so signing in somewhere new asks again — and it expires long
+-- before the thirty-day session does, which is the entire reason it cannot
+-- simply ride along with it.
+ALTER TABLE sessions ADD COLUMN two_factor_at timestamptz;
+`,
+  },
 ];
 
 /**

@@ -6,6 +6,8 @@ import { createTestDatabase, type TestDatabase } from "@siumora/db";
 import { seed } from "../../../packages/db/src/seed.ts";
 
 import { buildApp, type App } from "./app.ts";
+import { stepFor, totpCode, totpCodeAtStep } from "@siumora/core";
+
 import { createRateLimiter } from "./lib/rate-limit.ts";
 import { sign } from "./lib/webhooks.ts";
 
@@ -50,7 +52,7 @@ before(async () => {
 beforeEach(async () => {
   if (!url) return;
   await app.pool.query(
-    "TRUNCATE audit_log; DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM cod_remittances; DELETE FROM privacy_requests; DELETE FROM tracking_events; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
+    "TRUNCATE audit_log; DELETE FROM admin_totp; DELETE FROM notifications; DELETE FROM notification_preferences; DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM cod_remittances; DELETE FROM privacy_requests; DELETE FROM tracking_events; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
   );
   await seed(testDb!.url);
 });
@@ -2622,4 +2624,289 @@ apiTest("keeps an invoice away from someone holding only the order number", asyn
     url: `/orders/${placed.orderNumber}/invoice.pdf`,
   });
   assert.equal(response.statusCode, 404);
+});
+
+// ── Admin second factor ───────────────────────────────────────
+
+/** An app that can actually seal a TOTP secret. */
+async function twoFactorApp() {
+  return buildApp({
+    connectionString: testDb!.url,
+    adminPhones: OPERATOR_PHONE,
+    otpEcho: true,
+    courierSimulation: true,
+    rateLimiter: createRateLimiter([]),
+    totpEncryptionKey: "a-development-key-long-enough",
+  });
+}
+
+async function signInTo(app2: Awaited<ReturnType<typeof buildApp>>, phone: string) {
+  // These tests sign the same operator in several times to get distinct
+  // sessions, and the resend cooldown is per phone. Clearing the challenges is
+  // the test getting out of its own way, not a hole in the throttle.
+  await app2.pool.query("DELETE FROM otp_challenges WHERE phone = $1", [phone]);
+  const issued = json(
+    await app2.server.inject({ method: "POST", url: "/auth/otp", payload: { phone } }),
+  );
+  const verified = json(
+    await app2.server.inject({
+      method: "POST",
+      url: "/auth/verify",
+      payload: { phone, code: issued.code },
+    }),
+  );
+  return { authorization: `Bearer ${verified.token}` };
+}
+
+apiTest("enrols a second factor and enforces it thereafter", async () => {
+  const app2 = await twoFactorApp();
+  try {
+    await app2.pool.query("DELETE FROM admin_totp");
+    const headers = await signInTo(app2, OPERATOR_PHONE);
+
+    // Before enrolment nothing is enforced — a control that locks out every
+    // operator the day it ships is one somebody turns off.
+    assert.equal(
+      (await app2.server.inject({ method: "GET", url: "/admin/metrics", headers })).statusCode,
+      200,
+    );
+
+    const started = json(
+      await app2.server.inject({ method: "POST", url: "/admin/2fa/enrol", headers }),
+    );
+    assert.match(started.uri, /^otpauth:\/\/totp\//);
+    assert.equal(started.recoveryCodes.length, 8);
+
+    // Still not enforced: the enrolment is unconfirmed, so an operator who
+    // scanned a code that does not work is not locked out by their own attempt.
+    assert.equal(
+      (await app2.server.inject({ method: "GET", url: "/admin/metrics", headers })).statusCode,
+      200,
+    );
+
+    const confirmed = await app2.server.inject({
+      method: "POST",
+      url: "/admin/2fa/confirm",
+      headers,
+      payload: { code: totpCode(started.secret) },
+    });
+    assert.equal(confirmed.statusCode, 200);
+
+    // Confirming stepped this session up, so it keeps working.
+    assert.equal(
+      (await app2.server.inject({ method: "GET", url: "/admin/metrics", headers })).statusCode,
+      200,
+    );
+
+    // A different session has not passed the factor.
+    const fresh = await signInTo(app2, OPERATOR_PHONE);
+    const refused = await app2.server.inject({
+      method: "GET",
+      url: "/admin/metrics",
+      headers: fresh,
+    });
+    assert.equal(refused.statusCode, 403);
+    assert.equal(json(refused).error, "two_factor_required");
+
+    const stepped = await app2.server.inject({
+      method: "POST",
+      url: "/admin/2fa/verify",
+      headers: fresh,
+      // The next step's code, not this one's: confirming already spent the
+      // current counter, and the replay guard is right to refuse it.
+      payload: { code: totpCodeAtStep(started.secret, stepFor(new Date()) + 1) },
+    });
+    assert.equal(stepped.statusCode, 200);
+    assert.equal(
+      (await app2.server.inject({ method: "GET", url: "/admin/metrics", headers: fresh })).statusCode,
+      200,
+    );
+  } finally {
+    await app2.pool.query("DELETE FROM admin_totp");
+    await app2.server.close();
+    await app2.pool.end();
+  }
+});
+
+apiTest("will not accept the same code twice", async () => {
+  // A TOTP is valid for thirty seconds and would otherwise work twice inside
+  // that window — which is exactly long enough for somebody reading it over a
+  // shoulder, or replaying a captured request.
+  const app2 = await twoFactorApp();
+  try {
+    await app2.pool.query("DELETE FROM admin_totp");
+    const headers = await signInTo(app2, OPERATOR_PHONE);
+    const started = json(
+      await app2.server.inject({ method: "POST", url: "/admin/2fa/enrol", headers }),
+    );
+    const code = totpCode(started.secret);
+
+    await app2.server.inject({
+      method: "POST",
+      url: "/admin/2fa/confirm",
+      headers,
+      payload: { code },
+    });
+
+    const fresh = await signInTo(app2, OPERATOR_PHONE);
+    const replayed = await app2.server.inject({
+      method: "POST",
+      url: "/admin/2fa/verify",
+      headers: fresh,
+      payload: { code },
+    });
+
+    assert.equal(replayed.statusCode, 400);
+    assert.equal(json(replayed).reason, "replayed");
+  } finally {
+    await app2.pool.query("DELETE FROM admin_totp");
+    await app2.server.close();
+    await app2.pool.end();
+  }
+});
+
+apiTest("lets a recovery code in exactly once", async () => {
+  const app2 = await twoFactorApp();
+  try {
+    await app2.pool.query("DELETE FROM admin_totp");
+    const headers = await signInTo(app2, OPERATOR_PHONE);
+    const started = json(
+      await app2.server.inject({ method: "POST", url: "/admin/2fa/enrol", headers }),
+    );
+    await app2.server.inject({
+      method: "POST",
+      url: "/admin/2fa/confirm",
+      headers,
+      payload: { code: totpCode(started.secret) },
+    });
+
+    const recovery = started.recoveryCodes[0];
+    const fresh = await signInTo(app2, OPERATOR_PHONE);
+    const used = await app2.server.inject({
+      method: "POST",
+      url: "/admin/2fa/verify",
+      headers: fresh,
+      payload: { code: recovery },
+    });
+    assert.equal(used.statusCode, 200);
+    assert.equal(json(used).usedRecoveryCode, true);
+
+    // Single-use, so one read off a screenshot works once.
+    const another = await signInTo(app2, OPERATOR_PHONE);
+    const again = await app2.server.inject({
+      method: "POST",
+      url: "/admin/2fa/verify",
+      headers: another,
+      payload: { code: recovery },
+    });
+    assert.equal(again.statusCode, 400);
+
+    const state = json(
+      await app2.server.inject({ method: "GET", url: "/admin/2fa", headers }),
+    );
+    assert.equal(state.recoveryCodesLeft, 7);
+  } finally {
+    await app2.pool.query("DELETE FROM admin_totp");
+    await app2.server.close();
+    await app2.pool.end();
+  }
+});
+
+apiTest("will not swap a confirmed factor for a new one", async () => {
+  // Otherwise anyone with a live session quietly replaces the second factor
+  // with their own, and the control protects nothing.
+  const app2 = await twoFactorApp();
+  try {
+    await app2.pool.query("DELETE FROM admin_totp");
+    const headers = await signInTo(app2, OPERATOR_PHONE);
+    const started = json(
+      await app2.server.inject({ method: "POST", url: "/admin/2fa/enrol", headers }),
+    );
+    await app2.server.inject({
+      method: "POST",
+      url: "/admin/2fa/confirm",
+      headers,
+      payload: { code: totpCode(started.secret) },
+    });
+
+    const again = await app2.server.inject({
+      method: "POST",
+      url: "/admin/2fa/enrol",
+      headers,
+    });
+    assert.equal(again.statusCode, 409);
+  } finally {
+    await app2.pool.query("DELETE FROM admin_totp");
+    await app2.server.close();
+    await app2.pool.end();
+  }
+});
+
+apiTest("requires a live code to remove the factor", async () => {
+  // A stolen session that could remove the factor completes the theft, which
+  // is precisely what the factor was there to prevent.
+  const app2 = await twoFactorApp();
+  try {
+    await app2.pool.query("DELETE FROM admin_totp");
+    const headers = await signInTo(app2, OPERATOR_PHONE);
+    const started = json(
+      await app2.server.inject({ method: "POST", url: "/admin/2fa/enrol", headers }),
+    );
+    await app2.server.inject({
+      method: "POST",
+      url: "/admin/2fa/confirm",
+      headers,
+      payload: { code: totpCode(started.secret) },
+    });
+
+    const withoutCode = await app2.server.inject({
+      method: "DELETE",
+      url: "/admin/2fa",
+      headers,
+      payload: { code: "000000" },
+    });
+    assert.equal(withoutCode.statusCode, 400);
+
+    const { rows } = await app2.pool.query("SELECT count(*)::int AS n FROM admin_totp");
+    assert.equal(rows[0].n, 1, "still enrolled");
+  } finally {
+    await app2.pool.query("DELETE FROM admin_totp");
+    await app2.server.close();
+    await app2.pool.end();
+  }
+});
+
+apiTest("refuses to store a second factor it cannot seal", async () => {
+  // A plaintext shared secret is worse than no second factor, because it looks
+  // like one.
+  const operator = await signIn(OPERATOR_PHONE);
+  const response = await app.server.inject({
+    method: "POST",
+    url: "/admin/2fa/enrol",
+    headers: operator.headers,
+  });
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(json(response).error, "not_configured");
+});
+
+apiTest("never stores the TOTP secret in the clear", async () => {
+  const app2 = await twoFactorApp();
+  try {
+    await app2.pool.query("DELETE FROM admin_totp");
+    const headers = await signInTo(app2, OPERATOR_PHONE);
+    const started = json(
+      await app2.server.inject({ method: "POST", url: "/admin/2fa/enrol", headers }),
+    );
+
+    const { rows } = await app2.pool.query("SELECT secret_sealed FROM admin_totp");
+    // The dump that leaks this table also carries the hashed session tokens, so
+    // a plaintext secret would fall at the same moment as what it protects.
+    assert.equal(rows[0].secret_sealed.includes(started.secret), false);
+    assert.match(rows[0].secret_sealed, /^v1\./);
+  } finally {
+    await app2.pool.query("DELETE FROM admin_totp");
+    await app2.server.close();
+    await app2.pool.end();
+  }
 });

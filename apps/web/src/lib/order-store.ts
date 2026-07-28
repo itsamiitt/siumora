@@ -256,6 +256,7 @@ export async function getTrackingReport(): Promise<TrackingReport | undefined> {
 export interface OperatorAccess {
   readonly role: "viewer" | "operator" | "owner";
   readonly permissions: string[];
+  readonly twoFactor?: { enrolled: boolean; recoveryCodesLeft: number };
 }
 
 /**
@@ -268,7 +269,11 @@ export async function getOperatorAccess(): Promise<OperatorAccess | undefined> {
   try {
     const metrics = (await (await apiAs()).getMetrics()) as Partial<OperatorAccess>;
     if (!metrics.role) return undefined;
-    return { role: metrics.role, permissions: metrics.permissions ?? [] };
+    return {
+      role: metrics.role,
+      permissions: metrics.permissions ?? [],
+      ...(metrics.twoFactor ? { twoFactor: metrics.twoFactor } : {}),
+    };
   } catch {
     return undefined;
   }

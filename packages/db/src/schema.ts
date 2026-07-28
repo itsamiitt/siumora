@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -212,6 +213,13 @@ export const sessions = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     userAgent: text("user_agent").notNull().default(""),
+    /**
+     * When this session last passed the second factor.
+     *
+     * On the session, not the account: signing in somewhere new asks again, and
+     * it expires long before the thirty-day session does.
+     */
+    twoFactorAt: timestamp("two_factor_at", { withTimezone: true }),
   },
   (table) => [
     uniqueIndex("sessions_token_hash_key").on(table.tokenHash),
@@ -483,6 +491,26 @@ export const notifications = pgTable(
  * Keyed on the number rather than the customer: a guest who never signed in can
  * still opt out, and their wish has to outlive the order.
  */
+/**
+ * An operator's second factor.
+ *
+ * The shared secret is sealed with a key from the environment: a database dump
+ * that leaks this table also carries the hashed session tokens, so a plaintext
+ * secret would fall at the same moment as the thing it protects.
+ */
+export const adminTotp = pgTable("admin_totp", {
+  customerId: uuid("customer_id")
+    .primaryKey()
+    .references(() => customers.id, { onDelete: "cascade" }),
+  secretSealed: text("secret_sealed").notNull(),
+  /** Null until a code has been typed back. An abandoned enrolment locks nobody out. */
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  /** The last counter accepted — what makes a TOTP one-time. */
+  lastUsedStep: bigint("last_used_step", { mode: "number" }),
+  recoveryHashes: jsonb("recovery_hashes").notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const notificationPreferences = pgTable("notification_preferences", {
   recipient: text("recipient").primaryKey(),
   marketingConsent: boolean("marketing_consent").notNull().default(false),

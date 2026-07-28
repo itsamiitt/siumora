@@ -2,6 +2,7 @@ import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 
 import {
   PLACEHOLDER_SELLER,
+  deriveKey,
   parseAdminPhones,
   parseAdminRoles,
   type Role,
@@ -19,6 +20,7 @@ import { registerAdminRoutes } from "./routes/admin.ts";
 import { registerGstRoutes } from "./routes/gst.ts";
 import { registerRemittanceRoutes } from "./routes/remittance.ts";
 import { registerPrivacyRoutes } from "./routes/privacy.ts";
+import { registerTwoFactorRoutes } from "./routes/two-factor.ts";
 import { registerWishlistRoutes } from "./routes/wishlist.ts";
 import { createRateLimiter, type RateLimiter } from "./lib/rate-limit.ts";
 
@@ -67,6 +69,14 @@ export interface AppConfig {
    */
   seller?: Partial<Seller>;
   /**
+   * Passphrase for sealing TOTP secrets at rest.
+   *
+   * Unset, enrolment is refused rather than storing the shared secret in
+   * plaintext — a column that looks like a second factor and is not one is
+   * worse than no second factor at all.
+   */
+  totpEncryptionKey?: string;
+  /**
    * Send HSTS. Off by default because it is a promise a browser remembers for a
    * year, and making it on a plain-HTTP development origin pins that browser to
    * an https://localhost that does not exist.
@@ -102,6 +112,8 @@ declare module "fastify" {
     /** Phone to role. Read on every request; a demotion takes effect at once. */
     adminRoles: Map<string, Role>;
     seller: Seller;
+    /** Derived once at boot. Undefined when no passphrase is configured. */
+    totpKey: Buffer | undefined;
     rateLimiter: RateLimiter;
   }
 }
@@ -135,6 +147,12 @@ export async function buildApp(config: AppConfig): Promise<App> {
   server.decorate("adminPhones", parseAdminPhones(config.adminPhones));
   server.decorate("adminRoles", parseAdminRoles(config.adminPhones));
   server.decorate("seller", { ...PLACEHOLDER_SELLER, ...config.seller });
+  server.decorate(
+    "totpKey",
+    // Derived at boot: scrypt is deliberately slow, and doing it per request
+    // would put that cost on every enrolment check.
+    config.totpEncryptionKey ? deriveKey(config.totpEncryptionKey) : undefined,
+  );
 
   server.addContentTypeParser(
     "application/json",
@@ -245,6 +263,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
   await registerGstRoutes(server);
   await registerRemittanceRoutes(server);
   await registerPrivacyRoutes(server);
+  await registerTwoFactorRoutes(server);
 
   return { server, db, pool };
 }

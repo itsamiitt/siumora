@@ -3,11 +3,12 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import {
   can,
   roleFor,
+  stepUpValid,
   type AuditAction,
   type Permission,
   type Role,
 } from "@siumora/core";
-import { findSession, recordAudit, type CustomerRow } from "@siumora/db";
+import { findSession, recordAudit, totpState, type CustomerRow } from "@siumora/db";
 
 /**
  * Who is making this request?
@@ -28,6 +29,8 @@ export interface Viewer {
   readonly isAdmin: boolean;
   /** Undefined for a shopper. Demoting somebody takes effect on the next call. */
   readonly role?: Role;
+  /** When this session last passed the second factor, if ever. */
+  readonly twoFactorAt?: Date | null;
 }
 
 const SESSION_COOKIE = "siumora_session";
@@ -69,6 +72,7 @@ export async function resolveViewer(
     sessionId: session.sessionId,
     isAdmin: role !== undefined,
     ...(role ? { role } : {}),
+    twoFactorAt: session.twoFactorAt ?? null,
   };
 }
 
@@ -123,6 +127,37 @@ export async function requireAdmin(
 }
 
 /**
+ * Require an operator who has passed their second factor.
+ *
+ * Only for accounts that enrolled one. Making it unconditional would lock out
+ * every operator the moment this shipped, and a security control that has to be
+ * turned off to get work done is not one.
+ *
+ * The 2FA routes themselves use `requireAdmin`, not this — otherwise the only
+ * way to step up would be to already be stepped up.
+ */
+export async function requireSteppedUpAdmin(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<Viewer | undefined> {
+  const viewer = await requireAdmin(request, reply);
+  if (!viewer) return undefined;
+
+  const state = await totpState(request.server.db, viewer.customer.id);
+  if (!state.enrolled) return viewer;
+
+  if (!stepUpValid(viewer.twoFactorAt)) {
+    await reply.code(403).send({
+      error: "two_factor_required",
+      message: "Enter the code from your authenticator app to continue.",
+    });
+    return undefined;
+  }
+
+  return viewer;
+}
+
+/**
  * Require a specific permission.
  *
  * The refusal names the permission rather than saying "no". An operator told
@@ -138,7 +173,9 @@ export async function requirePermission(
   reply: FastifyReply,
   permission: Permission,
 ): Promise<Viewer | undefined> {
-  const viewer = await requireAdmin(request, reply);
+  // Every permission-gated route is behind the second factor, for operators who
+  // have one. These are the routes that move money and erase people.
+  const viewer = await requireSteppedUpAdmin(request, reply);
   if (!viewer) return undefined;
 
   if (!can(viewer.role, permission)) {

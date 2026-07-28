@@ -87,13 +87,16 @@ async function AdminPageContents() {
         Ops
       </Display>
 
-      {/* 2FA beyond the sign-in code is still outstanding, and this page is
-          worth being straight about rather than implying it is fully hardened. */}
+      {/* Says plainly whether this account has a second factor. A dashboard
+          that implies it is hardened when it is not is worse than one that
+          says so. */}
       <p className="mt-3 text-sm text-content-faint">
         Signed in as {viewer.customer.maskedPhone}
         {access ? ` · ${access.role}` : ""}. Roles come from the{" "}
-        <code>ADMIN_PHONES</code> allow-list; a second factor beyond the sign-in
-        code is not built yet.
+        <code>ADMIN_PHONES</code> allow-list.{" "}
+        {access?.twoFactor?.enrolled
+          ? "A second factor is enrolled on this account."
+          : "No second factor is enrolled on this account yet."}
       </p>
 
       <section className="mt-10">
