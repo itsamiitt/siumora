@@ -90,6 +90,31 @@ export class SiumoraClient {
     });
   }
 
+  /**
+   * The tax invoice, as raw bytes.
+   *
+   * Its own method rather than going through `request`, which parses JSON — a
+   * PDF put through `response.json()` is a syntax error where a document should
+   * be. Authorisation is the same: the bearer, or the access key for a guest.
+   */
+  async invoicePdf(
+    orderNumber: string,
+    accessKey?: string,
+  ): Promise<{ ok: boolean; status: number; body?: ArrayBuffer }> {
+    const query = accessKey ? `?key=${encodeURIComponent(accessKey)}` : "";
+    const response = await this.doFetch(
+      `${this.baseUrl}/orders/${encodeURIComponent(orderNumber)}/invoice.pdf${query}`,
+      {
+        signal: AbortSignal.timeout(this.timeoutMs),
+        headers: this.token ? { authorization: `Bearer ${this.token}` } : {},
+        cache: "no-store",
+      } as RequestInit,
+    );
+
+    if (!response.ok) return { ok: false, status: response.status };
+    return { ok: true, status: response.status, body: await response.arrayBuffer() };
+  }
+
   private async request<T>(
     method: string,
     path: string,

@@ -24,6 +24,16 @@ const { server, pool } = await buildApp({
   ga4Configured: process.env.GA4_API_SECRET !== undefined,
   metaConfigured: process.env.META_CAPI_TOKEN !== undefined,
   hsts: process.env.NODE_ENV === "production",
+  seller: {
+    ...(process.env.SELLER_NAME ? { name: process.env.SELLER_NAME } : {}),
+    ...(process.env.SELLER_ADDRESS ? { address: process.env.SELLER_ADDRESS } : {}),
+    ...(process.env.SELLER_GSTIN ? { gstin: process.env.SELLER_GSTIN } : {}),
+    ...(process.env.SELLER_STATE_CODE
+      ? { stateCode: process.env.SELLER_STATE_CODE }
+      : {}),
+    ...(process.env.SELLER_EMAIL ? { email: process.env.SELLER_EMAIL } : {}),
+    ...(process.env.SELLER_PHONE ? { phone: process.env.SELLER_PHONE } : {}),
+  },
   // Cloudflare and the load balancer in plan/11 §1 both sit in front of this,
   // and behind either one the socket address is the proxy's — which would put
   // the whole internet in a single rate-limit bucket.

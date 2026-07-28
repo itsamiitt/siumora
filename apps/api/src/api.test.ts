@@ -2477,3 +2477,149 @@ apiTest("tells the dashboard what this operator may do", async () => {
   assert.equal(metrics.role, "owner");
   assert.ok(metrics.permissions.includes("gst:read"));
 });
+
+// ── Tax invoice PDF ───────────────────────────────────────────
+
+/** An app with the seller's registered details filled in. */
+async function invoiceApp() {
+  return buildApp({
+    connectionString: testDb!.url,
+    adminPhones: OPERATOR_PHONE,
+    otpEcho: true,
+    courierSimulation: true,
+    rateLimiter: createRateLimiter([]),
+    seller: {
+      name: "Siumora Jewels Private Limited",
+      address: "12 Kala Ghoda, Fort, Mumbai 400001",
+      gstin: "27AAPFU0939F1ZV",
+      stateCode: "27",
+      email: "hello@siumora.example",
+      phone: "9000000001",
+    },
+  });
+}
+
+apiTest("serves the tax invoice as a PDF", async () => {
+  const invoicing = await invoiceApp();
+  try {
+    const cart = json(await invoicing.server.inject({ method: "POST", url: "/carts" }));
+    const products = json(
+      await invoicing.server.inject({ method: "GET", url: "/products" }),
+    );
+    const variant = products.products
+      .flatMap((p: { variants: Array<{ id: string; sku: string }> }) => p.variants)
+      .find((v: { sku: string }) => v.sku === "SIU-PS-GLD");
+    await invoicing.server.inject({
+      method: "POST",
+      url: `/carts/${cart.cartId}/lines`,
+      payload: { variantId: variant.id, quantity: 1 },
+    });
+    const placed = json(
+      await invoicing.server.inject({
+        method: "POST",
+        url: "/checkout",
+        payload: { cartId: cart.cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+      }),
+    );
+    await invoicing.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status: "confirmed" },
+    });
+
+    const response = await invoicing.server.inject({
+      method: "GET",
+      url: `/orders/${placed.orderNumber}/invoice.pdf?key=${placed.accessKey}`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.headers["content-type"] as string, /application\/pdf/);
+    assert.match(
+      response.headers["content-disposition"] as string,
+      new RegExp(`filename="invoice-${placed.orderNumber}\\.pdf"`),
+    );
+
+    const body = response.rawPayload;
+    // A real PDF, not an error page that happened to get the header.
+    assert.equal(body.subarray(0, 5).toString("latin1"), "%PDF-");
+    assert.ok(body.includes(Buffer.from("%%EOF")), "the file is terminated");
+
+    const text = body.toString("latin1");
+    for (const required of [
+      "TAX INVOICE",
+      "27AAPFU0939F1ZV",
+      "Siumora Jewels Private Limited",
+      "Asha Menon",
+      "Amount in words",
+      "Declaration",
+      "7113",
+    ]) {
+      assert.ok(text.includes(required), required);
+    }
+  } finally {
+    await invoicing.server.close();
+    await invoicing.pool.end();
+  }
+});
+
+apiTest("will not issue an invoice for an order that never raised one", async () => {
+  const invoicing = await invoiceApp();
+  try {
+    const cart = json(await invoicing.server.inject({ method: "POST", url: "/carts" }));
+    const products = json(
+      await invoicing.server.inject({ method: "GET", url: "/products" }),
+    );
+    const variant = products.products
+      .flatMap((p: { variants: Array<{ id: string; sku: string }> }) => p.variants)
+      .find((v: { sku: string }) => v.sku === "SIU-PS-GLD");
+    await invoicing.server.inject({
+      method: "POST",
+      url: `/carts/${cart.cartId}/lines`,
+      payload: { variantId: variant.id, quantity: 1 },
+    });
+    // Placed but never confirmed, so no number was allocated.
+    const placed = json(
+      await invoicing.server.inject({
+        method: "POST",
+        url: "/checkout",
+        payload: { cartId: cart.cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+      }),
+    );
+
+    const response = await invoicing.server.inject({
+      method: "GET",
+      url: `/orders/${placed.orderNumber}/invoice.pdf?key=${placed.accessKey}`,
+    });
+
+    // Producing a document here would be issuing an invoice outside the series.
+    assert.equal(response.statusCode, 409);
+    assert.equal(json(response).error, "no_invoice");
+  } finally {
+    await invoicing.server.close();
+    await invoicing.pool.end();
+  }
+});
+
+apiTest("refuses to print a tax invoice for an unconfigured seller", async () => {
+  // A document with a dash where the registration number belongs looks official
+  // enough that nobody would check it.
+  const placed = await placeAndMove("upi", "SIU-PS-GLD", ["confirmed"]);
+  const response = await app.server.inject({
+    method: "GET",
+    url: `/orders/${placed.orderNumber}/invoice.pdf?key=${placed.accessKey}`,
+  });
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(json(response).error, "seller_not_configured");
+});
+
+apiTest("keeps an invoice away from someone holding only the order number", async () => {
+  // An invoice carries the buyer's name, address and phone. Checking only the
+  // number would make this a directory of everyone who has ever bought here.
+  const placed = await placeAndMove("upi", "SIU-PS-GLD", ["confirmed"]);
+  const response = await app.server.inject({
+    method: "GET",
+    url: `/orders/${placed.orderNumber}/invoice.pdf`,
+  });
+  assert.equal(response.statusCode, 404);
+});

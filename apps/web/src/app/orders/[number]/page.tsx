@@ -151,7 +151,22 @@ export default async function OrderPage({ params }: PageProps) {
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <CollectionTitle className="text-xs">Tax invoice</CollectionTitle>
           {order.invoiceNumber ? (
-            <span className="text-sm text-content-muted">{order.invoiceNumber}</span>
+            <span className="flex flex-wrap items-baseline gap-4">
+              <span className="text-sm text-content-muted">
+                {order.invoiceNumber}
+              </span>
+              {/* A plain link, not a button: it fetches a document and changes
+                  nothing, so it should behave like every other link — openable
+                  in a new tab, savable, shareable by the person it belongs to. */}
+              <a
+                href={`/api/orders/${order.number}/invoice`}
+                target="_blank"
+                rel="noopener"
+                className="border-b border-content pb-0.5 text-sm transition-colors hover:border-accent-ink hover:text-accent-ink"
+              >
+                Download PDF
+              </a>
+            </span>
           ) : (
             // No number is burned until the order is confirmed — the series has
             // to stay gapless within the financial year.

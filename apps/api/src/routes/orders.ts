@@ -2,17 +2,21 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import {
+  buildInvoice,
   can,
   canTransition,
   evaluateReturn,
   hsnSummary,
   ndrState,
   outcomeFor,
+  renderInvoicePdf,
   restockTiming,
+  sellerConfigured,
   summariseInvoice,
   type CartLine,
   type NdrReason,
   type OrderStatus,
+  type ShippingAddress,
 } from "@siumora/core";
 import {
   eq,
@@ -180,6 +184,65 @@ export async function registerOrderRoutes(server: FastifyInstance) {
 
     return { order, viewer };
   }
+
+  /**
+   * The tax invoice, as a PDF.
+   *
+   * Authorised exactly as reading the order is: the access key for a guest, the
+   * session for a customer, the role for an operator. An invoice carries the
+   * buyer's name, address and phone, so an endpoint that only checked the order
+   * number would be a directory of everyone who has ever bought here.
+   */
+  server.get("/orders/:number/invoice.pdf", async (request, reply) => {
+    const { number } = numberParam.parse(request.params);
+
+    const found = await authorised(request, reply, number);
+    if (!found) return;
+    const { order } = found;
+
+    if (!order.invoiceNumber) {
+      // No number allocated means no supply was ever made. Producing a document
+      // for it would be issuing an invoice outside the series.
+      return reply.code(409).send({
+        error: "no_invoice",
+        message: "No invoice has been raised for this order yet.",
+      });
+    }
+
+    if (!sellerConfigured(server.seller)) {
+      // Refused rather than printed with a dash where the registration number
+      // belongs — a document that looks official enough that nobody checks.
+      return reply.code(503).send({
+        error: "seller_not_configured",
+        message:
+          "The seller's registered details are not configured, so a tax invoice cannot be issued.",
+      });
+    }
+
+    const invoice = buildInvoice({
+      invoiceNumber: order.invoiceNumber,
+      // Dated when the number was allocated against the order, which is when
+      // the supply was made — not when somebody asked for the file.
+      invoiceDate: order.placedAt,
+      orderNumber: order.number,
+      seller: server.seller,
+      billTo: order.address as ShippingAddress,
+      buyerGstin: order.buyerGstin,
+      lines: toCartLines(order.lines),
+      shipping: order.shipping,
+      codFee: order.codFee,
+      total: order.total,
+      paymentMethod: order.paymentMethod,
+    });
+
+    reply.header("Content-Type", "application/pdf");
+    reply.header("Cache-Control", "private, no-store");
+    reply.header(
+      "Content-Disposition",
+      `inline; filename="invoice-${order.number}.pdf"`,
+    );
+    return renderInvoicePdf(invoice);
+  });
 
   /** Confirm a held COD order. Stands in for the WhatsApp OTP callback. */
   server.post("/orders/:number/confirm", async (request, reply) => {

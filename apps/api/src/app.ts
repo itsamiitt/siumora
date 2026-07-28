@@ -1,6 +1,12 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 
-import { parseAdminPhones, parseAdminRoles, type Role } from "@siumora/core";
+import {
+  PLACEHOLDER_SELLER,
+  parseAdminPhones,
+  parseAdminRoles,
+  type Role,
+  type Seller,
+} from "@siumora/core";
 import { createDb, createPool, migrate, type Database } from "@siumora/db";
 
 import { registerAuthRoutes } from "./routes/auth.ts";
@@ -53,6 +59,14 @@ export interface AppConfig {
   ga4Configured?: boolean;
   metaConfigured?: boolean;
   /**
+   * The registered seller, for the tax invoice.
+   *
+   * Left unset the invoice endpoint refuses rather than printing a document
+   * with a dash where the GSTIN belongs — which would look official enough that
+   * nobody would check.
+   */
+  seller?: Partial<Seller>;
+  /**
    * Send HSTS. Off by default because it is a promise a browser remembers for a
    * year, and making it on a plain-HTTP development origin pins that browser to
    * an https://localhost that does not exist.
@@ -87,6 +101,7 @@ declare module "fastify" {
     adminPhones: string[];
     /** Phone to role. Read on every request; a demotion takes effect at once. */
     adminRoles: Map<string, Role>;
+    seller: Seller;
     rateLimiter: RateLimiter;
   }
 }
@@ -119,6 +134,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
   server.decorate("config", config);
   server.decorate("adminPhones", parseAdminPhones(config.adminPhones));
   server.decorate("adminRoles", parseAdminRoles(config.adminPhones));
+  server.decorate("seller", { ...PLACEHOLDER_SELLER, ...config.seller });
 
   server.addContentTypeParser(
     "application/json",
