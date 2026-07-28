@@ -172,3 +172,21 @@ export {
   type OtpVerificationInput,
   type OtpVerificationStatus,
 } from "./auth.ts";
+
+export {
+  NO_FILTERS,
+  PRICE_BANDS,
+  SORTS,
+  SORT_LABELS,
+  applyFilters,
+  filtersToQuery,
+  hasActiveFilters,
+  materialFacets,
+  parseFilters,
+  priceFacets,
+  sortProducts,
+  type Facet,
+  type FilterState,
+  type PriceBand,
+  type Sort,
+} from "./facets.ts";
