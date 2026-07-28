@@ -358,6 +358,12 @@ export const trackingEvents = pgTable(
     attempts: integer("attempts").notNull().default(0),
     payload: jsonb("payload"),
     sentAt: timestamp("sent_at", { withTimezone: true }),
+    /** When this row becomes eligible again. Backoff lives here, not in a sleep. */
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** What the destination said. A failed row with no reason is a dead end. */
+    lastError: text("last_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

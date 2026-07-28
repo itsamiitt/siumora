@@ -226,6 +226,8 @@ export async function listAllOrders(): Promise<Order[]> {
 export interface TrackingReport {
   readonly health: {
     pending: number;
+    /** Claimed by the worker and in flight. */
+    sending: number;
     sent: number;
     failed: number;
     skipped: number;

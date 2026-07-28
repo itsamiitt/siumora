@@ -98,6 +98,25 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  apps/worker:
+    dependencies:
+      '@siumora/analytics':
+        specifier: workspace:*
+        version: link:../../packages/analytics
+      '@siumora/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+    devDependencies:
+      '@siumora/config-ts':
+        specifier: workspace:*
+        version: link:../../packages/config-ts
+      '@types/node':
+        specifier: ^22.19.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/analytics:
     dependencies:
       zod:

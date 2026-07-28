@@ -163,6 +163,12 @@ async function AdminPageContents() {
                 <span className="text-content-muted">Queued </span>
                 {tracking.health.pending}
               </span>
+              <span>
+                {/* Claimed by the worker. Persistently non-zero means a worker
+                    died mid-send and its claims are waiting to be reclaimed. */}
+                <span className="text-content-muted">In flight </span>
+                {tracking.health.sending}
+              </span>
               <span
                 className={tracking.health.failed > 0 ? "text-accent-ink" : undefined}
               >

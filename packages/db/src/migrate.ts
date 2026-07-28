@@ -417,6 +417,33 @@ CREATE UNIQUE INDEX cod_remittance_batch_order_key
 CREATE INDEX cod_remittance_order_idx ON cod_remittances(order_number);
 `,
   },
+  {
+    id: "0008_tracking_retry",
+    sql: `
+-- The ledger recorded attempts but nothing said *when* to try again, so a
+-- refused send was retried on the very next pass. Against a rate limit that
+-- turns a queue into a hammer.
+ALTER TABLE tracking_events ADD COLUMN next_attempt_at timestamptz NOT NULL DEFAULT now();
+
+-- What the destination actually said. Without it a failed row is a dead end:
+-- an operator can see that five attempts were refused but not why.
+ALTER TABLE tracking_events ADD COLUMN last_error text;
+
+-- 'sending' is the claim, and it has to be a persisted state.
+-- SELECT ... FOR UPDATE SKIP LOCKED only holds a row for the length of its
+-- transaction, and the alternative — keeping one open across an HTTP call —
+-- ties a database connection to a third party's latency. Without a claim two
+-- workers post the same conversion, and the unique index cannot stop a
+-- duplicate *post*, only a duplicate row.
+ALTER TABLE tracking_events ADD CONSTRAINT tracking_event_status_known
+  CHECK (status IN ('pending', 'sending', 'sent', 'failed', 'skipped'));
+
+-- The queue the worker reads: due, not yet done.
+CREATE INDEX tracking_event_due_idx
+  ON tracking_events(next_attempt_at)
+  WHERE status IN ('pending', 'sending');
+`,
+  },
 ];
 
 /**
