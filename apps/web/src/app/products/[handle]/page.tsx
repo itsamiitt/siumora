@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import { notFound } from "next/navigation";
 
 import { lowestPrice } from "@siumora/core";
 import { breadcrumbJsonLd, productJsonLd, productMetadata } from "@siumora/seo";
-import { CollectionTitle, Display, Price } from "@siumora/ui";
+import { CollectionTitle, Display, Price, TrustRow } from "@siumora/ui";
 
 import { AddToBag } from "@/components/add-to-bag";
+import { ProductGallery } from "@/components/product-gallery";
 import { JsonLdScript } from "@/components/json-ld";
 import { PincodeChecker } from "@/components/pincode-checker";
 import { ReviewsBlock } from "@/components/reviews-block";
@@ -14,12 +14,23 @@ import { WishlistButton } from "@/components/wishlist-button";
 import { TrackViewItem } from "@/components/track-view-item";
 import { itemFromProduct } from "@/lib/analytics-items";
 import { getProduct, listProducts } from "@/lib/catalog";
-import { COUNTRY_OF_ORIGIN } from "@/lib/legal";
+import { COUNTRY_OF_ORIGIN, RETURN_WINDOW_DAYS } from "@/lib/legal";
 import { listReviews } from "@/lib/reviews";
 
 interface PageProps {
   params: Promise<{ handle: string }>;
 }
+
+/**
+ * Every line is something the site actually does, drawn from the same constants
+ * the rest of the code enforces. A trust row that promises a window the returns
+ * engine would refuse is worse than no trust row.
+ */
+const PDP_TRUST = [
+  { label: `${RETURN_WINDOW_DAYS}-day returns`, detail: "free pickup on faults" },
+  { label: "GST invoice", detail: "with every order" },
+  { label: "Gift-wrapped", detail: "as standard" },
+];
 
 export async function generateStaticParams() {
   const products = await listProducts();
@@ -42,7 +53,6 @@ export default async function ProductPage({ params }: PageProps) {
   if (!product) notFound();
 
   const price = lowestPrice(product);
-  const image = product.images[0]!;
   const reviews = await listReviews(product.handle);
 
   const collectionHandle = product.collections[0];
@@ -73,19 +83,7 @@ export default async function ProductPage({ params }: PageProps) {
       />
 
       <div className="grid gap-12 lg:grid-cols-2">
-        {/* Held at the catalogue's 4:5 ratio so the plate never stretches to
-            match whatever the detail column happens to be. */}
-        <div className="aspect-4/5 self-start bg-ground-raised">
-          <Image
-            src={image.url}
-            alt={image.alt}
-            width={image.width}
-            height={image.height}
-            priority
-            sizes="(min-width: 1024px) 50vw, 100vw"
-            className="h-full w-full object-cover"
-          />
-        </div>
+        <ProductGallery images={product.images} title={product.title} />
 
         <div className="lg:py-6">
           <CollectionTitle className="text-xs">
@@ -110,6 +108,9 @@ export default async function ProductPage({ params }: PageProps) {
           <div className="mt-9">
             <AddToBag variants={product.variants} productTitle={product.title} />
           </div>
+
+          {/* Directly under the button, where the decision is made. */}
+          <TrustRow className="mt-5" items={PDP_TRUST} />
 
           <div className="mt-5">
             <WishlistButton

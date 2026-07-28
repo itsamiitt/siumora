@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import { mintEventId } from "@siumora/analytics";
 import { track } from "@siumora/analytics/client";
 import type { Variant } from "@siumora/core";
+import { formatPaise } from "@siumora/in-locale";
 import { Button, MicroLabel } from "@siumora/ui";
 
 import { addToCart } from "@/app/actions/cart";
@@ -28,6 +29,23 @@ export function AddToBag({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
+
+  // The sticky bar lives here rather than as a sibling because it has to share
+  // the selected variant and the pending state — two buttons that could
+  // disagree about which finish is being bought would be worse than no bar.
+  const inlineRef = useRef<HTMLDivElement>(null);
+  const [inlineVisible, setInlineVisible] = useState(true);
+
+  useEffect(() => {
+    const node = inlineRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setInlineVisible(entry?.isIntersecting ?? true),
+      { rootMargin: "-72px 0px 0px 0px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   const firstAvailable = variants.find((v) => v.inventory > 0);
   const [selectedId, setSelectedId] = useState(firstAvailable?.id ?? "");
@@ -107,19 +125,47 @@ export function AddToBag({
         </p>
       )}
 
-      <Button
-        size="lg"
-        className="mt-6 w-full"
-        onClick={onAdd}
-        disabled={!anyAvailable || !selected || pending}
-      >
-        {!anyAvailable ? "Sold out" : pending ? "Adding…" : "Add to bag"}
-      </Button>
+      <div ref={inlineRef}>
+        <Button
+          size="lg"
+          className="mt-6 w-full"
+          onClick={onAdd}
+          disabled={!anyAvailable || !selected || pending}
+        >
+          {!anyAvailable ? "Sold out" : pending ? "Adding…" : "Add to bag"}
+        </Button>
+      </div>
 
       {message && (
         <p aria-live="polite" className="mt-2 text-center text-xs text-content-muted">
           {message}
         </p>
+      )}
+
+      {/* Sticky bar: phones only, and only once the real button has scrolled
+          away. Showing it alongside the button would be two of the same
+          control on screen at once. */}
+      {!inlineVisible && anyAvailable && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-rule)] bg-ground/95 px-5 py-3 backdrop-blur-sm lg:hidden">
+          <div className="mx-auto flex max-w-6xl items-center gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm">{productTitle}</p>
+              {selected && (
+                <p className="text-xs text-content-muted">
+                  {formatPaise(selected.price.selling)} · {selected.title}
+                </p>
+              )}
+            </div>
+            <Button
+              size="md"
+              onClick={onAdd}
+              disabled={!selected || pending}
+              className="shrink-0"
+            >
+              {pending ? "Adding…" : "Add to bag"}
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   );

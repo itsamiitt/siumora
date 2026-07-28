@@ -75,6 +75,39 @@
 
   /* ── Motion ─────────────────────────────────────────────────── */
   --ease-siumora: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* A slow breath for loading placeholders. The kit's motion note is that
+     nothing travels across a surface except the polish sweep on the mark, so
+     this is opacity rather than a sweeping gradient. */
+  --animate-siumora-breathe: siumora-breathe 2.4s var(--ease-siumora) infinite;
+
+  /* The kernel arriving: it lands last and rings once, never twice. */
+  --animate-siumora-kernel: siumora-kernel 0.6s var(--ease-siumora) both;
+
+  @keyframes siumora-breathe {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+
+  @keyframes siumora-kernel {
+    0% {
+      opacity: 0;
+      transform: scale(0.4);
+    }
+    60% {
+      opacity: 1;
+      transform: scale(1.12);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
 }
 
 /**

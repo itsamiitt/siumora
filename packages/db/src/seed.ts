@@ -29,6 +29,8 @@ const CATALOG = [
     piercedJewellery: true,
     images: [
       { url: "/catalog/petal-studs.svg", alt: "Petal Studs", width: 1200, height: 1500 },
+      { url: "/catalog/petal-studs-detail.svg", alt: "Petal Studs — the kernel, close up", width: 1200, height: 1500 },
+      { url: "/catalog/petal-studs-scale.svg", alt: "Petal Studs drawn at 11 mm across, against a millimetre rule", width: 1200, height: 1500 },
     ],
     collections: ["everyday", "gifting"],
     variants: [
@@ -64,6 +66,8 @@ const CATALOG = [
     piercedJewellery: false,
     images: [
       { url: "/catalog/kernel-pendant.svg", alt: "Kernel Pendant", width: 1200, height: 1500 },
+      { url: "/catalog/kernel-pendant-detail.svg", alt: "Kernel Pendant — the kernel, close up", width: 1200, height: 1500 },
+      { url: "/catalog/kernel-pendant-scale.svg", alt: "Kernel Pendant drawn at 18 mm across, against a millimetre rule", width: 1200, height: 1500 },
     ],
     collections: ["gifting", "the-petal-edit"],
     variants: [
@@ -91,6 +95,8 @@ const CATALOG = [
     piercedJewellery: true,
     images: [
       { url: "/catalog/jaali-hoops.svg", alt: "Jaali Hoops", width: 1200, height: 1500 },
+      { url: "/catalog/jaali-hoops-detail.svg", alt: "Jaali Hoops — the kernel, close up", width: 1200, height: 1500 },
+      { url: "/catalog/jaali-hoops-scale.svg", alt: "Jaali Hoops drawn at 32 mm across, against a millimetre rule", width: 1200, height: 1500 },
     ],
     collections: ["everyday", "the-petal-edit"],
     variants: [
@@ -119,6 +125,8 @@ const CATALOG = [
     piercedJewellery: false,
     images: [
       { url: "/catalog/tuesday-band.svg", alt: "Tuesday Band", width: 1200, height: 1500 },
+      { url: "/catalog/tuesday-band-detail.svg", alt: "Tuesday Band — the kernel, close up", width: 1200, height: 1500 },
+      { url: "/catalog/tuesday-band-scale.svg", alt: "Tuesday Band drawn at 6 mm across, against a millimetre rule", width: 1200, height: 1500 },
     ],
     collections: ["everyday"],
     variants: [
