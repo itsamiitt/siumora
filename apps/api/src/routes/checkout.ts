@@ -1,7 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
-import { evaluateCod, initialStatus, scoreAddress, scoreRto } from "@siumora/core";
+import {
+  evaluateCod,
+  initialStatus,
+  isValidGstin,
+  scoreAddress,
+  scoreRto,
+} from "@siumora/core";
 import {
   eq,
   getCartLines,
@@ -47,6 +53,18 @@ const checkoutSchema = z.object({
    * cannot send a GA4 event at all, so its absence is worth seeing.
    */
   gaClientId: z.string().max(64).optional(),
+  /**
+   * A registered buyer's GSTIN, for a B2B invoice.
+   *
+   * Checked by check digit, not just shape. A mistyped GSTIN on an invoice
+   * denies the buyer their input credit and lands in the seller's mismatch
+   * report — so it is refused at the point of entry, where somebody can fix it.
+   */
+  buyerGstin: z
+    .string()
+    .transform((value) => value.trim().toUpperCase())
+    .refine(isValidGstin, "that GSTIN does not look right")
+    .optional(),
 });
 
 /**
@@ -218,6 +236,7 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
           ...(signals.customerId ? { customerId: signals.customerId } : {}),
           phoneVerified: signals.phoneVerified,
           ...(body.gaClientId ? { gaClientId: body.gaClientId } : {}),
+          ...(body.buyerGstin ? { buyerGstin: body.buyerGstin } : {}),
         });
 
         if (!placed.ok) return { ok: false as const, message: placed.message };

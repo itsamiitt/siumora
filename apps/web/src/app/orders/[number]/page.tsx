@@ -161,6 +161,15 @@ export default async function OrderPage({ params }: PageProps) {
           )}
         </div>
 
+        {/* Printed because it is what lets the buyer claim input credit — an
+            invoice without it is one they cannot use. */}
+        {order.buyerGstin && (
+          <p className="mt-3 text-sm text-content-muted">
+            Buyer GSTIN{" "}
+            <span className="font-mono text-content">{order.buyerGstin}</span>
+          </p>
+        )}
+
         <ul className="mt-6 divide-y divide-[var(--color-rule)] border-y border-[var(--color-rule)]">
           {order.lines.map((line) => (
             <li key={line.variantId} className="flex justify-between gap-4 py-3.5">

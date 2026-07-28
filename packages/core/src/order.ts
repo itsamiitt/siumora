@@ -120,6 +120,8 @@ export interface Order {
   readonly eventId: string;
   /** Invoice number, assigned once the order is confirmed. */
   readonly invoiceNumber?: string;
+  /** A registered buyer GSTIN, printed on the invoice for input credit. */
+  readonly buyerGstin?: string;
 }
 
 /**

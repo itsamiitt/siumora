@@ -244,6 +244,8 @@ export interface PlaceOrderInput {
   phoneVerified?: boolean;
   /** The browser GA4 client id, without which no server-side GA4 event can go. */
   gaClientId?: string;
+  /** A registered buyer GSTIN. Present makes this a B2B supply in GSTR-1. */
+  buyerGstin?: string;
 }
 
 export interface PlacedOrder {
@@ -344,6 +346,7 @@ export async function placeOrder(
         ...(input.customerId ? { customerId: input.customerId } : {}),
         phoneVerified: input.phoneVerified ?? false,
         ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
+        ...(input.buyerGstin ? { buyerGstin: input.buyerGstin } : {}),
         ...(issueInvoice
           ? {
               invoiceNumber: invoiceNumber(invoiceSeq, now),

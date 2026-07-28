@@ -35,6 +35,8 @@ export async function submitOrder(input: {
    * half of the dual-send never fires.
    */
   gaClientId?: string;
+  /** A registered buyer GSTIN, for a B2B invoice. */
+  buyerGstin?: string;
 }): Promise<PlaceOrderResult> {
   // The event id doubles as the idempotency key: it is already unique per
   // checkout attempt and already travels with the order, so a resubmitted form
@@ -45,6 +47,7 @@ export async function submitOrder(input: {
     eventId: input.eventId,
     idempotencyKey: input.eventId,
     ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
+    ...(input.buyerGstin ? { buyerGstin: input.buyerGstin } : {}),
   });
   if (!result.ok) return { ok: false, message: result.message };
 

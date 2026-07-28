@@ -7,6 +7,7 @@ import { useEffect, useState, useTransition } from "react";
 import { track, mintEventId, gaClientId } from "@siumora/analytics/client";
 
 import type { CodDecision } from "@siumora/core";
+import { isValidGstin } from "@siumora/core/gstin";
 import {
   INDIAN_STATES,
   formatPaise,
@@ -43,6 +44,8 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
   } | null>(null);
   const [delivery, setDelivery] = useState<string | null>(null);
   const [phoneVerified, setPhoneVerified] = useState(false);
+  const [business, setBusiness] = useState(false);
+  const [gstin, setGstin] = useState("");
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +53,7 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
   const router = useRouter();
 
   const pincodeValid = isValidPincode(pincode);
+  const gstinValid = isValidGstin(gstin);
 
   useEffect(() => {
     if (!pincodeValid) {
@@ -92,7 +96,10 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
   }, [cod, method]);
 
   const phoneValid = /^[6-9]\d{9}$/.test(phone);
-  const canPay = phoneValid && pincodeValid && stateCode !== "";
+  // A GSTIN that is present must be right. Sending a mistyped one denies the
+  // buyer their input credit, which is worse than not asking.
+  const canPay =
+    phoneValid && pincodeValid && stateCode !== "" && (!business || gstinValid);
 
   return (
     <form
@@ -131,6 +138,7 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
             // Captured here because the server cannot see the cookie, and GA4
             // will not accept a server event without it.
             gaClientId: gaClientId(),
+            ...(business && gstinValid ? { buyerGstin: gstin } : {}),
             codFee: method === "cod" ? (cod?.fee ?? 0) : 0,
           });
 
@@ -246,6 +254,45 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
             Delivery in <span className="text-content">{delivery} days</span>
           </p>
         )}
+
+        {/* Behind a toggle rather than always on screen: most orders are not
+            B2B, and a GSTIN field on every checkout is a question almost
+            nobody needs to answer. */}
+        <div className="mt-6 border-t border-[var(--color-rule)] pt-5">
+          {business ? (
+            <Field label="GSTIN" htmlFor="gstin">
+              <input
+                id="gstin"
+                value={gstin}
+                onChange={(event) => setGstin(event.target.value.toUpperCase())}
+                maxLength={15}
+                autoComplete="off"
+                placeholder="27AAPFU0939F1ZV"
+                aria-invalid={gstin.length === 15 && !gstinValid}
+                className="h-11 w-full border border-content/20 px-3 font-mono text-sm tracking-wide outline-none focus:border-accent-ink"
+              />
+              <p className="mt-2 text-xs text-content-muted">
+                {gstin.length === 15 && !gstinValid ? (
+                  // Checked in the browser too, so a typo is caught while the
+                  // field is still in front of the person who can fix it.
+                  <span className="text-accent-ink">
+                    That GSTIN does not look right — check the last character.
+                  </span>
+                ) : (
+                  "We will put this on the invoice so you can claim input credit."
+                )}
+              </p>
+            </Field>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setBusiness(true)}
+              className="text-sm text-content-muted underline-offset-4 hover:text-accent-ink hover:underline"
+            >
+              Buying for a business?
+            </button>
+          )}
+        </div>
       </Section>
 
       <Section step="3" title="Payment">

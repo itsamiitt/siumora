@@ -345,6 +345,24 @@ CREATE INDEX orders_awaiting_restock_idx
 ALTER TABLE orders ADD COLUMN ga_client_id text;
 `,
   },
+  {
+    id: "0006_buyer_gstin",
+    sql: `
+-- A registered buyer's GSTIN, captured at checkout so the invoice carries it
+-- and GSTR-1 files the supply invoice-wise rather than folding it into a B2C
+-- summary the buyer cannot claim input credit against.
+ALTER TABLE orders ADD COLUMN buyer_gstin text;
+
+-- Structure only; the check digit is verified in the application, where a
+-- refusal can explain itself to the person typing.
+ALTER TABLE orders ADD CONSTRAINT orders_buyer_gstin_shape
+  CHECK (buyer_gstin IS NULL OR buyer_gstin ~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$');
+
+-- Partial: the B2B tables of GSTR-1 are built from exactly these rows, and they
+-- are a small minority of orders.
+CREATE INDEX orders_b2b_idx ON orders(financial_year) WHERE buyer_gstin IS NOT NULL;
+`,
+  },
 ];
 
 /**

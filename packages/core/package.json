@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./auth": "./src/auth.ts",
-    "./facets": "./src/facets.ts"
+    "./facets": "./src/facets.ts",
+    "./gstin": "./src/gstin.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

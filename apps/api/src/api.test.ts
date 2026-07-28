@@ -1390,3 +1390,175 @@ apiTest("reports orders that produced no conversion at all", async () => {
   assert.equal(metrics.tracking.missingConversions.length, 1);
   assert.equal(metrics.tracking.health.sent, 0);
 });
+
+// ── GST desk ──────────────────────────────────────────────────
+
+const B2B_GSTIN = "27AAPFU0939F1ZV";
+
+async function confirmedOrder(overrides: Record<string, unknown> = {}) {
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: {
+        cartId,
+        address: ADDRESS,
+        paymentMethod: "upi",
+        eventId: crypto.randomUUID(),
+        ...overrides,
+      },
+    }),
+  );
+
+  if (placed.orderNumber) {
+    await app.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status: "confirmed" },
+    });
+  }
+  return placed;
+}
+
+/** The period the seeded orders land in, read the way the code reads it. */
+function thisPeriod(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+  })
+    .format(new Date())
+    .slice(0, 7);
+}
+
+apiTest("refuses a GSTIN whose check digit is wrong", async () => {
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const response = await app.server.inject({
+    method: "POST",
+    url: "/checkout",
+    payload: {
+      cartId,
+      address: ADDRESS,
+      paymentMethod: "upi",
+      eventId: crypto.randomUUID(),
+      // Right shape, wrong last character. On an invoice this denies the buyer
+      // their input credit and lands in the seller's mismatch report.
+      buyerGstin: "27AAPFU0939F1ZW",
+    },
+  });
+
+  assert.equal(response.statusCode, 500);
+  const stored = await app.pool.query("SELECT count(*)::int AS n FROM orders");
+  assert.equal(stored.rows[0].n, 0);
+});
+
+apiTest("stores a valid GSTIN, normalised", async () => {
+  await confirmedOrder({ buyerGstin: " 27aapfu0939f1zv " });
+  const { rows } = await app.pool.query("SELECT buyer_gstin FROM orders");
+  // Case and stray spaces are not the customer's problem, but the stored value
+  // has to be the canonical one or the return will not match the portal.
+  assert.equal(rows[0].buyer_gstin, B2B_GSTIN);
+});
+
+apiTest("files a registered buyer invoice-wise and a consumer as a summary", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  await confirmedOrder({ buyerGstin: B2B_GSTIN });
+  await confirmedOrder();
+
+  const gstr1 = json(
+    await app.server.inject({
+      method: "GET",
+      url: `/admin/gstr1?period=${thisPeriod()}`,
+      headers: operator.headers,
+    }),
+  );
+
+  assert.equal(gstr1.b2b.length, 1);
+  assert.equal(gstr1.b2b[0].gstin, B2B_GSTIN);
+  assert.equal(gstr1.b2cs.length, 1);
+  assert.equal(gstr1.totals.invoices, 2);
+});
+
+apiTest("the HSN table reconciles to the invoice tables", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  await confirmedOrder({ buyerGstin: B2B_GSTIN });
+  await confirmedOrder();
+
+  const gstr1 = json(
+    await app.server.inject({
+      method: "GET",
+      url: `/admin/gstr1?period=${thisPeriod()}`,
+      headers: operator.headers,
+    }),
+  );
+
+  // The cross-check a return is scrutinised on: if these two disagree the
+  // filing is wrong whichever one is right.
+  const hsnTaxable = gstr1.hsn.reduce(
+    (sum: number, row: { taxableValue: number }) => sum + row.taxableValue,
+    0,
+  );
+  assert.equal(hsnTaxable, gstr1.totals.taxableValue);
+});
+
+apiTest("leaves uninvoiced orders out of the return", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  // Placed but never confirmed, so no invoice number was ever allocated.
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  await app.server.inject({
+    method: "POST",
+    url: "/checkout",
+    payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+  });
+
+  const gstr1 = json(
+    await app.server.inject({
+      method: "GET",
+      url: `/admin/gstr1?period=${thisPeriod()}`,
+      headers: operator.headers,
+    }),
+  );
+  assert.equal(gstr1.totals.invoices, 0);
+});
+
+apiTest("exports the return as CSV with every table", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  await confirmedOrder({ buyerGstin: B2B_GSTIN });
+
+  const response = await app.server.inject({
+    method: "GET",
+    url: `/admin/gstr1?period=${thisPeriod()}&format=csv`,
+    headers: operator.headers,
+  });
+
+  assert.match(response.headers["content-type"] as string, /text\/csv/);
+  assert.match(
+    response.headers["content-disposition"] as string,
+    /attachment; filename="gstr1-\d{4}-\d{2}\.csv"/,
+  );
+  for (const table of ["B2B", "B2CL", "B2CS", "HSN"]) {
+    assert.ok(response.body.includes(`\n${table}\n`), table);
+  }
+  assert.ok(response.body.includes(B2B_GSTIN));
+});
+
+apiTest("refuses a malformed period rather than guessing one", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const response = await app.server.inject({
+    method: "GET",
+    url: "/admin/gstr1?period=2026-13",
+    headers: operator.headers,
+  });
+  assert.equal(response.statusCode, 500);
+});
+
+apiTest("keeps the return away from a customer", async () => {
+  const shopper = await signIn("9812340002");
+  const response = await app.server.inject({
+    method: "GET",
+    url: `/admin/gstr1?period=${thisPeriod()}`,
+    headers: shopper.headers,
+  });
+  assert.equal(response.statusCode, 403);
+});

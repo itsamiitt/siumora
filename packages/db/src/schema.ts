@@ -232,6 +232,8 @@ export const orders = pgTable(
     restockedAt: timestamp("restocked_at", { withTimezone: true }),
     /** The browser's GA4 client id, captured at checkout. Null when blocked. */
     gaClientId: text("ga_client_id"),
+    /** A registered buyer's GSTIN. Present makes this a B2B supply in GSTR-1. */
+    buyerGstin: text("buyer_gstin"),
 
     deliveryAttempts: integer("delivery_attempts").notNull().default(0),
     ndrReason: text("ndr_reason"),

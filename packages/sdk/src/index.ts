@@ -319,6 +319,8 @@ export class SiumoraClient {
       eventId: string;
       /** The browser's GA4 client id; GA4 refuses a server event without one. */
       gaClientId?: string;
+      /** A registered buyer GSTIN, for a B2B invoice. */
+      buyerGstin?: string;
     },
     idempotencyKey?: string,
   ): Promise<{
@@ -447,6 +449,21 @@ export class SiumoraClient {
   }
 
   // ── Admin ───────────────────────────────────────────────────
+
+  /**
+   * The GSTR-1 return for a period.
+   *
+   * The figures come from the same engine that produced the invoices, so the
+   * return and the invoices cannot drift apart the way a spreadsheet does.
+   */
+  async getGstr1(period: string): Promise<Record<string, unknown>> {
+    return this.request(
+      "GET",
+      `/admin/gstr1?period=${encodeURIComponent(period)}`,
+      undefined,
+      { cache: "no-store" },
+    );
+  }
 
   async getMetrics(): Promise<Record<string, unknown>> {
     return this.request("GET", "/admin/metrics", undefined, { cache: "no-store" });

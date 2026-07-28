@@ -76,6 +76,7 @@ function toDomain(raw: Record<string, unknown>): Order {
     deliveryAttempts: (raw.deliveryAttempts as number) ?? 0,
     ...(raw.ndrReason ? { ndrReason: raw.ndrReason as Order["ndrReason"] } : {}),
     ...(raw.invoiceNumber ? { invoiceNumber: raw.invoiceNumber as string } : {}),
+    ...(raw.buyerGstin ? { buyerGstin: raw.buyerGstin as string } : {}),
   };
 }
 
@@ -87,6 +88,8 @@ export interface PlaceOrderInput {
   readonly idempotencyKey?: string;
   /** The browser GA4 client id, without which no server-side GA4 event can go. */
   readonly gaClientId?: string;
+  /** A registered buyer GSTIN, for a B2B invoice. */
+  readonly buyerGstin?: string;
 }
 
 export async function placeOrder(
@@ -103,6 +106,7 @@ export async function placeOrder(
         paymentMethod: input.paymentMethod,
         eventId: input.eventId,
         ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
+        ...(input.buyerGstin ? { buyerGstin: input.buyerGstin } : {}),
       },
       input.idempotencyKey,
     );
