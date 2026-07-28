@@ -298,6 +298,58 @@ export async function getAuditLog(): Promise<AuditEntry[]> {
   }
 }
 
+export interface MessageQueue {
+  readonly health: {
+    pending: number;
+    sending: number;
+    sent: number;
+    failed: number;
+    skipped: number;
+  };
+  readonly failed: Array<{
+    id: string;
+    templateKey: string;
+    recipient: string;
+    lastError: string | null;
+    createdAt: string;
+  }>;
+}
+
+export interface PrivacyQueue {
+  readonly open: Array<{
+    id: string;
+    kind: string;
+    status: string;
+    resolveBy: string;
+    note: string | null;
+    overdue: boolean;
+  }>;
+}
+
+/**
+ * The queues nobody could see until now.
+ *
+ * A queue that is invisible is a queue that runs over — which is the whole
+ * reason the privacy deadlines were recorded rather than acted on inline.
+ */
+export async function getQueues(): Promise<{
+  messages?: MessageQueue;
+  privacy?: PrivacyQueue;
+}> {
+  try {
+    const metrics = (await (await apiAs()).getMetrics()) as {
+      messages?: MessageQueue;
+      privacy?: PrivacyQueue;
+    };
+    return {
+      ...(metrics.messages ? { messages: metrics.messages } : {}),
+      ...(metrics.privacy ? { privacy: metrics.privacy } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
 export interface RemittanceReport {
   readonly batches: Array<{
     batchId: string;

@@ -2,8 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import {
+  can,
   invoiceSeriesHealth,
   isAuditAction,
+  isOverdue,
   ndrQueue,
   rtoBreakdown,
   statusCounts,
@@ -12,9 +14,13 @@ import {
   summariseRevenue,
   type CartTotals,
   type Order,
+  type PrivacyRequestStatus,
 } from "@siumora/core";
 import {
   desc,
+  failedNotifications,
+  notificationHealth,
+  openPrivacyRequests,
   ordersMissingConversion,
   readAudit,
   schema,
@@ -121,10 +127,18 @@ export async function registerAdminRoutes(server: FastifyInstance) {
 
     // Doc 08 §8: order-to-conversion parity, as a query rather than a metric
     // somebody eyeballs. Any gap here is revenue the ad platforms cannot see.
-    const [health, missingConversions] = await Promise.all([
-      trackingHealth(server.db),
-      ordersMissingConversion(server.db),
-    ]);
+    const [health, missingConversions, messages, failedMessages, privacy] =
+      await Promise.all([
+        trackingHealth(server.db),
+        ordersMissingConversion(server.db),
+        notificationHealth(server.db),
+        failedNotifications(server.db, 20),
+        // Only for the role that can act on them. An operator who can see the
+        // queue but cannot work it is being shown somebody else's homework.
+        can(viewer.role, "privacy:write")
+          ? openPrivacyRequests(server.db, 20)
+          : Promise.resolve([]),
+      ]);
 
     reply.header("Cache-Control", "no-store");
     return {
@@ -148,6 +162,33 @@ export async function registerAdminRoutes(server: FastifyInstance) {
       statuses: statusCounts(orders),
       invoiceSeries: invoiceSeriesHealth(orders),
       tracking: { health, missingConversions },
+      messages: {
+        health: messages,
+        // The queue an operator has to work: messages that ran out of attempts
+        // and will not be retried again.
+        failed: failedMessages.map((row) => ({
+          id: row.id,
+          templateKey: row.templateKey,
+          recipient: maskPhone(row.recipient),
+          lastError: row.lastError,
+          createdAt: row.createdAt,
+        })),
+      },
+      privacy: {
+        open: privacy.map((request) => ({
+          id: request.id,
+          kind: request.kind,
+          status: request.status,
+          resolveBy: request.resolveBy,
+          note: request.note,
+          // Computed here rather than in the browser: the deadline is the
+          // regulated part and a clock skew must not hide it.
+          overdue: isOverdue(
+            request.status as PrivacyRequestStatus,
+            request.resolveBy,
+          ),
+        })),
+      },
       recentOrders: rows.slice(0, 50),
     };
   });

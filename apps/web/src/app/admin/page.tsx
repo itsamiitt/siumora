@@ -20,10 +20,13 @@ import { CollectionTitle, Display, MicroLabel } from "@siumora/ui";
 import {
   getAuditLog,
   getOperatorAccess,
+  getQueues,
   getRemittanceReport,
   getTrackingReport,
   listAllOrders,
   type AuditEntry,
+  type MessageQueue,
+  type PrivacyQueue,
   type RemittanceReport,
 } from "@/lib/order-store";
 import { currentViewer } from "@/lib/session";
@@ -62,11 +65,12 @@ async function AdminPageContents() {
     );
   }
 
-  const [orders, tracking, remittances, access] = await Promise.all([
+  const [orders, tracking, remittances, access, queues] = await Promise.all([
     listAllOrders(),
     getTrackingReport(),
     getRemittanceReport(),
     getOperatorAccess(),
+    getQueues(),
   ]);
 
   const may = (permission: string) => access?.permissions.includes(permission) ?? false;
@@ -228,6 +232,16 @@ async function AdminPageContents() {
         </Section>
       )}
 
+      <Section title="Customer messages">
+        <MessagePanel queue={queues.messages} />
+      </Section>
+
+      {may("privacy:write") && (
+        <Section title="Data requests">
+          <PrivacyPanel queue={queues.privacy} />
+        </Section>
+      )}
+
       <Section title="Order states">
         {Object.keys(counts).length === 0 ? (
           <Empty>No orders yet.</Empty>
@@ -245,6 +259,96 @@ async function AdminPageContents() {
         )}
       </Section>
     </div>
+  );
+}
+
+function MessagePanel({ queue }: { queue?: MessageQueue }) {
+  if (!queue) return <Empty>Message figures are unavailable.</Empty>;
+
+  const { health, failed } = queue;
+
+  return (
+    <>
+      <div className="flex flex-wrap gap-x-10 gap-y-3 text-sm">
+        <span>
+          <span className="text-content-muted">Queued </span>
+          {health.pending}
+        </span>
+        <span>
+          <span className="text-content-muted">Sent </span>
+          {health.sent}
+        </span>
+        <span className={health.failed > 0 ? "text-accent-ink" : undefined}>
+          <span className="text-content-muted">Failed </span>
+          {health.failed}
+        </span>
+        <span>
+          {/* No WhatsApp or SMS provider is wired up yet. Shown rather than
+              hidden: it is the difference between "nothing happened" and
+              "nothing could happen". */}
+          <span className="text-content-muted">No channel </span>
+          {health.skipped}
+        </span>
+      </div>
+
+      {failed.length > 0 && (
+        <ul className="mt-5 divide-y divide-[var(--color-rule)] border-y border-[var(--color-rule)]">
+          {failed.map((message) => (
+            <li
+              key={message.id}
+              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3"
+            >
+              <MicroLabel>{message.templateKey.replace(/_/g, " ")}</MicroLabel>
+              <span className="text-sm text-content-muted">
+                {message.recipient}
+                {message.lastError && (
+                  <span className="text-accent-ink"> · {message.lastError}</span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+const REQUEST_LABEL: Record<string, string> = {
+  access: "Copy of their data",
+  correction: "Correction",
+  erasure: "Erasure",
+};
+
+function PrivacyPanel({ queue }: { queue?: PrivacyQueue }) {
+  if (!queue) return <Empty>Request figures are unavailable.</Empty>;
+  if (queue.open.length === 0) {
+    return <Empty>No open requests.</Empty>;
+  }
+
+  return (
+    <ul className="divide-y divide-[var(--color-rule)] border-y border-[var(--color-rule)]">
+      {queue.open.map((request) => (
+        <li key={request.id} className="py-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <MicroLabel>{REQUEST_LABEL[request.kind] ?? request.kind}</MicroLabel>
+            {/* The deadline is the regulated part, so it is the thing shown
+                rather than the date it arrived. */}
+            <span
+              className={`text-sm ${request.overdue ? "text-accent-ink" : "text-content-muted"}`}
+            >
+              {request.overdue ? "Overdue since " : "Due by "}
+              {new Date(request.resolveBy).toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "long",
+              })}
+            </span>
+          </div>
+          {request.note && (
+            <p className="mt-1 text-sm text-content-faint">{request.note}</p>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 
