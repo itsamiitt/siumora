@@ -32,7 +32,7 @@ export default async function CheckoutPage() {
         <Display as="h1" size="sm">
           Checkout
         </Display>
-        <Link href="/cart" className="transition-colors hover:text-mulberry">
+        <Link href="/cart" className="transition-colors hover:text-accent-ink">
           <MicroLabel>Back to bag</MicroLabel>
         </Link>
       </div>
@@ -42,7 +42,7 @@ export default async function CheckoutPage() {
 
         <aside className="lg:sticky lg:top-28 lg:self-start">
           <OrderSummary totals={totals} />
-          <ul className="mt-6 space-y-1.5 text-xs text-ink-muted">
+          <ul className="mt-6 space-y-1.5 text-xs text-content-muted">
             <li>Secure payment · GST invoice</li>
             <li>7-day returns</li>
           </ul>

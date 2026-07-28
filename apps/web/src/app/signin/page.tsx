@@ -31,7 +31,7 @@ export default async function SignInPage({
       <Display as="h1" size="sm" className="text-center">
         Sign in
       </Display>
-      <p className="mx-auto mt-4 max-w-sm text-center text-sm text-ink-muted">
+      <p className="mx-auto mt-4 max-w-sm text-center text-sm text-content-muted">
         Your mobile number is your account. We send a code — there is no password
         to remember.
       </p>

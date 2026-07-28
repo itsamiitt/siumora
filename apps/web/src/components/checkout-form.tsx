@@ -148,13 +148,13 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
             onChange={(e) => setName(e.target.value)}
             autoComplete="name"
             placeholder="Asha Menon"
-            className="h-11 w-full border border-ink/20 px-3 text-sm outline-none focus:border-mulberry"
+            className="h-11 w-full border border-content/20 px-3 text-sm outline-none focus:border-accent-ink"
           />
         </Field>
 
         <Field label="Phone number" htmlFor="phone">
           <div className="flex">
-            <span className="flex h-11 items-center border border-r-0 border-ink/20 px-3 text-sm text-ink-muted">
+            <span className="flex h-11 items-center border border-r-0 border-content/20 px-3 text-sm text-content-muted">
               +91
             </span>
             <input
@@ -166,11 +166,11 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
               inputMode="numeric"
               autoComplete="tel-national"
               placeholder="98765 43210"
-              className="h-11 w-full border border-ink/20 px-3 text-sm outline-none focus:border-mulberry"
+              className="h-11 w-full border border-content/20 px-3 text-sm outline-none focus:border-accent-ink"
             />
           </div>
           {phone.length > 0 && !phoneValid && (
-            <p className="mt-1.5 text-xs text-mulberry">
+            <p className="mt-1.5 text-xs text-accent-ink">
               Enter a 10-digit mobile number.
             </p>
           )}
@@ -187,7 +187,7 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
               inputMode="numeric"
               autoComplete="postal-code"
               placeholder="400001"
-              className="h-11 w-full border border-ink/20 px-3 text-sm outline-none focus:border-mulberry"
+              className="h-11 w-full border border-content/20 px-3 text-sm outline-none focus:border-accent-ink"
             />
           </Field>
 
@@ -196,7 +196,7 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
               id="state"
               value={stateCode}
               onChange={(e) => setStateCode(e.target.value)}
-              className="h-11 w-full border border-ink/20 bg-transparent px-3 text-sm outline-none focus:border-mulberry"
+              className="h-11 w-full border border-content/20 bg-transparent px-3 text-sm outline-none focus:border-accent-ink"
             >
               <option value="">Select a state</option>
               {INDIAN_STATES.map((s) => (
@@ -215,7 +215,7 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
             onChange={(e) => setCity(e.target.value)}
             autoComplete="address-level2"
             placeholder="Mumbai"
-            className="h-11 w-full border border-ink/20 px-3 text-sm outline-none focus:border-mulberry"
+            className="h-11 w-full border border-content/20 px-3 text-sm outline-none focus:border-accent-ink"
           />
         </Field>
 
@@ -227,12 +227,12 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
             onChange={(e) => setAddressLine(e.target.value)}
             autoComplete="street-address"
             placeholder="Flat, building, street, area"
-            className="w-full border border-ink/20 p-3 text-sm outline-none focus:border-mulberry"
+            className="w-full border border-content/20 p-3 text-sm outline-none focus:border-accent-ink"
           />
           {/* Surfaced as help, not as an error: the order is still allowed,
               but a thin address quietly costs COD eligibility. */}
           {addressQuality && addressQuality.needsReview && addressLine.length > 0 && (
-            <p className="mt-1.5 text-xs text-ink-muted">
+            <p className="mt-1.5 text-xs text-content-muted">
               Add {addressQuality.issues[0]?.toLowerCase()} so the courier can
               find you.
             </p>
@@ -240,8 +240,8 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
         </Field>
 
         {delivery && (
-          <p className="mt-3 text-sm text-ink-muted">
-            Delivery in <span className="text-ink">{delivery} days</span>
+          <p className="mt-3 text-sm text-content-muted">
+            Delivery in <span className="text-content">{delivery} days</span>
           </p>
         )}
       </Section>
@@ -289,19 +289,19 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
 
         {/* Nudge to prepaid only when it actually saves money. */}
         {method === "cod" && cod?.available && cod.fee > 0 && (
-          <p className="mt-4 border border-mulberry/25 bg-mulberry/[0.04] p-3 text-sm">
+          <p className="mt-4 border border-accent-ink/25 bg-accent/[0.04] p-3 text-sm">
             Pay online and save {formatPaise(cod.fee)} — plus faster dispatch.
           </p>
         )}
 
         {method === "cod" && cod?.verification === "otp" && (
-          <p className="mt-3 text-xs text-ink-muted">
+          <p className="mt-3 text-xs text-content-muted">
             We will send a WhatsApp message to confirm this order.
           </p>
         )}
 
         {method === "cod" && cod?.verification === "partial-payment" && (
-          <p className="mt-3 text-xs text-ink-muted">
+          <p className="mt-3 text-xs text-content-muted">
             This order needs a {formatPaise(cod.partialPayment)} advance to
             confirm. The rest is paid on delivery.
           </p>
@@ -310,15 +310,15 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
         {/* Terms that differ between visits need a reason on screen, or a fee
             that quietly appears reads as a mistake. */}
         {phoneVerified ? (
-          <p className="mt-3 text-xs text-ink-faint">
+          <p className="mt-3 text-xs text-content-faint">
             This number is verified on your account.
           </p>
         ) : (
           phoneValid && (
-            <p className="mt-3 text-xs text-ink-faint">
+            <p className="mt-3 text-xs text-content-faint">
               <Link
                 href="/signin?next=/checkout"
-                className="border-b border-ink/40 pb-0.5 hover:border-mulberry hover:text-mulberry"
+                className="border-b border-content/40 pb-0.5 hover:border-accent-ink hover:text-accent-ink"
               >
                 Sign in
               </Link>{" "}
@@ -343,14 +343,14 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
         </Button>
 
         {error && (
-          <p aria-live="polite" className="mt-2 text-center text-xs text-mulberry">
+          <p aria-live="polite" className="mt-2 text-center text-xs text-accent-ink">
             {error}
           </p>
         )}
 
         {/* The order is recorded and invoiced, but no money moves: Razorpay is
             not connected. Saying so beats implying a payment was taken. */}
-        <p className="mt-2 text-center text-xs text-ink-faint">
+        <p className="mt-2 text-center text-xs text-content-faint">
           Razorpay is not connected — the order is recorded, no payment is taken.
         </p>
       </div>
@@ -370,7 +370,7 @@ function Section({
   return (
     <section>
       <div className="flex items-baseline gap-3 border-b border-[var(--color-rule)] pb-3">
-        <span className="font-display text-xl font-light text-mulberry">
+        <span className="font-display text-xl font-light text-accent-ink">
           {step}
         </span>
         <MicroLabel>{title}</MicroLabel>
@@ -393,7 +393,7 @@ function Field({
 }) {
   return (
     <div className={className}>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm text-ink-muted">
+      <label htmlFor={htmlFor} className="mb-1.5 block text-sm text-content-muted">
         {label}
       </label>
       {children}
@@ -423,10 +423,10 @@ function PaymentOption({
       className={[
         "flex cursor-pointer items-start gap-3 border p-4 transition-colors",
         disabled
-          ? "cursor-not-allowed border-ink/10 text-ink-faint"
+          ? "cursor-not-allowed border-content/10 text-content-faint"
           : active
-            ? "border-mulberry bg-mulberry/[0.04]"
-            : "border-ink/20 hover:border-ink/40",
+            ? "border-accent-ink bg-accent/[0.04]"
+            : "border-content/20 hover:border-content/40",
       ].join(" ")}
     >
       <input
@@ -440,7 +440,7 @@ function PaymentOption({
       />
       <span>
         <span className="block text-sm font-medium">{title}</span>
-        <span className="mt-0.5 block text-xs text-ink-muted">{note}</span>
+        <span className="mt-0.5 block text-xs text-content-muted">{note}</span>
       </span>
     </label>
   );

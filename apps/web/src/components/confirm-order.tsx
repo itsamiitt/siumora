@@ -21,8 +21,8 @@ export function ConfirmOrder({ orderNumber }: { orderNumber: string }) {
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <div className="mt-8 border border-mulberry/25 bg-mulberry/[0.04] p-5 text-center">
-      <p className="text-sm text-ink-muted">
+    <div className="mt-8 border border-accent-ink/25 bg-accent/[0.04] p-5 text-center">
+      <p className="text-sm text-content-muted">
         WhatsApp is not connected in this environment. Confirm here to continue
         the order.
       </p>
@@ -41,7 +41,7 @@ export function ConfirmOrder({ orderNumber }: { orderNumber: string }) {
       >
         {pending ? "Confirming…" : "Confirm order"}
       </Button>
-      {error && <p className="mt-2 text-xs text-mulberry">{error}</p>}
+      {error && <p className="mt-2 text-xs text-accent-ink">{error}</p>}
     </div>
   );
 }

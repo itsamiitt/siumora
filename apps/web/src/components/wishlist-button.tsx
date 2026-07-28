@@ -74,7 +74,7 @@ export function WishlistButton({
           }
         })
       }
-      className="transition-colors hover:text-mulberry"
+      className="transition-colors hover:text-accent-ink"
     >
       <MicroLabel tone={saved ? "mulberry" : "ink"}>
         {saved ? "Saved" : "Save for later"}

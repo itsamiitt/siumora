@@ -53,7 +53,7 @@ export function CartLines({ lines }: { lines: CartLine[] }) {
         <li key={line.variantId} className="flex gap-5 py-6">
           <Link
             href={`/products/${line.productHandle}`}
-            className="shrink-0 bg-blush"
+            className="shrink-0 bg-ground-raised"
           >
             <Image
               src={line.imageUrl}
@@ -75,7 +75,7 @@ export function CartLines({ lines }: { lines: CartLine[] }) {
                     {line.title}
                   </h2>
                 </Link>
-                <p className="mt-1 text-sm text-ink-muted">
+                <p className="mt-1 text-sm text-content-muted">
                   {line.variantTitle}
                 </p>
               </div>
@@ -85,7 +85,7 @@ export function CartLines({ lines }: { lines: CartLine[] }) {
             </div>
 
             <div className="mt-auto flex items-center justify-between gap-4 pt-4">
-              <div className="flex items-center border border-ink/20">
+              <div className="flex items-center border border-content/20">
                 <QuantityButton
                   label="Decrease quantity"
                   onClick={() =>
@@ -110,7 +110,7 @@ export function CartLines({ lines }: { lines: CartLine[] }) {
               <button
                 type="button"
                 onClick={() => changeQuantity(line.variantId, 0)}
-                className="transition-colors hover:text-mulberry"
+                className="transition-colors hover:text-accent-ink"
               >
                 <MicroLabel>Remove</MicroLabel>
               </button>
@@ -136,7 +136,7 @@ function QuantityButton({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="flex h-9 w-9 items-center justify-center text-base transition-colors hover:text-mulberry"
+      className="flex h-9 w-9 items-center justify-center text-base transition-colors hover:text-accent-ink"
     >
       {children}
     </button>

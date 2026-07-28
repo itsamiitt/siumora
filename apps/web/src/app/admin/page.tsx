@@ -35,7 +35,7 @@ export default async function AdminPage() {
         <Display as="h1" size="sm">
           Ops
         </Display>
-        <p className="mt-4 text-ink-muted">
+        <p className="mt-4 text-content-muted">
           {viewer
             ? "This account is not on the operator list."
             : "Sign in with an operator number to open the dashboard."}
@@ -43,7 +43,7 @@ export default async function AdminPage() {
         {!viewer && (
           <Link
             href="/signin?next=/admin"
-            className="mt-8 border-b border-ink pb-1 transition-colors hover:border-mulberry hover:text-mulberry"
+            className="mt-8 border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
           >
             <MicroLabel>Sign in</MicroLabel>
           </Link>
@@ -69,7 +69,7 @@ export default async function AdminPage() {
 
       {/* 2FA beyond the sign-in code is still outstanding, and this page is
           worth being straight about rather than implying it is fully hardened. */}
-      <p className="mt-3 text-sm text-ink-faint">
+      <p className="mt-3 text-sm text-content-faint">
         Signed in as {viewer.customer.maskedPhone}. Operator access comes from
         the <code>ADMIN_PHONES</code> allow-list; a second factor beyond the
         sign-in code is not built yet.
@@ -87,7 +87,7 @@ export default async function AdminPage() {
             note={`${revenue.orderCount} orders`}
           />
         </div>
-        <p className="mt-3 text-xs text-ink-muted">
+        <p className="mt-3 text-xs text-content-muted">
           Booked value is {formatPaise(revenue.booked)}. Only delivered orders
           count as revenue — a parcel in transit can still come back.
         </p>
@@ -100,10 +100,10 @@ export default async function AdminPage() {
           <ul className="divide-y divide-[var(--color-rule)] border-y border-[var(--color-rule)]">
             {queue.map((order) => (
               <li key={order.id} className="flex items-baseline justify-between gap-4 py-3">
-                <Link href={`/orders/${order.number}`} className="hover:text-mulberry">
+                <Link href={`/orders/${order.number}`} className="hover:text-accent-ink">
                   <MicroLabel>{order.number}</MicroLabel>
                 </Link>
-                <span className="text-sm text-ink-muted">
+                <span className="text-sm text-content-muted">
                   Attempt {order.deliveryAttempts ?? 1} · {order.address.pincode}
                 </span>
               </li>
@@ -123,11 +123,11 @@ export default async function AdminPage() {
       <Section title="GST desk">
         <div className="flex flex-wrap gap-x-10 gap-y-3 text-sm">
           <span>
-            <span className="text-ink-muted">Invoices issued </span>
+            <span className="text-content-muted">Invoices issued </span>
             {series.issued}
           </span>
-          <span className={series.healthy ? "" : "text-mulberry"}>
-            <span className="text-ink-muted">Series </span>
+          <span className={series.healthy ? "" : "text-accent-ink"}>
+            <span className="text-content-muted">Series </span>
             {series.healthy
               ? "unbroken"
               : `gaps at ${series.gaps.join(", ")}`}
@@ -143,7 +143,7 @@ export default async function AdminPage() {
           <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
             {Object.entries(counts).map(([status, count]) => (
               <span key={status}>
-                <span className="text-ink-muted">
+                <span className="text-content-muted">
                   {status.replace(/_/g, " ")}{" "}
                 </span>
                 {count}
@@ -166,7 +166,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-ink-muted">{children}</p>;
+  return <p className="text-sm text-content-muted">{children}</p>;
 }
 
 function Stat({
@@ -184,11 +184,11 @@ function Stat({
     <div className="border border-[var(--color-rule)] p-4">
       <MicroLabel>{label}</MicroLabel>
       <p
-        className={`mt-2 font-display text-2xl font-light ${accent ? "text-mulberry" : "text-ink"}`}
+        className={`mt-2 font-display text-2xl font-light ${accent ? "text-accent-ink" : "text-content"}`}
       >
         {value}
       </p>
-      {note && <p className="mt-1 text-xs text-ink-faint">{note}</p>}
+      {note && <p className="mt-1 text-xs text-content-faint">{note}</p>}
     </div>
   );
 }
@@ -204,7 +204,7 @@ function RtoTable({
 
   return (
     <table className="w-full text-sm">
-      <thead className="text-ink-muted">
+      <thead className="text-content-muted">
         <tr className="text-left">
           <th className="pb-2 font-normal">Key</th>
           <th className="pb-2 text-right font-normal">Settled</th>
@@ -221,7 +221,7 @@ function RtoTable({
             {/* A quarter of a lane coming back is the point at which the
                 unit economics stop working. */}
             <td
-              className={`py-2 text-right tabular-nums ${row.rate >= 0.25 ? "text-mulberry" : ""}`}
+              className={`py-2 text-right tabular-nums ${row.rate >= 0.25 ? "text-accent-ink" : ""}`}
             >
               {Math.round(row.rate * 100)}%
             </td>
@@ -239,7 +239,7 @@ function HsnTable({ orders }: { orders: readonly Order[] }) {
     .flatMap((order) => order.lines);
 
   if (lines.length === 0) {
-    return <p className="mt-4 text-sm text-ink-muted">No invoices raised yet.</p>;
+    return <p className="mt-4 text-sm text-content-muted">No invoices raised yet.</p>;
   }
 
   const rows = hsnSummary(lines, { interState: false });
@@ -247,7 +247,7 @@ function HsnTable({ orders }: { orders: readonly Order[] }) {
 
   return (
     <table className="mt-5 w-full text-sm">
-      <thead className="text-ink-muted">
+      <thead className="text-content-muted">
         <tr className="text-left">
           <th className="pb-2 font-normal">HSN</th>
           <th className="pb-2 text-right font-normal">Taxable</th>
@@ -258,7 +258,7 @@ function HsnTable({ orders }: { orders: readonly Order[] }) {
         {rows.map((row) => (
           <tr key={`${row.hsn}-${row.slab}`} className="border-t border-[var(--color-rule)]">
             <td className="py-2">
-              {row.hsn} <span className="text-ink-faint">@{row.slab}%</span>
+              {row.hsn} <span className="text-content-faint">@{row.slab}%</span>
             </td>
             <td className="py-2 text-right tabular-nums">
               {formatPaise(row.taxableValue, { showPaise: true })}
@@ -268,7 +268,7 @@ function HsnTable({ orders }: { orders: readonly Order[] }) {
             </td>
           </tr>
         ))}
-        <tr className="border-t border-ink/20 font-medium">
+        <tr className="border-t border-content/20 font-medium">
           <td className="py-2">Total</td>
           <td className="py-2 text-right tabular-nums">
             {formatPaise(totals.taxableValue, { showPaise: true })}

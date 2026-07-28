@@ -7,8 +7,11 @@ import { MicroLabel, SiumoraLockupStacked } from "@siumora/ui";
  * is room. Ink Plate ground, so the mark is set in ivory with a brass kernel.
  */
 export function SiteFooter() {
+  // Plate in both themes — it is the kit's named dark surface, not a role that
+  // flips. The brass hairline is what keeps it distinct on a dark page, where a
+  // plate block on a plate ground would otherwise have no edge.
   return (
-    <footer className="mt-24 bg-plate text-ivory">
+    <footer className="mt-24 border-t border-brass/40 bg-plate text-ivory">
       <div className="mx-auto max-w-6xl px-5 py-16">
         <div className="flex flex-col items-center gap-4 text-center">
           <SiumoraLockupStacked size={52} tone="ivory" />

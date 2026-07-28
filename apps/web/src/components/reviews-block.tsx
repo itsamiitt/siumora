@@ -15,7 +15,7 @@ export function ReviewsBlock({ reviews }: { reviews: readonly Review[] }) {
     return (
       <section className="mt-16 border-t border-[var(--color-rule)] pt-10">
         <CollectionTitle className="text-xs">Reviews</CollectionTitle>
-        <p className="mt-4 text-sm text-ink-muted">
+        <p className="mt-4 text-sm text-content-muted">
           No reviews yet. Yours would be the first.
         </p>
       </section>
@@ -34,7 +34,7 @@ export function ReviewsBlock({ reviews }: { reviews: readonly Review[] }) {
             {summary.average.toFixed(1)}
           </p>
           <Stars rating={summary.average} className="mt-1.5" />
-          <p className="mt-1.5 text-xs text-ink-muted">
+          <p className="mt-1.5 text-xs text-content-muted">
             {summary.count} verified {summary.count === 1 ? "buyer" : "buyers"}
           </p>
         </div>
@@ -46,16 +46,16 @@ export function ReviewsBlock({ reviews }: { reviews: readonly Review[] }) {
 
             return (
               <div key={star} className="flex items-center gap-3 text-xs">
-                <dt className="w-3 text-ink-muted">{star}</dt>
+                <dt className="w-3 text-content-muted">{star}</dt>
                 <dd className="flex-1">
-                  <div className="h-px w-full bg-ink/12">
+                  <div className="h-px w-full bg-content/12">
                     <div
-                      className="h-px bg-mulberry"
+                      className="h-px bg-accent"
                       style={{ width: `${width}%` }}
                     />
                   </div>
                 </dd>
-                <span className="w-4 text-right tabular-nums text-ink-faint">
+                <span className="w-4 text-right tabular-nums text-content-faint">
                   {value}
                 </span>
               </div>
@@ -74,10 +74,10 @@ export function ReviewsBlock({ reviews }: { reviews: readonly Review[] }) {
             <h3 className="mt-2.5 font-heading text-sm uppercase" style={{ letterSpacing: "var(--tracking-caps)" }}>
               {review.title}
             </h3>
-            <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">
+            <p className="mt-1.5 text-sm leading-relaxed text-content-muted">
               {review.body}
             </p>
-            <p className="mt-2 text-xs text-ink-faint">
+            <p className="mt-2 text-xs text-content-faint">
               {review.authorName} ·{" "}
               {new Date(review.createdAt).toLocaleDateString("en-IN", {
                 day: "numeric",

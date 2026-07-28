@@ -21,13 +21,13 @@ export default async function HomePage() {
           <Display as="h1" size="lg" className="mx-auto mt-6 max-w-2xl">
             Something given, something kept.
           </Display>
-          <p className="mx-auto mt-6 max-w-md text-ink-muted">
+          <p className="mx-auto mt-6 max-w-md text-content-muted">
             Demi-fine jewellery in 925 sterling silver and 18k gold PVD. Made to
             be worn, not stored.
           </p>
           <Link
             href="/collections/everyday"
-            className="mt-9 inline-block border-b border-ink pb-1 transition-colors hover:border-mulberry hover:text-mulberry"
+            className="mt-9 inline-block border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
           >
             <MicroLabel>Shop everyday</MicroLabel>
           </Link>
@@ -36,9 +36,9 @@ export default async function HomePage() {
 
       {/* Jaali band. The pattern never carries the logo — it is what the logo
           is made of — so this band holds a line of copy instead. */}
-      <section className="siumora-jaali border-b border-[var(--color-rule)] bg-blush/40">
+      <section className="siumora-jaali border-b border-[var(--color-rule)] bg-ground-raised/40">
         <div className="mx-auto max-w-6xl px-5 py-14 text-center">
-          <p className="font-display text-2xl font-light text-ink">
+          <p className="font-display text-2xl font-light text-content">
             Every piece leaves here wrapped as a gift.
           </p>
         </div>
@@ -49,7 +49,7 @@ export default async function HomePage() {
           <CollectionTitle className="text-sm">New in</CollectionTitle>
           <Link
             href="/collections/everyday"
-            className="transition-colors hover:text-mulberry"
+            className="transition-colors hover:text-accent-ink"
           >
             <MicroLabel>View all</MicroLabel>
           </Link>
@@ -69,12 +69,12 @@ export default async function HomePage() {
             <Link
               key={collection.id}
               href={`/collections/${collection.handle}`}
-              className="border border-[var(--color-rule)] p-8 transition-colors hover:border-mulberry/40"
+              className="border border-[var(--color-rule)] p-8 transition-colors hover:border-accent-ink/40"
             >
               <CollectionTitle className="text-xs">
                 {collection.title}
               </CollectionTitle>
-              <p className="mt-3 text-sm text-ink-muted">
+              <p className="mt-3 text-sm text-content-muted">
                 {collection.description}
               </p>
             </Link>

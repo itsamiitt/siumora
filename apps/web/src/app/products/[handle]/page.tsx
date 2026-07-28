@@ -75,7 +75,7 @@ export default async function ProductPage({ params }: PageProps) {
       <div className="grid gap-12 lg:grid-cols-2">
         {/* Held at the catalogue's 4:5 ratio so the plate never stretches to
             match whatever the detail column happens to be. */}
-        <div className="aspect-4/5 self-start bg-blush">
+        <div className="aspect-4/5 self-start bg-ground-raised">
           <Image
             src={image.url}
             alt={image.alt}
@@ -96,7 +96,7 @@ export default async function ProductPage({ params }: PageProps) {
             {product.title}
           </Display>
 
-          <p className="mt-3 text-ink-muted">{product.subtitle}</p>
+          <p className="mt-3 text-content-muted">{product.subtitle}</p>
 
           <Price
             mrp={price.mrp}
@@ -125,16 +125,16 @@ export default async function ProductPage({ params }: PageProps) {
 
           <dl className="mt-10 space-y-4 border-t border-[var(--color-rule)] pt-8 text-sm">
             <div>
-              <dt className="text-ink-muted">Material</dt>
+              <dt className="text-content-muted">Material</dt>
               <dd className="mt-1">{product.material}</dd>
             </div>
             <div>
               {/* Required on every listing under the Legal Metrology rules. */}
-              <dt className="text-ink-muted">Country of origin</dt>
+              <dt className="text-content-muted">Country of origin</dt>
               <dd className="mt-1">{COUNTRY_OF_ORIGIN}</dd>
             </div>
             <div>
-              <dt className="text-ink-muted">About</dt>
+              <dt className="text-content-muted">About</dt>
               <dd className="mt-1 leading-relaxed">{product.description}</dd>
             </div>
           </dl>

@@ -40,12 +40,12 @@ export default async function AccountPage() {
         <Display as="h1" size="sm">
           Your orders
         </Display>
-        <p className="mt-4 text-ink-muted">
+        <p className="mt-4 text-content-muted">
           Sign in with your mobile number to see everything you have ordered.
         </p>
         <Link
           href="/signin?next=/account"
-          className="mt-8 border-b border-ink pb-1 transition-colors hover:border-mulberry hover:text-mulberry"
+          className="mt-8 border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
         >
           <MicroLabel>Sign in</MicroLabel>
         </Link>
@@ -64,14 +64,14 @@ export default async function AccountPage() {
         <SignOutButton />
       </div>
 
-      <p className="mt-3 text-sm text-ink-faint">
+      <p className="mt-3 text-sm text-content-faint">
         Signed in as {viewer.customer.maskedPhone}.
         {viewer.isAdmin && (
           <>
             {" "}
             <Link
               href="/admin"
-              className="border-b border-ink/40 pb-0.5 hover:border-mulberry hover:text-mulberry"
+              className="border-b border-content/40 pb-0.5 hover:border-accent-ink hover:text-accent-ink"
             >
               Open the ops dashboard
             </Link>
@@ -82,10 +82,10 @@ export default async function AccountPage() {
 
       {orders.length === 0 ? (
         <div className="mt-16 text-center">
-          <p className="text-ink-muted">No orders yet.</p>
+          <p className="text-content-muted">No orders yet.</p>
           <Link
             href="/collections/everyday"
-            className="mt-6 inline-block border-b border-ink pb-1 transition-colors hover:border-mulberry hover:text-mulberry"
+            className="mt-6 inline-block border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
           >
             <MicroLabel>Start here</MicroLabel>
           </Link>
@@ -96,11 +96,11 @@ export default async function AccountPage() {
             <li key={order.id}>
               <Link
                 href={`/orders/${order.number}`}
-                className="flex flex-wrap items-baseline justify-between gap-4 py-5 transition-colors hover:text-mulberry"
+                className="flex flex-wrap items-baseline justify-between gap-4 py-5 transition-colors hover:text-accent-ink"
               >
                 <div>
                   <MicroLabel>{order.number}</MicroLabel>
-                  <p className="mt-1.5 text-sm text-ink-muted">
+                  <p className="mt-1.5 text-sm text-content-muted">
                     {order.lines.length}{" "}
                     {order.lines.length === 1 ? "piece" : "pieces"} ·{" "}
                     {new Date(order.placedAt).toLocaleDateString("en-IN", {
@@ -110,7 +110,7 @@ export default async function AccountPage() {
                     })}
                   </p>
                   {order.invoiceNumber && (
-                    <p className="mt-1 text-xs text-ink-faint">
+                    <p className="mt-1 text-xs text-content-faint">
                       Invoice {order.invoiceNumber}
                     </p>
                   )}
@@ -118,7 +118,7 @@ export default async function AccountPage() {
 
                 <div className="text-right">
                   <p className="font-medium">{formatPaise(order.totals.total)}</p>
-                  <p className="mt-1 text-xs text-ink-muted">
+                  <p className="mt-1 text-xs text-content-muted">
                     {STATUS_LABEL[order.status]}
                   </p>
                 </div>

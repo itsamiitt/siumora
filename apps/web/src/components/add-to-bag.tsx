@@ -87,10 +87,10 @@ export function AddToBag({
                 onClick={() => setSelectedId(variant.id)}
                 className={
                   soldOut
-                    ? "cursor-not-allowed border border-ink/12 px-5 py-2.5 text-sm text-ink-faint line-through"
+                    ? "cursor-not-allowed border border-content/12 px-5 py-2.5 text-sm text-content-faint line-through"
                     : active
-                      ? "border border-mulberry bg-mulberry/5 px-5 py-2.5 text-sm text-mulberry"
-                      : "border border-ink/25 px-5 py-2.5 text-sm transition-colors hover:border-mulberry hover:text-mulberry"
+                      ? "border border-accent-ink bg-accent/5 px-5 py-2.5 text-sm text-accent-ink"
+                      : "border border-content/25 px-5 py-2.5 text-sm transition-colors hover:border-accent-ink hover:text-accent-ink"
                 }
               >
                 {variant.title}
@@ -102,7 +102,7 @@ export function AddToBag({
 
       {/* Low-stock nudge only where it is true — a permanent banner is noise. */}
       {selected && selected.inventory > 0 && selected.inventory <= 5 && (
-        <p className="mt-3 text-xs text-mulberry">
+        <p className="mt-3 text-xs text-accent-ink">
           Only {selected.inventory} left
         </p>
       )}
@@ -117,7 +117,7 @@ export function AddToBag({
       </Button>
 
       {message && (
-        <p aria-live="polite" className="mt-2 text-center text-xs text-ink-muted">
+        <p aria-live="polite" className="mt-2 text-center text-xs text-content-muted">
           {message}
         </p>
       )}

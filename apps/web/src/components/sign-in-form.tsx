@@ -87,8 +87,8 @@ export function SignInForm({ next = "/account" }: { next?: string }) {
             <MicroLabel>Mobile number</MicroLabel>
           </label>
 
-          <div className="mt-3 flex items-center border border-ink/20 focus-within:border-mulberry">
-            <span className="pl-3 text-sm text-ink-muted">+91</span>
+          <div className="mt-3 flex items-center border border-content/20 focus-within:border-accent-ink">
+            <span className="pl-3 text-sm text-content-muted">+91</span>
             <input
               id="phone"
               value={phone}
@@ -119,7 +119,7 @@ export function SignInForm({ next = "/account" }: { next?: string }) {
           <label htmlFor="code" className="block">
             <MicroLabel>Enter the code</MicroLabel>
           </label>
-          <p className="mt-2 text-sm text-ink-muted">
+          <p className="mt-2 text-sm text-content-muted">
             Sent to {maskPhone(normalisePhone(phone) ?? "")}.{" "}
             <button
               type="button"
@@ -128,7 +128,7 @@ export function SignInForm({ next = "/account" }: { next?: string }) {
                 setCode("");
                 setMessage(null);
               }}
-              className="border-b border-ink pb-0.5 hover:border-mulberry hover:text-mulberry"
+              className="border-b border-content pb-0.5 hover:border-accent-ink hover:text-accent-ink"
             >
               Change
             </button>
@@ -143,7 +143,7 @@ export function SignInForm({ next = "/account" }: { next?: string }) {
             autoComplete="one-time-code"
             maxLength={OTP_LENGTH}
             placeholder="000000"
-            className="mt-3 h-12 w-full border border-ink/20 bg-transparent px-3 text-center text-xl tracking-[0.4em] outline-none focus:border-mulberry"
+            className="mt-3 h-12 w-full border border-content/20 bg-transparent px-3 text-center text-xl tracking-[0.4em] outline-none focus:border-accent-ink"
           />
 
           <Button
@@ -158,7 +158,7 @@ export function SignInForm({ next = "/account" }: { next?: string }) {
             type="button"
             onClick={send}
             disabled={cooldown > 0 || pending}
-            className="mt-4 w-full text-sm text-ink-muted disabled:opacity-60"
+            className="mt-4 w-full text-sm text-content-muted disabled:opacity-60"
           >
             {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
           </button>
@@ -166,7 +166,7 @@ export function SignInForm({ next = "/account" }: { next?: string }) {
       )}
 
       {message && (
-        <p role="alert" className="mt-4 text-sm text-mulberry">
+        <p role="alert" className="mt-4 text-sm text-accent-ink">
           {message}
         </p>
       )}
@@ -175,12 +175,12 @@ export function SignInForm({ next = "/account" }: { next?: string }) {
         // Shown, and labelled, because no WhatsApp or SMS sender is connected.
         // A code silently present in a response would be far worse than one
         // the page admits it is displaying.
-        <div className="mt-6 border border-dashed border-ink/25 p-4 text-sm">
+        <div className="mt-6 border border-dashed border-content/25 p-4 text-sm">
           <MicroLabel>No message sender connected</MicroLabel>
-          <p className="mt-2 text-ink-muted">
+          <p className="mt-2 text-content-muted">
             Nothing was sent to your phone. This environment shows the code
             instead:{" "}
-            <span className="font-medium tracking-[0.3em] text-ink">
+            <span className="font-medium tracking-[0.3em] text-content">
               {developmentCode}
             </span>
           </p>

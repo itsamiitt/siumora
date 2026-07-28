@@ -43,14 +43,14 @@ export function OrderSummary({
             <dt className="font-medium">Total</dt>
             <dd className="text-lg font-medium">{formatPaise(totals.total)}</dd>
           </div>
-          <p className="mt-1 text-xs text-ink-muted">Inclusive of all taxes</p>
+          <p className="mt-1 text-xs text-content-muted">Inclusive of all taxes</p>
         </div>
 
         {/* The breakup that appears on the GST invoice. Shown to the paise:
             rounded to whole rupees the components stop summing to the total
             (₹1,895 + ₹47 + ₹47 reads as ₹1,989 against a ₹1,990 charge), which
             on a tax document looks like an error. */}
-        <div className="space-y-1.5 border-t border-[var(--color-rule)] pt-3.5 text-xs text-ink-muted">
+        <div className="space-y-1.5 border-t border-[var(--color-rule)] pt-3.5 text-xs text-content-muted">
           <Row label="Taxable value" small>
             {formatPaise(totals.gst.taxableValue, { showPaise: true })}
           </Row>
@@ -87,8 +87,8 @@ function Row({
 }) {
   return (
     <div className="flex justify-between gap-4">
-      <dt className={small ? "" : "text-ink-muted"}>{label}</dt>
-      <dd className={tone === "mulberry" ? "text-mulberry" : undefined}>
+      <dt className={small ? "" : "text-content-muted"}>{label}</dt>
+      <dd className={tone === "mulberry" ? "text-accent-ink" : undefined}>
         {children}
       </dd>
     </div>

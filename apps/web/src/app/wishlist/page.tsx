@@ -26,12 +26,12 @@ export default async function WishlistPage() {
         <Display as="h1" size="sm">
           Nothing saved yet.
         </Display>
-        <p className="mt-4 text-ink-muted">
+        <p className="mt-4 text-content-muted">
           Save a piece and it waits here for you.
         </p>
         <Link
           href="/collections/everyday"
-          className="mt-8 border-b border-ink pb-1 transition-colors hover:border-mulberry hover:text-mulberry"
+          className="mt-8 border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
         >
           <MicroLabel>Shop everyday</MicroLabel>
         </Link>

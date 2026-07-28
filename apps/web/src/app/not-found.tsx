@@ -8,12 +8,12 @@ export default function NotFound() {
       <Display as="h1" size="md">
         Nothing kept here.
       </Display>
-      <p className="mt-4 text-ink-muted">
+      <p className="mt-4 text-content-muted">
         The page you were looking for has moved or never existed.
       </p>
       <Link
         href="/"
-        className="mt-8 border-b border-ink pb-1 transition-colors hover:border-mulberry hover:text-mulberry"
+        className="mt-8 border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
       >
         <MicroLabel>Back to shop</MicroLabel>
       </Link>

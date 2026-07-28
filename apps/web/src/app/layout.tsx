@@ -7,6 +7,7 @@ import { ConsentBanner } from "@/components/consent-banner";
 import { JsonLdScript } from "@/components/json-ld";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { THEME_SCRIPT } from "@/components/theme-toggle";
 
 import "./globals.css";
 
@@ -50,7 +51,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#F7F3EA",
+  // Two values so the browser chrome matches the ground the page actually
+  // paints — Kagaz Ivory light, Ink Plate dark.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#F7F3EA" },
+    { media: "(prefers-color-scheme: dark)", color: "#14110F" },
+  ],
 };
 
 export default function RootLayout({
@@ -60,7 +66,12 @@ export default function RootLayout({
     <html
       lang="en-IN"
       className={`${cormorant.variable} ${marcellus.variable} ${jost.variable}`}
+      suppressHydrationWarning
     >
+      <head>
+        {/* Before paint, so a dark-theme visitor never sees an ivory flash. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="flex min-h-dvh flex-col">
         <JsonLdScript data={[organizationJsonLd(), websiteJsonLd()]} />
         <SiteHeader />

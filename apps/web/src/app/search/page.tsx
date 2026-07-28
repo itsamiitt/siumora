@@ -37,7 +37,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
       </div>
 
       {query && (
-        <p className="mt-6 text-sm text-ink-muted">
+        <p className="mt-6 text-sm text-content-muted">
           {hits.length === 0
             ? `Nothing matches “${query}”.`
             : `${hits.length} ${hits.length === 1 ? "piece" : "pieces"} for “${query}”`}
@@ -55,7 +55,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
       {/* A dead end is a lost sale, so an empty result always offers a way on. */}
       {query && hits.length === 0 && (
         <div className="mt-8">
-          <p className="text-sm text-ink-muted">
+          <p className="text-sm text-content-muted">
             Try a different word, or start here.
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
@@ -63,7 +63,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
               <Link
                 key={name}
                 href={`/collections/${name.toLowerCase().replace(/\s+/g, "-")}`}
-                className="border border-ink/20 px-4 py-2 transition-colors hover:border-mulberry hover:text-mulberry"
+                className="border border-content/20 px-4 py-2 transition-colors hover:border-accent-ink hover:text-accent-ink"
               >
                 <MicroLabel>{name}</MicroLabel>
               </Link>

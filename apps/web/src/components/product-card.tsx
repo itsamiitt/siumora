@@ -11,7 +11,7 @@ export function ProductCard({ product }: { product: Product }) {
 
   return (
     <Link href={`/products/${product.handle}`} className="group block">
-      <div className="relative aspect-4/5 overflow-hidden bg-blush">
+      <div className="relative aspect-4/5 overflow-hidden bg-ground-raised">
         <Image
           src={image.url}
           alt={image.alt}
@@ -22,17 +22,17 @@ export function ProductCard({ product }: { product: Product }) {
         />
 
         {!available && (
-          <div className="absolute inset-x-0 bottom-0 bg-ivory/92 py-2 text-center">
+          <div className="absolute inset-x-0 bottom-0 bg-ground/92 py-2 text-center">
             <MicroLabel>Sold out</MicroLabel>
           </div>
         )}
       </div>
 
       <div className="mt-4">
-        <h3 className="font-heading text-sm uppercase text-ink" style={{ letterSpacing: "var(--tracking-caps)" }}>
+        <h3 className="font-heading text-sm uppercase text-content" style={{ letterSpacing: "var(--tracking-caps)" }}>
           {product.title}
         </h3>
-        <p className="mt-1 text-sm text-ink-muted">{product.subtitle}</p>
+        <p className="mt-1 text-sm text-content-muted">{product.subtitle}</p>
         <Price mrp={price.mrp} selling={price.selling} size="sm" className="mt-2" />
       </div>
     </Link>

@@ -57,7 +57,7 @@ export function CartBadge() {
   }, []);
 
   return (
-    <Link href="/cart" className="transition-colors hover:text-mulberry">
+    <Link href="/cart" className="transition-colors hover:text-accent-ink">
       <MicroLabel>Bag{count ? ` (${count})` : ""}</MicroLabel>
     </Link>
   );

@@ -51,9 +51,9 @@ export function OrderProgress({
   if (next.length === 0) return null;
 
   return (
-    <div className="mt-8 border border-dashed border-ink/20 p-5">
+    <div className="mt-8 border border-dashed border-content/20 p-5">
       <MicroLabel>Courier simulation</MicroLabel>
-      <p className="mt-2 text-xs text-ink-muted">
+      <p className="mt-2 text-xs text-content-muted">
         Shiprocket is not connected. These move the order the way the courier
         webhook would.
       </p>
@@ -95,7 +95,7 @@ export function OrderProgress({
         ))}
       </div>
 
-      {error && <p className="mt-3 text-xs text-mulberry">{error}</p>}
+      {error && <p className="mt-3 text-xs text-accent-ink">{error}</p>}
     </div>
   );
 }

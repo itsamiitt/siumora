@@ -54,7 +54,7 @@ export function Stars({
       </span>
 
       {count !== undefined && (
-        <span className="font-body text-xs text-ink-muted">
+        <span className="font-body text-xs text-content-muted">
           {rating.toFixed(1)} ({count})
         </span>
       )}

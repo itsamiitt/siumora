@@ -65,7 +65,7 @@ export default async function OrderPage({ params }: PageProps) {
         <Display as="h1" size="sm" className="mt-6">
           {headline.title}
         </Display>
-        <p className="mt-3 text-ink-muted">{headline.detail}</p>
+        <p className="mt-3 text-content-muted">{headline.detail}</p>
         <p className="mt-5">
           <MicroLabel>Order {order.number}</MicroLabel>
         </p>
@@ -87,9 +87,9 @@ export default async function OrderPage({ params }: PageProps) {
           customer to infer it from a status word in a list is how a support
           ticket starts. */}
       {order.status === "rto" && (
-        <div className="mt-8 border border-mulberry/30 bg-mulberry/[0.04] p-5">
+        <div className="mt-8 border border-accent-ink/30 bg-accent/[0.04] p-5">
           <MicroLabel tone="mulberry">On its way back to us</MicroLabel>
-          <p className="mt-2.5 text-sm text-ink-muted">
+          <p className="mt-2.5 text-sm text-content-muted">
             {order.ndrReason === "customer_refused"
               ? "The parcel was refused at the door, so it is returning to us."
               : `The courier tried ${order.deliveryAttempts ?? MAX_DELIVERY_ATTEMPTS} times and could not deliver, so the parcel is returning to us.`}{" "}
@@ -107,9 +107,9 @@ export default async function OrderPage({ params }: PageProps) {
       )}
 
       {openReturn && (
-        <div className="mt-8 border border-mulberry/25 bg-mulberry/[0.04] p-5">
+        <div className="mt-8 border border-accent-ink/25 bg-accent/[0.04] p-5">
           <MicroLabel tone="mulberry">Return {openReturn.status}</MicroLabel>
-          <p className="mt-2 text-sm text-ink-muted">
+          <p className="mt-2 text-sm text-content-muted">
             {openReturn.freeReturnShipping
               ? "We are covering return shipping."
               : "Return shipping is deducted from the refund."}{" "}
@@ -129,11 +129,11 @@ export default async function OrderPage({ params }: PageProps) {
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <CollectionTitle className="text-xs">Tax invoice</CollectionTitle>
           {order.invoiceNumber ? (
-            <span className="text-sm text-ink-muted">{order.invoiceNumber}</span>
+            <span className="text-sm text-content-muted">{order.invoiceNumber}</span>
           ) : (
             // No number is burned until the order is confirmed — the series has
             // to stay gapless within the financial year.
-            <span className="text-sm text-ink-faint">
+            <span className="text-sm text-content-faint">
               Issued once confirmed
             </span>
           )}
@@ -145,9 +145,9 @@ export default async function OrderPage({ params }: PageProps) {
               <div>
                 <p className="text-sm">
                   {line.title}
-                  <span className="text-ink-muted"> · {line.variantTitle}</span>
+                  <span className="text-content-muted"> · {line.variantTitle}</span>
                 </p>
-                <p className="mt-0.5 text-xs text-ink-faint">
+                <p className="mt-0.5 text-xs text-content-faint">
                   HSN {line.hsn} · {line.gstSlab}% GST · Qty {line.quantity}
                 </p>
               </div>
@@ -160,7 +160,7 @@ export default async function OrderPage({ params }: PageProps) {
 
         {/* HSN-wise breakup — the shape the GST return is filed in. */}
         <table className="mt-6 w-full text-xs">
-          <thead className="text-ink-muted">
+          <thead className="text-content-muted">
             <tr className="text-left">
               <th className="pb-2 font-normal">HSN</th>
               <th className="pb-2 text-right font-normal">Taxable</th>
@@ -178,7 +178,7 @@ export default async function OrderPage({ params }: PageProps) {
             {rows.map((row) => (
               <tr key={`${row.hsn}-${row.slab}`} className="border-t border-[var(--color-rule)]">
                 <td className="py-2">
-                  {row.hsn} <span className="text-ink-faint">@{row.slab}%</span>
+                  {row.hsn} <span className="text-content-faint">@{row.slab}%</span>
                 </td>
                 <td className="py-2 text-right tabular-nums">
                   {formatPaise(row.taxableValue, { showPaise: true })}
@@ -229,7 +229,7 @@ export default async function OrderPage({ params }: PageProps) {
       <div className="mt-10 text-center">
         <Link
           href="/collections/everyday"
-          className="border-b border-ink pb-1 transition-colors hover:border-mulberry hover:text-mulberry"
+          className="border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
         >
           <MicroLabel>Keep looking</MicroLabel>
         </Link>
@@ -241,7 +241,7 @@ export default async function OrderPage({ params }: PageProps) {
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-4">
-      <dt className="text-ink-muted">{label}</dt>
+      <dt className="text-content-muted">{label}</dt>
       <dd className="tabular-nums">{children}</dd>
     </div>
   );

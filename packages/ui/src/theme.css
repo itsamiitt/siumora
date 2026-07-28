@@ -24,6 +24,40 @@
   --color-ink-faint: rgb(28 25 23 / 0.34);
   --color-rule: rgb(28 25 23 / 0.12);
 
+  /**
+   * Mulberry lifted for dark surfaces.
+   *
+   * Not a new brand colour: it is Mulberry mixed 40% toward Blush Mist, so the
+   * hue is unchanged and both parents are in the kit. It exists because brand
+   * Mulberry on Ink Plate measures 1.81:1 — invisible, and far below the 4.5:1
+   * that body copy and a focus ring need. This mix measures 4.58:1 on plate.
+   *
+   * It is only ever used on dark surfaces. On ivory it drops to 3.71:1, so the
+   * light theme keeps true Mulberry (9.38:1) and this token is never referenced
+   * there.
+   */
+  --color-mulberry-lifted: #9e717e;
+
+  /* ── Semantic roles ─────────────────────────────────────────────
+   *
+   * The palette above is the brand and never changes — ivory is ivory in
+   * every theme. These are the roles a page actually uses, and they are what
+   * the dark theme reassigns. Components reference roles, so a theme is a
+   * handful of variable swaps rather than a conditional on every element.
+   */
+  --color-ground: var(--color-ivory);
+  --color-ground-raised: var(--color-blush);
+  --color-content: var(--color-ink);
+  --color-content-muted: var(--color-ink-muted);
+  --color-content-faint: var(--color-ink-faint);
+
+  /* Two accent roles, because one value cannot do both jobs on a dark ground.
+     `accent` is the fill — always true Mulberry, which carries ivory type at
+     9.4:1 either way. `accent-ink` is Mulberry used as type or a stroke
+     directly on the ground, where the dark theme needs the lifted tint. */
+  --color-accent: var(--color-mulberry);
+  --color-accent-ink: var(--color-mulberry);
+
   /* ── Type ───────────────────────────────────────────────────── */
   --font-display: var(--font-cormorant), "Cormorant Garamond", serif;
   --font-heading: var(--font-marcellus), "Marcellus", serif;
@@ -44,8 +78,55 @@
 }
 
 /**
- * Base layer. Body is always Kohl Ink on Kagaz Ivory — the guidelines make
- * this unconditional, so it lives here rather than on each page.
+ * The dark theme.
+ *
+ * Ink Plate is the kit's named surface for dark, and the reversal is the one
+ * the printed collateral already uses: ivory type on plate, mulberry still the
+ * single accent, brass still only a stroke or a kernel — never a fill, per rule
+ * 3 of the guidelines.
+ *
+ * The colours are the same seven; only which role each one plays changes. The
+ * ivory-on-plate proportion is inverted from the 62/20/11 spec because the
+ * spec describes ink on ivory, and a dark page that kept it would be a page of
+ * ivory panels.
+ */
+@layer base {
+  :root[data-theme="dark"],
+  :root:not([data-theme="light"]) {
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+
+      --color-ground: var(--color-plate);
+      --color-ground-raised: #1f1a18;
+      --color-content: var(--color-ivory);
+      --color-content-muted: rgb(247 243 234 / 0.66);
+      --color-content-faint: rgb(247 243 234 / 0.4);
+      --color-rule: rgb(247 243 234 / 0.14);
+      --color-accent-ink: var(--color-mulberry-lifted);
+    }
+  }
+
+  /* An explicit choice always wins over the system preference. */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --color-ground: var(--color-plate);
+    --color-ground-raised: #1f1a18;
+    --color-content: var(--color-ivory);
+    --color-content-muted: rgb(247 243 234 / 0.66);
+    --color-content-faint: rgb(247 243 234 / 0.4);
+    --color-rule: rgb(247 243 234 / 0.14);
+    --color-accent-ink: var(--color-mulberry-lifted);
+  }
+}
+
+/**
+ * Base layer. Body is the content role on the ground role — ink on ivory in
+ * the light theme, ivory on plate in the dark one.
  */
 @layer base {
   html {
@@ -53,8 +134,8 @@
   }
 
   body {
-    background-color: var(--color-ivory);
-    color: var(--color-ink);
+    background-color: var(--color-ground);
+    color: var(--color-content);
     font-family: var(--font-body);
     font-weight: 300;
     font-size: 1rem;
@@ -72,13 +153,15 @@
   }
 
   ::selection {
-    background-color: var(--color-mulberry);
+    background-color: var(--color-accent);
     color: var(--color-ivory);
   }
 
-  /* Focus ring uses mulberry, the one accent, so it never competes with brass. */
+  /* Focus ring uses mulberry, the one accent, so it never competes with brass.
+     The `accent-ink` role, because the ring is a stroke on the ground and true
+     mulberry disappears against plate. */
   :focus-visible {
-    outline: 2px solid var(--color-mulberry);
+    outline: 2px solid var(--color-accent-ink);
     outline-offset: 2px;
   }
 
@@ -101,8 +184,17 @@
    * Never place the logo on top of this; the pattern is what the logo is made of.
    */
   .siumora-jaali {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' width='100' height='100'%3E%3Cg fill='none' stroke='%231C1917' stroke-width='0.75' opacity='0.5'%3E%3Ccircle cx='50' cy='0' r='25'/%3E%3Ccircle cx='100' cy='50' r='25'/%3E%3Ccircle cx='50' cy='100' r='25'/%3E%3Ccircle cx='0' cy='50' r='25'/%3E%3Ccircle cx='50' cy='50' r='25'/%3E%3C/g%3E%3C/svg%3E");
-    background-size: 44px 44px;
-    background-repeat: repeat;
+    /* Drawn as a mask rather than an image, so the lattice takes the current
+       text colour and survives the dark theme. A data-URL image cannot read a
+       CSS variable, and a hard-coded ink stroke would vanish on plate. */
+    --jaali: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' width='100' height='100'%3E%3Cg fill='none' stroke='%23000' stroke-width='0.75'%3E%3Ccircle cx='50' cy='0' r='25'/%3E%3Ccircle cx='100' cy='50' r='25'/%3E%3Ccircle cx='50' cy='100' r='25'/%3E%3Ccircle cx='0' cy='50' r='25'/%3E%3Ccircle cx='50' cy='50' r='25'/%3E%3C/g%3E%3C/svg%3E");
+    background-color: currentColor;
+    opacity: 0.5;
+    mask-image: var(--jaali);
+    mask-size: 44px 44px;
+    mask-repeat: repeat;
+    -webkit-mask-image: var(--jaali);
+    -webkit-mask-size: 44px 44px;
+    -webkit-mask-repeat: repeat;
   }
 }

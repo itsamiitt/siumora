@@ -26,7 +26,7 @@ export function SignOutButton() {
           router.refresh();
         })
       }
-      className="text-sm text-ink-muted underline-offset-4 hover:text-mulberry hover:underline disabled:opacity-60"
+      className="text-sm text-content-muted underline-offset-4 hover:text-accent-ink hover:underline disabled:opacity-60"
     >
       {pending ? "Signing out…" : "Sign out"}
     </button>

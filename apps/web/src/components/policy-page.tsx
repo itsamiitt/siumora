@@ -30,7 +30,7 @@ export function PolicyPage({
         {title}
       </Display>
 
-      {intro && <p className="mt-4 text-ink-muted">{intro}</p>}
+      {intro && <p className="mt-4 text-content-muted">{intro}</p>}
 
       {updated && (
         <p className="mt-4">
@@ -41,7 +41,7 @@ export function PolicyPage({
       {/* A statutory page with unfilled entity details is not compliant. Say so
           loudly rather than shipping a page that looks complete. */}
       {statutory && !LEGAL_COMPLETE && (
-        <p className="mt-8 border border-mulberry/30 bg-mulberry/[0.04] p-4 text-sm">
+        <p className="mt-8 border border-accent-ink/30 bg-accent/[0.04] p-4 text-sm">
           <strong className="font-medium">Not ready to publish.</strong> The
           registered entity details, GSTIN and grievance officer below are
           unset. They are statutory disclosures and must be filled in before
@@ -66,12 +66,12 @@ export function Section({
   return (
     <section>
       <h2
-        className="font-heading text-sm uppercase text-ink"
+        className="font-heading text-sm uppercase text-content"
         style={{ letterSpacing: "var(--tracking-caps)" }}
       >
         {heading}
       </h2>
-      <div className="mt-3 space-y-3 text-ink-muted">{children}</div>
+      <div className="mt-3 space-y-3 text-content-muted">{children}</div>
     </section>
   );
 }
@@ -81,8 +81,8 @@ export function Disclosure({ label, value }: { label: string; value: string }) {
   const unset = value === "—" || value.trim() === "";
   return (
     <div className="flex flex-wrap justify-between gap-3 border-b border-[var(--color-rule)] py-2.5">
-      <dt className="text-ink-muted">{label}</dt>
-      <dd className={unset ? "text-mulberry" : "text-ink"}>
+      <dt className="text-content-muted">{label}</dt>
+      <dd className={unset ? "text-accent-ink" : "text-content"}>
         {unset ? "To be filled in" : value}
       </dd>
     </div>

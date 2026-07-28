@@ -37,7 +37,7 @@ export function Display({
   return (
     <Tag
       className={cn(
-        "font-display font-light leading-[1.12] text-balance text-ink",
+        "font-display font-light leading-[1.12] text-balance text-content",
         sizes[size],
         className,
       )}
@@ -51,7 +51,7 @@ export function Display({
 export function CollectionTitle({ children, className }: TextProps) {
   return (
     <span
-      className={cn("font-heading uppercase text-ink", className)}
+      className={cn("font-heading uppercase text-content", className)}
       style={{ letterSpacing: "var(--tracking-collection)" }}
     >
       {children}
@@ -66,8 +66,8 @@ export function MicroLabel({
   tone = "ink",
 }: TextProps & { tone?: "ink" | "mulberry" | "brass" }) {
   const tones = {
-    ink: "text-ink-muted",
-    mulberry: "text-mulberry",
+    ink: "text-content-muted",
+    mulberry: "text-accent-ink",
     brass: "text-brass",
   } as const;
 

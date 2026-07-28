@@ -71,7 +71,7 @@ export default function ReturnsPage() {
         <p className="pt-2">
           <Link
             href="/account"
-            className="border-b border-ink pb-0.5 transition-colors hover:border-mulberry hover:text-mulberry"
+            className="border-b border-content pb-0.5 transition-colors hover:border-accent-ink hover:text-accent-ink"
           >
             <MicroLabel>Start a return</MicroLabel>
           </Link>

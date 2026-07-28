@@ -45,17 +45,17 @@ export function NdrRecovery({
   const state = ndrState(attempts, reason);
 
   return (
-    <div className="mt-8 border border-mulberry/30 bg-mulberry/[0.04] p-5">
+    <div className="mt-8 border border-accent-ink/30 bg-accent/[0.04] p-5">
       <MicroLabel tone="mulberry">Delivery did not go through</MicroLabel>
 
       <p className="mt-2.5 text-sm">
         {NDR_REASON_LABELS[reason]}.{" "}
         {state.exhausted ? (
-          <span className="text-ink-muted">
+          <span className="text-content-muted">
             The courier cannot try again, so the parcel is on its way back to us.
           </span>
         ) : (
-          <span className="text-ink-muted">
+          <span className="text-content-muted">
             {state.attemptsRemaining === 1
               ? "One attempt left."
               : `${state.attemptsRemaining} attempts left.`}{" "}
@@ -88,7 +88,7 @@ export function NdrRecovery({
       </div>
 
       {error && (
-        <p aria-live="polite" className="mt-3 text-xs text-mulberry">
+        <p aria-live="polite" className="mt-3 text-xs text-accent-ink">
           {error}
         </p>
       )}

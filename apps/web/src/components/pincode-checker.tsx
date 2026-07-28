@@ -43,13 +43,13 @@ export function PincodeChecker() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="transition-colors hover:text-mulberry"
+        className="transition-colors hover:text-accent-ink"
       >
         <MicroLabel>{result ? `Deliver to ${pincode}` : "Deliver to"}</MicroLabel>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-9 w-72 border border-[var(--color-rule)] bg-ivory p-4 shadow-lg">
+        <div className="absolute right-0 top-9 w-72 border border-[var(--color-rule)] bg-ground p-4 shadow-lg">
           <MicroLabel>Check delivery</MicroLabel>
 
           <div className="mt-3 flex gap-2">
@@ -63,7 +63,7 @@ export function PincodeChecker() {
               autoComplete="postal-code"
               placeholder="400001"
               aria-label="Pincode"
-              className="h-11 min-w-0 flex-1 border border-ink/20 bg-transparent px-3 text-sm outline-none focus:border-mulberry"
+              className="h-11 min-w-0 flex-1 border border-content/20 bg-transparent px-3 text-sm outline-none focus:border-accent-ink"
             />
             <Button size="sm" onClick={onCheck} disabled={!valid || pending}>
               {pending ? "…" : "Check"}
@@ -75,16 +75,16 @@ export function PincodeChecker() {
               {result.serviceable ? (
                 <>
                   <div className="flex justify-between gap-4">
-                    <dt className="text-ink-muted">Delivery by</dt>
+                    <dt className="text-content-muted">Delivery by</dt>
                     <dd>{result.estimatedDays} days</dd>
                   </div>
                   <div className="flex justify-between gap-4">
-                    <dt className="text-ink-muted">Cash on delivery</dt>
+                    <dt className="text-content-muted">Cash on delivery</dt>
                     <dd>{result.codAvailable ? "Available" : "Not available"}</dd>
                   </div>
                 </>
               ) : (
-                <p className="text-ink-muted">
+                <p className="text-content-muted">
                   We do not deliver here yet. Try another pincode.
                 </p>
               )}

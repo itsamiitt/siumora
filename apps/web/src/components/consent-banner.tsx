@@ -81,12 +81,12 @@ export function ConsentBanner() {
     <div
       role="dialog"
       aria-label="Cookie choices"
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-rule)] bg-ivory/97 backdrop-blur-sm"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-rule)] bg-ground/97 backdrop-blur-sm"
     >
       <div className="mx-auto flex max-w-6xl flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center">
         <div className="flex-1">
           <MicroLabel>Cookies</MicroLabel>
-          <p className="mt-1.5 text-sm text-ink-muted">
+          <p className="mt-1.5 text-sm text-content-muted">
             We use cookies to understand what works on this site and to measure
             our advertising. You can say no and shop exactly the same.
           </p>

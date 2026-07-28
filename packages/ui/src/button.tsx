@@ -13,10 +13,10 @@ export type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "bg-mulberry text-ivory hover:bg-mulberry/90 disabled:bg-mulberry/40",
+    "bg-accent text-ivory hover:bg-accent/90 disabled:bg-accent/40",
   secondary:
-    "border border-ink/20 text-ink hover:border-ink/40 hover:bg-ink/[0.03] disabled:text-ink/40",
-  quiet: "text-ink underline-offset-8 hover:underline disabled:text-ink/40",
+    "border border-content/20 text-content hover:border-content/40 hover:bg-content/[0.03] disabled:text-content/40",
+  quiet: "text-content underline-offset-8 hover:underline disabled:text-content/40",
 };
 
 const SIZES: Record<ButtonSize, string> = {

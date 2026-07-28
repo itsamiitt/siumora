@@ -16,18 +16,18 @@ export function FreeShippingProgress({ subtotal }: { subtotal: number }) {
     <div>
       <p className="text-sm">
         {earned ? (
-          <span className="text-mulberry">Shipping is on us.</span>
+          <span className="text-accent-ink">Shipping is on us.</span>
         ) : (
           <>
-            <span className="text-ink-muted">Add </span>
+            <span className="text-content-muted">Add </span>
             <span className="font-medium">{formatPaise(remaining)}</span>
-            <span className="text-ink-muted"> for free shipping</span>
+            <span className="text-content-muted"> for free shipping</span>
           </>
         )}
       </p>
 
       <div
-        className="mt-2.5 h-px w-full bg-ink/12"
+        className="mt-2.5 h-px w-full bg-content/12"
         role="progressbar"
         aria-valuenow={Math.round(progress)}
         aria-valuemin={0}
@@ -35,7 +35,7 @@ export function FreeShippingProgress({ subtotal }: { subtotal: number }) {
         aria-label="Progress toward free shipping"
       >
         <div
-          className="h-px bg-mulberry transition-[width] duration-500 ease-[var(--ease-siumora)]"
+          className="h-px bg-accent transition-[width] duration-500 ease-[var(--ease-siumora)]"
           style={{ width: `${progress}%` }}
         />
       </div>

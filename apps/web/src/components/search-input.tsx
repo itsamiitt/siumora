@@ -37,7 +37,7 @@ export function SearchInput({ initialQuery = "" }: { initialQuery?: string }) {
         name="q"
         aria-label="Search"
         placeholder="Try “jhumka” or “gift under 2000”"
-        className="h-11 min-w-0 flex-1 border border-ink/20 bg-transparent px-3 text-sm outline-none focus:border-mulberry"
+        className="h-11 min-w-0 flex-1 border border-content/20 bg-transparent px-3 text-sm outline-none focus:border-accent-ink"
       />
       <Button type="submit" size="sm">
         Search

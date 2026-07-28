@@ -46,7 +46,7 @@ export default async function CollectionPage({ params }: PageProps) {
         <Display as="h1" size="md">
           {collection.title}
         </Display>
-        <p className="mx-auto mt-4 max-w-md text-ink-muted">
+        <p className="mx-auto mt-4 max-w-md text-content-muted">
           {collection.description}
         </p>
       </header>
@@ -58,7 +58,7 @@ export default async function CollectionPage({ params }: PageProps) {
           ))}
         </div>
       ) : (
-        <p className="mt-16 text-center text-ink-muted">
+        <p className="mt-16 text-center text-content-muted">
           Nothing here yet. Something is on its way.
         </p>
       )}

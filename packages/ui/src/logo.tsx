@@ -11,9 +11,18 @@ import type { SVGProps } from "react";
  * nothing may enter it.
  */
 
-export type MarkTone = "ink" | "ivory" | "brass" | "mulberry";
+/**
+ * Which colourway to draw.
+ *
+ * `auto` is the default: the stroke follows the surrounding text colour, so the
+ * mark reverses to ivory on a dark page without the caller knowing which theme
+ * is live. The named tones stay for surfaces that are fixed regardless of
+ * theme — the plate footer, a brass foil block, an emailed lockup.
+ */
+export type MarkTone = "auto" | "ink" | "ivory" | "brass" | "mulberry";
 
 const STROKE: Record<MarkTone, string> = {
+  auto: "currentColor",
   ink: "#1C1917",
   ivory: "#F7F3EA",
   brass: "#C79A5C",
@@ -22,6 +31,8 @@ const STROKE: Record<MarkTone, string> = {
 
 /** The kernel is the one place brass is allowed to be solid. */
 const KERNEL: Record<MarkTone, string> = {
+  // The kernel is the accent, so it takes the accent role and lifts on dark.
+  auto: "var(--color-accent-ink)",
   ink: "#6B2942",
   ivory: "#E3C08A",
   brass: "#C79A5C",
@@ -45,7 +56,7 @@ export interface MarkProps extends Omit<SVGProps<SVGSVGElement>, "viewBox"> {
  */
 export function SiumoraMark({
   size = 40,
-  tone = "ink",
+  tone = "auto",
   label = "Siumora",
   ...props
 }: MarkProps) {
@@ -89,7 +100,7 @@ export interface LockupProps {
  */
 export function SiumoraLockupHorizontal({
   size = 32,
-  tone = "ink",
+  tone = "auto",
   className,
 }: LockupProps) {
   return (
@@ -98,7 +109,7 @@ export function SiumoraLockupHorizontal({
       <span
         className="font-display font-light leading-none"
         style={{
-          color: STROKE[tone],
+          color: tone === "auto" ? undefined : STROKE[tone],
           fontSize: size * 0.72,
           letterSpacing: "var(--tracking-wordmark)",
           paddingLeft: "var(--tracking-wordmark)",
@@ -116,7 +127,7 @@ export function SiumoraLockupHorizontal({
  */
 export function SiumoraLockupStacked({
   size = 56,
-  tone = "ink",
+  tone = "auto",
   className,
 }: LockupProps) {
   return (
@@ -128,7 +139,7 @@ export function SiumoraLockupStacked({
       <span
         className="font-display font-light leading-none"
         style={{
-          color: STROKE[tone],
+          color: tone === "auto" ? undefined : STROKE[tone],
           fontSize: size * 0.44,
           letterSpacing: "var(--tracking-wordmark)",
           paddingLeft: "var(--tracking-wordmark)",

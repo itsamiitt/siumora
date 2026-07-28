@@ -26,12 +26,12 @@ export default async function CartPage() {
         <Display as="h1" size="sm">
           Your bag is empty.
         </Display>
-        <p className="mt-4 text-ink-muted">
+        <p className="mt-4 text-content-muted">
           Nothing kept here yet. Something is waiting.
         </p>
         <Link
           href="/collections/everyday"
-          className="mt-8 border-b border-ink pb-1 transition-colors hover:border-mulberry hover:text-mulberry"
+          className="mt-8 border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
         >
           <MicroLabel>Shop everyday</MicroLabel>
         </Link>
@@ -63,13 +63,13 @@ export default async function CartPage() {
 
           <Link
             href="/checkout"
-            className="mt-6 flex h-14 w-full items-center justify-center bg-mulberry font-body text-[13px] font-medium uppercase text-ivory transition-colors hover:bg-mulberry/90"
+            className="mt-6 flex h-14 w-full items-center justify-center bg-accent font-body text-[13px] font-medium uppercase text-ivory transition-colors hover:bg-accent/90"
             style={{ letterSpacing: "var(--tracking-caps)" }}
           >
             Checkout
           </Link>
 
-          <ul className="mt-6 space-y-1.5 text-xs text-ink-muted">
+          <ul className="mt-6 space-y-1.5 text-xs text-content-muted">
             <li>GST invoice with every order</li>
             <li>7-day returns</li>
             <li>Every piece wrapped as a gift</li>

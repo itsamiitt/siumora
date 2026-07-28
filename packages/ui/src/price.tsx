@@ -49,17 +49,17 @@ export function Price({
   return (
     <div className={cn("font-body", className)}>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className={cn("font-medium text-ink", SELLING_SIZE[size])}>
+        <span className={cn("font-medium text-content", SELLING_SIZE[size])}>
           {formatPaise(selling)}
         </span>
 
         {off > 0 && (
           <>
-            <span className="text-sm text-ink-faint line-through">
+            <span className="text-sm text-content-faint line-through">
               {formatPaise(mrp)}
             </span>
             <span
-              className="text-[11px] font-medium uppercase text-mulberry"
+              className="text-[11px] font-medium uppercase text-accent-ink"
               style={{ letterSpacing: "var(--tracking-caps)" }}
             >
               {off}% off
@@ -69,11 +69,11 @@ export function Price({
       </div>
 
       {showTaxNote && (
-        <p className="mt-1 text-xs text-ink-muted">Inclusive of all taxes</p>
+        <p className="mt-1 text-xs text-content-muted">Inclusive of all taxes</p>
       )}
 
       {showEmi && (
-        <p className="mt-1 text-xs text-ink-muted">
+        <p className="mt-1 text-xs text-content-muted">
           or {formatPaise(noCostEmiPerMonth(selling, emiMonths))}/mo · No-Cost EMI
         </p>
       )}
