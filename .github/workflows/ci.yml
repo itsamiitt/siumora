@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push supersedes the first. Nobody reads the result of a run against
+# a commit that has already been replaced.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # The database tests are the ones worth having — order state machines,
+    # invoice allocation under a lock, the remittance ledger. Running them
+    # against a real Postgres is the point; a mock would pass regardless.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: siumora
+          POSTGRES_PASSWORD: siumora
+          POSTGRES_DB: siumora
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U siumora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://siumora:siumora@localhost:5432/siumora
+      API_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations
+        run: pnpm --filter=@siumora/db migrate
+
+      - name: Seed the catalogue
+        run: pnpm --filter=@siumora/db seed
+
+      # The storefront prerenders product and collection pages at build time,
+      # so the build genuinely needs the API up. Starting it here rather than
+      # stubbing the fetch keeps the build honest: a route that would 500 in
+      # production fails the build instead of shipping.
+      - name: Start the API
+        run: |
+          pnpm --filter=@siumora/api start > /tmp/api.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -sf http://localhost:4000/health > /dev/null; then
+              echo "api up after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "api did not come up"
+          cat /tmp/api.log
+          exit 1
+        env:
+          ADMIN_PHONES: "9000000001"
+          OTP_ECHO: "true"
+          COURIER_SIMULATION: "true"
+
+      - name: Typecheck and test
+        run: pnpm turbo run typecheck test
+
+      - name: API log
+        if: failure()
+        run: cat /tmp/api.log || true

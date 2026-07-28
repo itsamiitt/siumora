@@ -6,6 +6,7 @@ import { createTestDatabase, type TestDatabase } from "@siumora/db";
 import { seed } from "../../../packages/db/src/seed.ts";
 
 import { buildApp, type App } from "./app.ts";
+import { createRateLimiter } from "./lib/rate-limit.ts";
 import { sign } from "./lib/webhooks.ts";
 
 /**
@@ -39,6 +40,10 @@ before(async () => {
     otpEcho: true,
     // The courier-simulation transitions the delivered and NDR paths depend on.
     courierSimulation: true,
+    // Every test in this file arrives from 127.0.0.1, so the shipped limits
+    // would throttle the suite against itself after the second sign-in. The
+    // limits are exercised deliberately below, on an app built for it.
+    rateLimiter: createRateLimiter([]),
   });
 });
 
@@ -1882,4 +1887,66 @@ apiTest("keeps the remittance desk away from a customer", async () => {
     ]),
   });
   assert.equal(write.statusCode, 403);
+});
+
+// ── Security headers and rate limits ──────────────────────────
+
+apiTest("sends the browser policy on every reply", async () => {
+  const response = await app.server.inject({ method: "GET", url: "/health" });
+
+  assert.equal(response.headers["x-content-type-options"], "nosniff");
+  assert.equal(response.headers["referrer-policy"], "no-referrer");
+  // This service returns JSON and loads nothing, so the honest policy is that
+  // it may load nothing — an error page rendered by a proxy cannot pull a
+  // script in.
+  assert.match(response.headers["content-security-policy"] as string, /default-src 'none'/);
+  assert.match(response.headers["content-security-policy"] as string, /frame-ancestors 'none'/);
+});
+
+apiTest("does not pin a plain-HTTP origin to https", async () => {
+  // HSTS is a promise a browser keeps for a year. Sent from a development
+  // origin it pins that browser to an https://localhost that does not exist.
+  const response = await app.server.inject({ method: "GET", url: "/health" });
+  assert.equal(response.headers["strict-transport-security"], undefined);
+});
+
+apiTest("refuses a flood of sign-in attempts from one origin", async () => {
+  // Its own app, with the limits the service actually ships. The shared one
+  // above runs unlimited so the suite does not throttle itself.
+  const limited = await buildApp({
+    connectionString: testDb!.url,
+    adminPhones: OPERATOR_PHONE,
+    otpEcho: true,
+  });
+
+  try {
+    const responses = [];
+    for (let attempt = 0; attempt < 14; attempt += 1) {
+      responses.push(
+        await limited.server.inject({
+          method: "POST",
+          url: "/auth/otp",
+          // A different number each time, so the per-phone throttle is not what
+          // is being measured — this is the ceiling on the origin itself.
+          payload: { phone: `98123${String(40000 + attempt)}` },
+        }),
+      );
+    }
+
+    const refused = responses.filter((response) => response.statusCode === 429);
+    assert.ok(refused.length > 0, "the burst was refused at some point");
+    assert.equal(json(refused[0]!).error, "rate_limited");
+    // Retry-After, or a client has to guess and will guess "immediately".
+    assert.ok(Number(refused[0]!.headers["retry-after"]) > 0);
+
+    // A burst on a courier webhook is the courier catching up after an outage,
+    // and refusing it drops parcel updates that will never be resent.
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const health = await limited.server.inject({ method: "GET", url: "/health" });
+      assert.equal(health.statusCode, 200, `health attempt ${attempt}`);
+    }
+  } finally {
+    await limited.server.close();
+    await limited.pool.end();
+  }
 });

@@ -13,6 +13,7 @@ import { registerAdminRoutes } from "./routes/admin.ts";
 import { registerGstRoutes } from "./routes/gst.ts";
 import { registerRemittanceRoutes } from "./routes/remittance.ts";
 import { registerWishlistRoutes } from "./routes/wishlist.ts";
+import { createRateLimiter, type RateLimiter } from "./lib/rate-limit.ts";
 
 export interface AppConfig {
   connectionString: string;
@@ -43,6 +44,23 @@ export interface AppConfig {
    */
   ga4Configured?: boolean;
   metaConfigured?: boolean;
+  /**
+   * Send HSTS. Off by default because it is a promise a browser remembers for a
+   * year, and making it on a plain-HTTP development origin pins that browser to
+   * an https://localhost that does not exist.
+   */
+  hsts?: boolean;
+  /**
+   * Trust `X-Forwarded-For`.
+   *
+   * Behind Cloudflare or a load balancer this must be on, or every request
+   * arrives from the proxy and the whole internet shares one rate-limit bucket.
+   * Directly exposed it must be off, or a client sets its own address and the
+   * limit means nothing.
+   */
+  trustProxy?: boolean;
+  /** Injected in tests, where the real windows are too slow to exercise. */
+  rateLimiter?: RateLimiter;
   logger?: boolean;
 }
 
@@ -59,6 +77,7 @@ declare module "fastify" {
     config: AppConfig;
     /** Parsed once at boot, so every request is not re-parsing an env string. */
     adminPhones: string[];
+    rateLimiter: RateLimiter;
   }
 }
 
@@ -80,6 +99,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
 
   const server = Fastify({
     logger: config.logger ?? false,
+    trustProxy: config.trustProxy ?? false,
     // The raw body is needed to verify webhook signatures; re-serialising the
     // parsed JSON reorders keys and breaks a perfectly genuine signature.
     bodyLimit: 1_048_576,
@@ -119,6 +139,54 @@ export async function buildApp(config: AppConfig): Promise<App> {
     reply.header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
 
     if (request.method === "OPTIONS") reply.code(204).send();
+  });
+
+  /**
+   * Response headers that apply to every reply.
+   *
+   * This is a JSON API, not a document server, so most of the browser-facing
+   * policy is short: never sniff the type, never frame it, never leak the URL
+   * on an outbound link. `default-src 'none'` is the honest CSP for a service
+   * that returns no HTML and loads nothing — it costs nothing and it means an
+   * error page rendered by a proxy cannot pull in a script.
+   */
+  server.addHook("onRequest", async (_request, reply) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Referrer-Policy", "no-referrer");
+    reply.header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+    reply.header("Cross-Origin-Resource-Policy", "same-site");
+    // Only over TLS: sent on a plain-HTTP local request it would pin
+    // developers' browsers to https://localhost.
+    if (config.hsts) {
+      reply.header(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains",
+      );
+    }
+  });
+
+  // Per-origin limits on the endpoints that cost money to serve. Registered
+  // after CORS so a pre-flight is answered rather than throttled, and before
+  // the routes so a refusal never reaches the database.
+  const limiter = config.rateLimiter ?? createRateLimiter();
+  server.decorate("rateLimiter", limiter);
+
+  server.addHook("onRequest", async (request, reply) => {
+    if (request.method === "OPTIONS") return;
+
+    const decision = limiter.check(
+      request.ip,
+      request.url.split("?")[0] ?? request.url,
+      request.method,
+    );
+    if (decision.allowed) return;
+
+    reply.header("Retry-After", String(decision.retryAfterSeconds));
+    return reply.code(429).send({
+      error: "rate_limited",
+      message: "Too many requests. Try again shortly.",
+      retryAfterSeconds: decision.retryAfterSeconds,
+    });
   });
 
   server.setErrorHandler((error: FastifyError, request, reply) => {
