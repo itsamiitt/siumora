@@ -23,6 +23,26 @@ export type OrderStatus =
   | "cancelled"
   | "returned";
 
+/**
+ * Every status, as a value.
+ *
+ * Derived from the same list the type is, so a status added to one and not the
+ * other is a compile error rather than a case nothing exhaustively checks.
+ */
+export const ORDER_STATUSES = [
+  "pending_payment",
+  "confirmed",
+  "awaiting_cod_confirmation",
+  "processing",
+  "shipped",
+  "out_for_delivery",
+  "delivered",
+  "ndr",
+  "rto",
+  "cancelled",
+  "returned",
+] as const satisfies readonly OrderStatus[];
+
 export type PaymentMethod = "upi" | "card" | "netbanking" | "wallet" | "cod";
 
 /**

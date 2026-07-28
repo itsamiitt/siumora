@@ -7,6 +7,7 @@ import {
   hsnSummary,
   ndrState,
   outcomeFor,
+  restockTiming,
   summariseInvoice,
   type CartLine,
   type NdrReason,
@@ -16,11 +17,13 @@ import {
   eq,
   getOrderByNumber,
   inArray,
+  listAwaitingRestock,
   listOrdersForCustomer,
+  restockOrder,
   schema,
 } from "@siumora/db";
 
-import { requireCustomer, resolveViewer, type Viewer } from "../lib/auth.ts";
+import { requireAdmin, requireCustomer, resolveViewer, type Viewer } from "../lib/auth.ts";
 import { setOrderStatus } from "../lib/invoicing.ts";
 import { isUniqueViolation } from "../lib/pg-errors.ts";
 
@@ -289,6 +292,61 @@ export async function registerOrderRoutes(server: FastifyInstance) {
       : reply.code(result.code).send({ error: result.error });
   });
 
+  /**
+   * The restock queue: ended orders whose goods have not gone back on the shelf.
+   *
+   * Operators only. It is a stock figure, and stock is what the whole oversell
+   * guard exists to protect.
+   */
+  server.get("/admin/restock-queue", async (request, reply) => {
+    const viewer = await requireAdmin(request, reply);
+    if (!viewer) return;
+
+    const rows = await listAwaitingRestock(server.db);
+    reply.header("Cache-Control", "no-store");
+    return {
+      orders: rows.map((row) => ({
+        number: row.number,
+        status: row.status,
+        placedAt: row.placedAt,
+        total: row.total,
+      })),
+    };
+  });
+
+  /**
+   * Confirm goods received and put them back.
+   *
+   * Deliberately a separate step from the status change. A parcel marked RTO is
+   * on a van, not on a shelf, and counting it as sellable promises a piece that
+   * is days away and may arrive damaged. Somebody has to have it in their hands.
+   */
+  server.post("/orders/:number/restock", async (request, reply) => {
+    const viewer = await requireAdmin(request, reply);
+    if (!viewer) return;
+
+    const { number } = numberParam.parse(request.params);
+    const order = await getOrderByNumber(server.db, number);
+    if (!order) return reply.code(404).send({ error: "not_found" });
+
+    const result = await restockOrder(server.db, order.id);
+
+    if (!result.restocked) {
+      // A repeat click is not an error — it is somebody checking. Say what the
+      // state is rather than failing.
+      return reply.code(result.reason === "already_restocked" ? 200 : 409).send({
+        ok: false,
+        reason: result.reason,
+        message:
+          result.reason === "already_restocked"
+            ? "These goods are already back in stock."
+            : "This order is not owed any stock back.",
+      });
+    }
+
+    return { ok: true, units: result.units };
+  });
+
   server.post("/orders/:number/returns", async (request, reply) => {
     const { number } = numberParam.parse(request.params);
     const body = z
@@ -412,6 +470,13 @@ export async function advance(
     ...(reason ? { ndrReason: reason } : {}),
     ...(to === "delivered" ? { deliveredAt: new Date() } : {}),
   });
+
+  // Stock left at placement; this is the counterpart. Only goods that never
+  // reached a courier go back automatically — a parcel travelling home is not
+  // sellable until somebody has it, so that waits for the restock call.
+  if (restockTiming(from, status) === "immediate") {
+    await restockOrder(server.db, order.id);
+  }
 
   if (to === "ndr") {
     await server.db.insert(schema.ndrEvents).values({

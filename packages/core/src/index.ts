@@ -71,6 +71,7 @@ export {
 } from "./invoice.ts";
 
 export {
+  ORDER_STATUSES,
   canTransition,
   initialStatus,
   isRevenueRecognised,
@@ -108,6 +109,12 @@ export {
   type ReturnResolution,
   type RmaStatus,
 } from "./returns.ts";
+
+export {
+  awaitsRestock,
+  restockTiming,
+  type RestockTiming,
+} from "./restock.ts";
 
 export {
   MAX_DELIVERY_ATTEMPTS,

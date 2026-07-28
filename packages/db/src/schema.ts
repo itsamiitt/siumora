@@ -228,6 +228,8 @@ export const orders = pgTable(
     accessKey: uuid("access_key").notNull().defaultRandom(),
     /** Snapshotted, because it is what the RTO score used at placement. */
     phoneVerified: boolean("phone_verified").notNull().default(false),
+    /** When the goods went back on the shelf. Null means they still owe stock. */
+    restockedAt: timestamp("restocked_at", { withTimezone: true }),
 
     deliveryAttempts: integer("delivery_attempts").notNull().default(0),
     ndrReason: text("ndr_reason"),

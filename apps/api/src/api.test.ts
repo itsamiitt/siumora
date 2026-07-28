@@ -1013,3 +1013,176 @@ apiTest("lets a signed courier webhook move an order it has no session for", asy
   );
   assert.equal(rows[0].status, "processing");
 });
+
+// ── Stock coming back ─────────────────────────────────────────
+
+/** Stock on hand for a SKU, read straight from the table. */
+async function stockOf(sku: string): Promise<number> {
+  const { rows } = await app.pool.query(
+    "SELECT inventory FROM variants WHERE sku = $1",
+    [sku],
+  );
+  return rows[0].inventory;
+}
+
+apiTest("puts stock back at once when an order is cancelled before dispatch", async () => {
+  const before = await stockOf("SIU-PS-GLD");
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  assert.equal(await stockOf("SIU-PS-GLD"), before - 1, "stock leaves at placement");
+
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+    payload: { status: "cancelled" },
+  });
+
+  // The goods never left the building, so there is nothing to wait for.
+  assert.equal(await stockOf("SIU-PS-GLD"), before);
+});
+
+apiTest("holds stock back until a returning parcel is actually received", async () => {
+  const before = await stockOf("SIU-PS-GLD");
+  const operator = await signIn(OPERATOR_PHONE);
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  const move = (status: string, ndrReason?: string) =>
+    app.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status, ndrReason },
+    });
+
+  for (const status of ["confirmed", "processing", "shipped"]) await move(status);
+  await move("rto");
+
+  // On a van, not on a shelf. Counting it now promises a piece days away.
+  assert.equal(await stockOf("SIU-PS-GLD"), before - 1);
+
+  const restocked = await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/restock`,
+    headers: operator.headers,
+  });
+  assert.equal(restocked.statusCode, 200);
+  assert.equal(json(restocked).units, 1);
+  assert.equal(await stockOf("SIU-PS-GLD"), before);
+});
+
+apiTest("will not put the same goods back twice", async () => {
+  const before = await stockOf("SIU-PS-GLD");
+  const operator = await signIn(OPERATOR_PHONE);
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  for (const status of ["confirmed", "processing", "shipped", "rto"]) {
+    await app.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status },
+    });
+  }
+
+  const restock = () =>
+    app.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/restock`,
+      headers: operator.headers,
+    });
+
+  await restock();
+  const second = await restock();
+
+  // A repeat click is somebody checking, not an error — but it must not add
+  // a second unit that does not exist.
+  assert.equal(json(second).ok, false);
+  assert.equal(json(second).reason, "already_restocked");
+  assert.equal(await stockOf("SIU-PS-GLD"), before);
+});
+
+apiTest("refuses to restock an order that is still live", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  const response = await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/restock`,
+    headers: operator.headers,
+  });
+
+  // Those goods are in a box with someone's name on it.
+  assert.equal(response.statusCode, 409);
+  assert.equal(json(response).reason, "not_eligible");
+});
+
+apiTest("lists what is still owed back, and drops it once returned", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const { cartId } = await newCartWith("SIU-PS-SLV");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  for (const status of ["confirmed", "processing", "shipped", "rto"]) {
+    await app.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status },
+    });
+  }
+
+  const queue = () =>
+    app.server
+      .inject({ method: "GET", url: "/admin/restock-queue", headers: operator.headers })
+      .then((r) => json(r).orders.map((o: { number: string }) => o.number));
+
+  assert.deepEqual(await queue(), [placed.orderNumber]);
+
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/restock`,
+    headers: operator.headers,
+  });
+
+  assert.deepEqual(await queue(), []);
+});
+
+apiTest("keeps the restock queue away from a customer", async () => {
+  const shopper = await signIn("9812340001");
+  const response = await app.server.inject({
+    method: "GET",
+    url: "/admin/restock-queue",
+    headers: shopper.headers,
+  });
+  assert.equal(response.statusCode, 403);
+});

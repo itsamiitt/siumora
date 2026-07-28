@@ -1,6 +1,7 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import {
+  awaitsRestock,
   calculateTotals,
   financialYear,
   invoiceNumber,
@@ -390,6 +391,87 @@ export async function placeOrder(
       },
     };
   });
+}
+
+export interface RestockResult {
+  readonly restocked: boolean;
+  /** Units put back, by variant. Empty when the order had already been restocked. */
+  readonly units: number;
+  readonly reason?: "already_restocked" | "not_eligible";
+}
+
+/**
+ * Put an order's goods back on the shelf.
+ *
+ * Idempotent by construction: the order row is locked and `restocked_at` is
+ * checked inside the same transaction that writes it, so two operators clicking
+ * at once — or a webhook racing a retry — cannot double-count the stock. A
+ * boolean flag checked before the transaction would let both through.
+ *
+ * Only ended orders that owe stock qualify. Restocking a live order would sell
+ * a piece that is in a box with someone's name on it.
+ */
+export async function restockOrder(
+  db: Database,
+  orderId: string,
+  now: Date = new Date(),
+): Promise<RestockResult> {
+  return db.transaction(async (tx) => {
+    const locked = await tx.execute(
+      sql`SELECT status, restocked_at FROM orders WHERE id = ${orderId} FOR UPDATE`,
+    );
+    const row = locked.rows[0] as
+      | { status: string; restocked_at: Date | null }
+      | undefined;
+
+    if (!row) return { restocked: false, units: 0, reason: "not_eligible" as const };
+    if (row.restocked_at) {
+      return { restocked: false, units: 0, reason: "already_restocked" as const };
+    }
+    if (!awaitsRestock(row.status as OrderStatus)) {
+      return { restocked: false, units: 0, reason: "not_eligible" as const };
+    }
+
+    const lines = await tx
+      .select()
+      .from(orderLines)
+      .where(eq(orderLines.orderId, orderId));
+
+    // Sorted, like the checkout lock, so two restocks of overlapping orders
+    // take the variant rows in the same order and cannot deadlock.
+    const sorted = [...lines].sort((a, b) => a.variantId.localeCompare(b.variantId));
+
+    let units = 0;
+    for (const line of sorted) {
+      await tx
+        .update(variants)
+        .set({ inventory: sql`${variants.inventory} + ${line.quantity}` })
+        .where(eq(variants.id, line.variantId));
+      units += line.quantity;
+    }
+
+    await tx
+      .update(orders)
+      .set({ restockedAt: now })
+      .where(eq(orders.id, orderId));
+
+    return { restocked: true, units };
+  });
+}
+
+/** Ended orders that still owe stock — the queue an operator works. */
+export async function listAwaitingRestock(db: Database, limit = 100) {
+  return db
+    .select()
+    .from(orders)
+    .where(
+      and(
+        sql`${orders.restockedAt} IS NULL`,
+        inArray(orders.status, ["rto", "returned", "cancelled"]),
+      ),
+    )
+    .orderBy(desc(orders.placedAt))
+    .limit(limit);
 }
 
 export async function getOrderByNumber(db: Database, number: string) {

@@ -316,6 +316,22 @@ ALTER TABLE orders ADD COLUMN access_key uuid NOT NULL DEFAULT gen_random_uuid()
 ALTER TABLE orders ADD COLUMN phone_verified boolean NOT NULL DEFAULT false;
 `,
   },
+  {
+    id: "0004_restock",
+    sql: `
+-- Stock leaves at placement and nothing ever put it back, so every cancelled,
+-- returned or returned-to-origin parcel permanently lost a sellable unit.
+--
+-- Recorded as a timestamp rather than a boolean: the restock is idempotent, and
+-- when it happened is the question anyone reconciling stock actually asks.
+ALTER TABLE orders ADD COLUMN restocked_at timestamptz;
+
+-- The queue an operator works: ended, owed stock back, not yet put back.
+CREATE INDEX orders_awaiting_restock_idx
+  ON orders(status)
+  WHERE restocked_at IS NULL AND status IN ('rto', 'returned', 'cancelled');
+`,
+  },
 ];
 
 /**
