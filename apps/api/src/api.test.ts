@@ -50,7 +50,7 @@ before(async () => {
 beforeEach(async () => {
   if (!url) return;
   await app.pool.query(
-    "DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM cod_remittances; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
+    "DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM cod_remittances; DELETE FROM privacy_requests; DELETE FROM tracking_events; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
   );
   await seed(testDb!.url);
 });
@@ -1949,4 +1949,298 @@ apiTest("refuses a flood of sign-in attempts from one origin", async () => {
     await limited.server.close();
     await limited.pool.end();
   }
+});
+
+// ── Data-principal rights ─────────────────────────────────────
+
+apiTest("hands a signed-in person everything held about them", async () => {
+  const buyer = await signIn("9812340003");
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  await app.server.inject({
+    method: "POST",
+    url: "/checkout",
+    headers: buyer.headers,
+    payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+  });
+
+  const response = await app.server.inject({
+    method: "GET",
+    url: "/account/data",
+    headers: buyer.headers,
+  });
+  const data = json(response);
+
+  assert.equal(data.customer.phone, "9812340003");
+  assert.equal(data.orders.length, 1);
+  assert.equal(data.orders[0].lines.length, 1);
+  // The retention notice travels with the file: told "here is your data" while
+  // an invoice is kept for six years, a person has been half-answered.
+  assert.ok(data.retained.some((entry: { because: string }) => /CGST Act/.test(entry.because)));
+  // A file to keep, not a page to read over somebody's shoulder.
+  assert.match(response.headers["content-disposition"] as string, /attachment/);
+});
+
+apiTest("does not put a live credential in the export", async () => {
+  const buyer = await signIn("9812340004");
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  await app.server.inject({
+    method: "POST",
+    url: "/checkout",
+    headers: buyer.headers,
+    payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+  });
+
+  const data = json(
+    await app.server.inject({
+      method: "GET",
+      url: "/account/data",
+      headers: buyer.headers,
+    }),
+  );
+
+  // The access key authorises reading the order, and an export is a file
+  // people forward. The session token likewise: handing it back turns a
+  // privacy right into an account takeover.
+  assert.equal(data.orders[0].accessKey, undefined);
+  assert.equal(JSON.stringify(data.sessions).includes(buyer.token), false);
+});
+
+apiTest("refuses an export to someone who is not signed in", async () => {
+  const response = await app.server.inject({ method: "GET", url: "/account/data" });
+  assert.equal(response.statusCode, 401);
+});
+
+apiTest("erases a settled customer and keeps the invoice", async () => {
+  const buyer = await signIn("9812340005");
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      headers: buyer.headers,
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+  for (const status of ["confirmed", "processing", "shipped", "out_for_delivery", "delivered"]) {
+    await app.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status },
+    });
+  }
+
+  const result = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/account/erasure",
+      headers: buyer.headers,
+    }),
+  );
+  assert.equal(result.erased, true);
+
+  const { rows } = await app.pool.query(
+    "SELECT address, invoice_number, total, cgst, sgst, ga_client_id FROM orders WHERE number = $1",
+    [placed.orderNumber],
+  );
+  // The person is gone from the address...
+  assert.equal(rows[0].address.name, "[erased]");
+  assert.equal(rows[0].address.phone, "[erased]");
+  assert.equal(rows[0].address.line1, "[erased]");
+  assert.equal(rows[0].ga_client_id, null);
+  // ...and the tax record is untouched. Erasing it to satisfy the privacy law
+  // would break the tax law.
+  assert.ok(rows[0].invoice_number);
+  assert.ok(rows[0].total > 0);
+  assert.equal(rows[0].address.state_code ?? rows[0].address.stateCode, "27");
+});
+
+apiTest("will not erase while a parcel is still moving", async () => {
+  // Erasing mid-flight strands the goods and the money both: the courier needs
+  // an address to deliver to and a phone to ring.
+  const buyer = await signIn("9812340006");
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      headers: buyer.headers,
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+  for (const status of ["confirmed", "processing", "shipped"]) {
+    await app.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status },
+    });
+  }
+
+  const result = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/account/erasure",
+      headers: buyer.headers,
+    }),
+  );
+
+  assert.equal(result.erased, false);
+  assert.match(result.pendingBecause, /still in progress/);
+  // Open, not refused: it becomes possible when the parcel lands, and the
+  // deadline keeps running until it does.
+  assert.ok(result.resolveBy);
+
+  const { rows } = await app.pool.query(
+    "SELECT address FROM orders WHERE number = $1",
+    [placed.orderNumber],
+  );
+  assert.equal(rows[0].address.name, ADDRESS.name);
+});
+
+apiTest("does not restart the clock when somebody asks twice", async () => {
+  const buyer = await signIn("9812340007");
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      headers: buyer.headers,
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+    payload: { status: "confirmed" },
+  });
+
+  const first = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/account/erasure",
+      headers: buyer.headers,
+    }),
+  );
+  const second = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/account/erasure",
+      headers: buyer.headers,
+    }),
+  );
+
+  assert.equal(second.alreadyOpen, true);
+  assert.equal(second.requestId, first.requestId);
+  // Impatience is not a second right, and a clock that resets on every tap
+  // never runs out.
+  assert.equal(second.resolveBy, first.resolveBy);
+});
+
+apiTest("signs an erased person out everywhere", async () => {
+  const buyer = await signIn("9812340008");
+  await app.server.inject({
+    method: "POST",
+    url: "/account/erasure",
+    headers: buyer.headers,
+  });
+
+  // The session was the only thing tying the token to a person, and the person
+  // is gone.
+  const after = await app.server.inject({
+    method: "GET",
+    url: "/account/data",
+    headers: buyer.headers,
+  });
+  assert.equal(after.statusCode, 401);
+});
+
+apiTest("does not leave a queued conversion carrying an erased identity", async () => {
+  const buyer = await signIn("9812340009");
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      headers: buyer.headers,
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+  for (const status of ["confirmed", "processing", "shipped", "out_for_delivery", "delivered"]) {
+    await app.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status },
+    });
+  }
+  // Force the ledger rows back into the queue, as a configured environment
+  // would have left them.
+  await app.pool.query("UPDATE tracking_events SET status = 'pending'");
+
+  await app.server.inject({
+    method: "POST",
+    url: "/account/erasure",
+    headers: buyer.headers,
+  });
+
+  const { rows } = await app.pool.query(
+    "SELECT status, payload FROM tracking_events WHERE status = 'pending'",
+  );
+  // A hashed phone number in a queued payload is still an identifier, and a
+  // worker draining after the erasure would send it.
+  assert.equal(rows.length, 0);
+});
+
+apiTest("puts the queue and its deadline in front of an operator", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const buyer = await signIn("9812340010");
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      headers: buyer.headers,
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+    payload: { status: "confirmed" },
+  });
+  await app.server.inject({
+    method: "POST",
+    url: "/account/erasure",
+    headers: buyer.headers,
+  });
+
+  const queue = json(
+    await app.server.inject({
+      method: "GET",
+      url: "/admin/privacy-requests",
+      headers: operator.headers,
+    }),
+  );
+
+  assert.equal(queue.requests.length, 1);
+  assert.equal(queue.requests[0].kind, "erasure");
+  assert.ok(queue.requests[0].resolveBy, "the deadline is the regulated part");
+  assert.match(queue.requests[0].note, /still in progress/);
+
+  // An operator cannot override the live-order check: the override would
+  // strand the parcel, and the operator is who has to sort that out.
+  const forced = await app.server.inject({
+    method: "POST",
+    url: `/admin/privacy-requests/${queue.requests[0].id}/complete`,
+    headers: operator.headers,
+  });
+  assert.equal(forced.statusCode, 409);
+});
+
+apiTest("keeps the privacy queue away from a customer", async () => {
+  const shopper = await signIn("9812340011");
+  const response = await app.server.inject({
+    method: "GET",
+    url: "/admin/privacy-requests",
+    headers: shopper.headers,
+  });
+  assert.equal(response.statusCode, 403);
 });

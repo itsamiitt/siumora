@@ -8,6 +8,7 @@ import type { OrderStatus } from "@siumora/core";
 import { formatPaise } from "@siumora/in-locale";
 import { Display, MicroLabel } from "@siumora/ui";
 
+import { PrivacyControls } from "@/components/privacy-controls";
 import { SignOutButton } from "@/components/sign-out-button";
 import { listOrders } from "@/lib/order-store";
 import { currentViewer } from "@/lib/session";
@@ -129,6 +130,15 @@ async function AccountPageContents() {
           ))}
         </ul>
       )}
+
+      <section className="mt-16 border-t border-[var(--color-rule)] pt-8">
+        <MicroLabel>Your data</MicroLabel>
+        <p className="mt-3 max-w-prose text-sm text-content-muted">
+          Under the Digital Personal Data Protection Act you can take a copy of
+          everything we hold about you, or ask us to erase it.
+        </p>
+        <PrivacyControls />
+      </section>
     </div>
   );
 }

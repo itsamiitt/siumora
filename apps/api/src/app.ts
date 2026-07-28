@@ -12,6 +12,7 @@ import { registerWebhookRoutes } from "./routes/webhooks.ts";
 import { registerAdminRoutes } from "./routes/admin.ts";
 import { registerGstRoutes } from "./routes/gst.ts";
 import { registerRemittanceRoutes } from "./routes/remittance.ts";
+import { registerPrivacyRoutes } from "./routes/privacy.ts";
 import { registerWishlistRoutes } from "./routes/wishlist.ts";
 import { createRateLimiter, type RateLimiter } from "./lib/rate-limit.ts";
 
@@ -217,6 +218,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
   await registerAdminRoutes(server);
   await registerGstRoutes(server);
   await registerRemittanceRoutes(server);
+  await registerPrivacyRoutes(server);
 
   return { server, db, pool };
 }

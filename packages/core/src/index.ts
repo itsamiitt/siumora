@@ -199,6 +199,25 @@ export {
 } from "./facets.ts";
 
 export {
+  ACKNOWLEDGE_HOURS,
+  EXPORT_SCOPE,
+  REDACTED,
+  RESOLVE_DAYS,
+  RETENTION_NOTICE,
+  UNATTRIBUTED_TABLES,
+  blockedReason,
+  erasedPhone,
+  isErasable,
+  isErasedPhone,
+  isOverdue,
+  redactAddress,
+  slaFor,
+  type PrivacyRequestDates,
+  type PrivacyRequestKind,
+  type PrivacyRequestStatus,
+} from "./dpdp.ts";
+
+export {
   DEDUCTION_ALARM_RATIO,
   cashPosition,
   overDeducted,

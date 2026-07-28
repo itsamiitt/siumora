@@ -448,6 +448,30 @@ export class SiumoraClient {
     return this.request("POST", `/wishlists/${wishlistId}/toggle`, { handle });
   }
 
+  // ── Data-principal rights ───────────────────────────────────
+
+  /** Everything held about the signed-in person. Scoped to the caller. */
+  async exportMyData(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/account/data", undefined, { cache: "no-store" });
+  }
+
+  /**
+   * Ask for erasure.
+   *
+   * Completes on the spot when every order has settled, and stays open with a
+   * reason when one has not — a parcel in transit needs an address to arrive at.
+   */
+  async requestErasure(): Promise<{
+    requestId: string;
+    alreadyOpen: boolean;
+    erased: boolean;
+    pendingBecause?: string;
+    resolveBy: string;
+    retained: Array<{ keeps: string; forHowLong: string; because: string }>;
+  }> {
+    return this.request("POST", "/account/erasure", {});
+  }
+
   // ── Admin ───────────────────────────────────────────────────
 
   /**

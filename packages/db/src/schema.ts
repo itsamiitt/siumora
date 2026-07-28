@@ -137,8 +137,38 @@ export const customers = pgTable(
     email: text("email"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Set when personal data was redacted. The row stays; the person does not. */
+    erasedAt: timestamp("erased_at", { withTimezone: true }),
   },
   (table) => [uniqueIndex("customers_phone_key").on(table.phone)],
+);
+
+/**
+ * Data-principal requests under the DPDP Act 2023.
+ *
+ * Recorded rather than acted on inline, because the deadline is the regulated
+ * part — 48 hours to acknowledge, a month to resolve — and a queue nobody can
+ * see is a queue that runs over.
+ */
+export const privacyRequests = pgTable(
+  "privacy_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
+    /** Kept beside the reference: an erasure nulls the link, and an
+     *  unattributable request is unauditable. */
+    subjectPhone: text("subject_phone").notNull(),
+    kind: text("kind").notNull(),
+    status: text("status").notNull().default("received"),
+    note: text("note"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    acknowledgeBy: timestamp("acknowledge_by", { withTimezone: true }).notNull(),
+    resolveBy: timestamp("resolve_by", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [index("privacy_request_due_idx").on(table.resolveBy)],
 );
 
 /**

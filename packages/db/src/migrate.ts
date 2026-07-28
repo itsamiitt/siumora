@@ -444,6 +444,71 @@ CREATE INDEX tracking_event_due_idx
   WHERE status IN ('pending', 'sending');
 `,
   },
+  {
+    id: "0009_privacy_requests",
+    sql: `
+-- Data-principal rights under the DPDP Act 2023 (plan/11 §5). A request is
+-- recorded rather than acted on inline, because the deadline is the regulated
+-- part: 48 hours to acknowledge, a month to resolve, and a queue nobody can see
+-- is a queue that runs over.
+CREATE TABLE privacy_requests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
+  -- Kept alongside the reference: an erasure that succeeds nulls the customer
+  -- link, and a request whose subject cannot be named afterwards is unauditable.
+  subject_phone text NOT NULL,
+  kind text NOT NULL,
+  status text NOT NULL DEFAULT 'received',
+  -- Why it was refused, or why it could not run yet. A refusal with no reason
+  -- is indistinguishable from being ignored.
+  note text,
+  received_at timestamptz NOT NULL DEFAULT now(),
+  acknowledge_by timestamptz NOT NULL,
+  resolve_by timestamptz NOT NULL,
+  completed_at timestamptz,
+
+  CONSTRAINT privacy_request_kind_known
+    CHECK (kind IN ('access', 'correction', 'erasure')),
+  CONSTRAINT privacy_request_status_known
+    CHECK (status IN ('received', 'acknowledged', 'completed', 'refused')),
+  -- A finished request has a finish time, and an unfinished one does not claim
+  -- to have finished.
+  CONSTRAINT privacy_request_completion_consistent CHECK (
+    (status IN ('completed', 'refused')) = (completed_at IS NOT NULL)
+  )
+);
+
+-- One open request per person per kind. Asking twice is impatience, not a
+-- second right, and two open erasures race each other.
+CREATE UNIQUE INDEX privacy_request_open_key
+  ON privacy_requests(subject_phone, kind)
+  WHERE status IN ('received', 'acknowledged');
+
+-- The queue: unfinished, soonest deadline first.
+CREATE INDEX privacy_request_due_idx
+  ON privacy_requests(resolve_by)
+  WHERE status IN ('received', 'acknowledged');
+
+-- Marks a customer whose personal data has been redacted. The row itself stays:
+-- orders reference it, and orphaning them would break the invoice trail that
+-- section 36 of the CGST Act requires be kept for six years.
+ALTER TABLE customers ADD COLUMN erased_at timestamptz;
+
+-- The phone constraint exists so a shopper who types +91 once and 0 the next
+-- time does not become two customers. An erased row has no phone number at all
+-- — it carries a token, because the column is NOT NULL and uniquely indexed and
+-- something has to sit there. The exception is named rather than the constraint
+-- dropped: a malformed *live* number must still be impossible.
+ALTER TABLE customers DROP CONSTRAINT customers_phone_normalised;
+ALTER TABLE customers ADD CONSTRAINT customers_phone_normalised
+  CHECK (phone ~ '^[6-9][0-9]{9}$' OR phone ~ '^erased:[0-9a-f-]{36}$');
+
+-- And the two states must agree: a token phone means erased, and erased means a
+-- token phone. Either one alone is a row nobody can interpret.
+ALTER TABLE customers ADD CONSTRAINT customers_erasure_consistent
+  CHECK ((phone LIKE 'erased:%') = (erased_at IS NOT NULL));
+`,
+  },
 ];
 
 /**
