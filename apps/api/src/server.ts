@@ -21,6 +21,8 @@ const { server, pool } = await buildApp({
     process.env.COURIER_SIMULATION === "true" ||
     (process.env.COURIER_SIMULATION === undefined &&
       process.env.NODE_ENV !== "production"),
+  ga4Configured: process.env.GA4_API_SECRET !== undefined,
+  metaConfigured: process.env.META_CAPI_TOKEN !== undefined,
   logger: true,
 });
 

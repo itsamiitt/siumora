@@ -17,7 +17,7 @@ import {
 import { formatPaise } from "@siumora/in-locale";
 import { CollectionTitle, Display, MicroLabel } from "@siumora/ui";
 
-import { listAllOrders } from "@/lib/order-store";
+import { getTrackingReport, listAllOrders } from "@/lib/order-store";
 import { currentViewer } from "@/lib/session";
 
 export const metadata: Metadata = {
@@ -54,7 +54,10 @@ async function AdminPageContents() {
     );
   }
 
-  const orders = await listAllOrders();
+  const [orders, tracking] = await Promise.all([
+    listAllOrders(),
+    getTrackingReport(),
+  ]);
 
   const revenue = summariseRevenue(orders);
   const byPincode = rtoBreakdown(orders, (o) => o.address.pincode);
@@ -136,6 +139,54 @@ async function AdminPageContents() {
           </span>
         </div>
         <HsnTable orders={orders} />
+      </Section>
+
+      <Section title="Marketing health">
+        {tracking ? (
+          <>
+            <div className="flex flex-wrap gap-x-10 gap-y-3 text-sm">
+              <span>
+                <span className="text-content-muted">Sent </span>
+                {tracking.health.sent}
+              </span>
+              <span>
+                <span className="text-content-muted">Queued </span>
+                {tracking.health.pending}
+              </span>
+              <span
+                className={tracking.health.failed > 0 ? "text-accent-ink" : undefined}
+              >
+                <span className="text-content-muted">Failed </span>
+                {tracking.health.failed}
+              </span>
+              <span>
+                {/* Built but never sent, because no destination is configured.
+                    Shown rather than hidden: it is the difference between
+                    "nothing happened" and "nothing could happen". */}
+                <span className="text-content-muted">Not configured </span>
+                {tracking.health.skipped}
+              </span>
+            </div>
+
+            <p className="mt-4 text-sm">
+              {tracking.missingConversions.length === 0 ? (
+                <span className="text-content-muted">
+                  Every order has a conversion against it.
+                </span>
+              ) : (
+                <span className="text-accent-ink">
+                  {tracking.missingConversions.length} orders have no conversion:{" "}
+                  {tracking.missingConversions
+                    .slice(0, 6)
+                    .map((order) => order.number)
+                    .join(", ")}
+                </span>
+              )}
+            </p>
+          </>
+        ) : (
+          <Empty>Tracking figures are unavailable.</Empty>
+        )}
       </Section>
 
       <Section title="Order states">

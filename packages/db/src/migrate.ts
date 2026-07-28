@@ -332,6 +332,19 @@ CREATE INDEX orders_awaiting_restock_idx
   WHERE restocked_at IS NULL AND status IN ('rto', 'returned', 'cancelled');
 `,
   },
+  {
+    id: "0005_ga_client_id",
+    sql: `
+-- The GA4 Measurement Protocol will not accept an event without a client_id,
+-- and only the browser has one — it lives in the _ga cookie. Without capturing
+-- it at checkout the server half of the dual-send can never fire, which leaves
+-- exactly the conversions that blockers ate unreported.
+--
+-- Nullable: a visitor with analytics blocked genuinely has none, and that is a
+-- fact to record rather than a value to invent.
+ALTER TABLE orders ADD COLUMN ga_client_id text;
+`,
+  },
 ];
 
 /**

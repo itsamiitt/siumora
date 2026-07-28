@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { track, mintEventId } from "@siumora/analytics/client";
+import { track, mintEventId, gaClientId } from "@siumora/analytics/client";
 
 import type { CodDecision } from "@siumora/core";
 import {
@@ -128,6 +128,9 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
             requiresCodConfirmation:
               method === "cod" && cod?.verification !== "none",
             eventId,
+            // Captured here because the server cannot see the cookie, and GA4
+            // will not accept a server event without it.
+            gaClientId: gaClientId(),
             codFee: method === "cod" ? (cod?.fee ?? 0) : 0,
           });
 

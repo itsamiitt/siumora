@@ -185,3 +185,21 @@ export {
   type ConsentChoice,
   type ConsentState,
 } from "./consent.ts";
+
+/**
+ * The visitor's GA4 client id, out of the _ga cookie.
+ *
+ * The Measurement Protocol will not accept a server event without one, and the
+ * browser is the only place it exists — so it has to be read here and carried
+ * to the server at checkout, or the server half of the dual-send can never
+ * fire and the conversions that blockers ate stay unreported.
+ *
+ * The cookie is `GA1.1.<client_id>` where the id is two dot-separated numbers.
+ * Returns undefined when analytics is blocked, which is a real state and not
+ * one to substitute a value for.
+ */
+export function gaClientId(): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  const match = document.cookie.match(/(?:^|;\s*)_ga=GA\d\.\d\.([\d.]+)/);
+  return match?.[1];
+}

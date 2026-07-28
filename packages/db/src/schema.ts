@@ -230,6 +230,8 @@ export const orders = pgTable(
     phoneVerified: boolean("phone_verified").notNull().default(false),
     /** When the goods went back on the shelf. Null means they still owe stock. */
     restockedAt: timestamp("restocked_at", { withTimezone: true }),
+    /** The browser's GA4 client id, captured at checkout. Null when blocked. */
+    gaClientId: text("ga_client_id"),
 
     deliveryAttempts: integer("delivery_attempts").notNull().default(0),
     ndrReason: text("ndr_reason"),

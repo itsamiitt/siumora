@@ -75,7 +75,7 @@ export async function registerWebhookRoutes(server: FastifyInstance) {
       return { ok: true, replayed: true, status: order.status };
     }
 
-    const updated = await setOrderStatus(server.db, order, "confirmed");
+    const updated = await setOrderStatus(server, order, "confirmed");
 
     return { ok: true, orderNumber, status: updated.status };
   });

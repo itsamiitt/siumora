@@ -32,6 +32,15 @@ export interface AppConfig {
    * thing that should be moving a parcel.
    */
   courierSimulation?: boolean;
+  /**
+   * Whether each conversion destination is actually wired up.
+   *
+   * When it is not, conversions are still built and written to the ledger —
+   * marked `skipped` rather than `pending`, so the queue does not fill with
+   * work no worker can do while the parity report still shows the event existed.
+   */
+  ga4Configured?: boolean;
+  metaConfigured?: boolean;
   logger?: boolean;
 }
 

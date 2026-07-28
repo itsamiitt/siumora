@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { consentFromChoice, FULL_CONSENT } from "./consent.ts";
 import { toRupees, type EventPayload } from "./events.ts";
+import { META_EVENT_MAP } from "./routing.ts";
 import { buildGa4Payload, buildMetaPayload, emit } from "./server.ts";
 
 const purchase: EventPayload<"purchase"> = {
@@ -120,4 +121,68 @@ test("emit produces both payloads with one shared id", async () => {
   assert.equal(result.meta?.event_id, "evt_abc");
   assert.equal(result.ga4?.events[0]?.params.event_id, "evt_abc");
   assert.equal(result.meta?.event_source_url, "https://siumora.com/checkout");
+});
+
+test("a COD delivery reaches Meta as a purchase", () => {
+  // COD is the majority of Indian orders. Without this mapping the platform
+  // optimises against prepaid alone and never learns which traffic converts.
+  assert.equal(META_EVENT_MAP.cod_delivered, "Purchase");
+  assert.equal(META_EVENT_MAP.purchase, "Purchase");
+});
+
+test("refuses a GA4 payload with no client id rather than inventing one", () => {
+  // The Measurement Protocol will not accept an event without one, and only
+  // the browser has it. Returning null is what lets the caller record the
+  // absence instead of queueing something that can never be sent.
+  const payload = buildGa4Payload(
+    "purchase",
+    {
+      event_id: "11111111-1111-4111-8111-111111111111",
+      currency: "INR",
+      value: 1890,
+      transaction_id: "SIU-00001",
+      tax: 90,
+      shipping: 0,
+      items: [
+        {
+          item_id: "SKU",
+          item_name: "Petal Studs",
+          price: 1890,
+          quantity: 1,
+          item_brand: "Siumora",
+        },
+      ],
+    },
+    { consent: FULL_CONSENT },
+  );
+  assert.equal(payload, null);
+});
+
+test("builds a GA4 payload once a client id is present", () => {
+  const payload = buildGa4Payload(
+    "purchase",
+    {
+      event_id: "11111111-1111-4111-8111-111111111111",
+      currency: "INR",
+      value: 1890,
+      transaction_id: "SIU-00001",
+      tax: 90,
+      shipping: 0,
+      items: [
+        {
+          item_id: "SKU",
+          item_name: "Petal Studs",
+          price: 1890,
+          quantity: 1,
+          item_brand: "Siumora",
+        },
+      ],
+    },
+    { consent: FULL_CONSENT, identity: { gaClientId: "123.456" } },
+  );
+
+  assert.equal(payload?.client_id, "123.456");
+  // The dedup key must survive into the params, or the browser send and this
+  // one land as two conversions.
+  assert.equal(payload?.events[0]?.params.event_id, "11111111-1111-4111-8111-111111111111");
 });

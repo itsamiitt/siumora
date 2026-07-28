@@ -85,6 +85,8 @@ export interface PlaceOrderInput {
   readonly eventId: string;
   /** Sent so a retried submit cannot create a second order. */
   readonly idempotencyKey?: string;
+  /** The browser GA4 client id, without which no server-side GA4 event can go. */
+  readonly gaClientId?: string;
 }
 
 export async function placeOrder(
@@ -100,6 +102,7 @@ export async function placeOrder(
         address: input.address,
         paymentMethod: input.paymentMethod,
         eventId: input.eventId,
+        ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
       },
       input.idempotencyKey,
     );
@@ -213,5 +216,33 @@ export async function listAllOrders(): Promise<Order[]> {
     return (metrics.recentOrders ?? []).map(toDomain);
   } catch {
     return [];
+  }
+}
+
+export interface TrackingReport {
+  readonly health: {
+    pending: number;
+    sent: number;
+    failed: number;
+    skipped: number;
+  };
+  readonly missingConversions: Array<{ number: string; status: string }>;
+}
+
+/**
+ * Order-to-conversion parity, for the ops dashboard.
+ *
+ * Doc 08 §8 asks for this to be watched rather than assumed: a gap between
+ * orders and conversions is revenue the ad platforms cannot see, and it drifts
+ * silently — nothing breaks, the numbers just quietly stop matching.
+ */
+export async function getTrackingReport(): Promise<TrackingReport | undefined> {
+  try {
+    const metrics = (await (await apiAs()).getMetrics()) as {
+      tracking?: TrackingReport;
+    };
+    return metrics.tracking;
+  } catch {
+    return undefined;
   }
 }

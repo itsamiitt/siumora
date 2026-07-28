@@ -27,6 +27,14 @@ export async function submitOrder(input: {
   requiresCodConfirmation: boolean;
   eventId: string;
   codFee?: number;
+  /**
+   * Read from the browser's _ga cookie by the caller.
+   *
+   * It has to be captured here because the server has no other way to get it,
+   * and GA4 refuses a server event without one — so without this the server
+   * half of the dual-send never fires.
+   */
+  gaClientId?: string;
 }): Promise<PlaceOrderResult> {
   // The event id doubles as the idempotency key: it is already unique per
   // checkout attempt and already travels with the order, so a resubmitted form
@@ -36,6 +44,7 @@ export async function submitOrder(input: {
     paymentMethod: input.paymentMethod,
     eventId: input.eventId,
     idempotencyKey: input.eventId,
+    ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
   });
   if (!result.ok) return { ok: false, message: result.message };
 

@@ -192,7 +192,7 @@ export async function registerOrderRoutes(server: FastifyInstance) {
     // The invoice number is allocated on confirmation, not at placement: a
     // held order that is never confirmed must not burn a number from a
     // gapless series.
-    const updated = await setOrderStatus(server.db, order, "confirmed");
+    const updated = await setOrderStatus(server, order, "confirmed");
 
     return { ok: true, order: updated };
   });
@@ -465,7 +465,7 @@ export async function advance(
 
   // Routed through setOrderStatus so a confirmation reached this way raises an
   // invoice exactly like one reached through the payment webhook.
-  const updated = await setOrderStatus(server.db, order, status, {
+  const updated = await setOrderStatus(server, order, status, {
     deliveryAttempts: attempts,
     ...(reason ? { ndrReason: reason } : {}),
     ...(to === "delivered" ? { deliveredAt: new Date() } : {}),
@@ -477,6 +477,7 @@ export async function advance(
   if (restockTiming(from, status) === "immediate") {
     await restockOrder(server.db, order.id);
   }
+
 
   if (to === "ndr") {
     await server.db.insert(schema.ndrEvents).values({

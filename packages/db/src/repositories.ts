@@ -242,6 +242,8 @@ export interface PlaceOrderInput {
   customerId?: string;
   /** Whether the contact number was proven by a code before the order was placed. */
   phoneVerified?: boolean;
+  /** The browser GA4 client id, without which no server-side GA4 event can go. */
+  gaClientId?: string;
 }
 
 export interface PlacedOrder {
@@ -341,6 +343,7 @@ export async function placeOrder(
         placedAt: now,
         ...(input.customerId ? { customerId: input.customerId } : {}),
         phoneVerified: input.phoneVerified ?? false,
+        ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
         ...(issueInvoice
           ? {
               invoiceNumber: invoiceNumber(invoiceSeq, now),

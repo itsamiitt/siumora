@@ -39,6 +39,14 @@ const checkoutSchema = z.object({
   paymentMethod: z.enum(["upi", "card", "netbanking", "wallet", "cod"]),
   /** Minted by the client so the browser pixel and server event share one id. */
   eventId: z.uuid(),
+  /**
+   * The visitor's GA4 client id, read from the _ga cookie.
+   *
+   * Optional because a visitor with analytics blocked has none — and that is
+   * the honest state to record, not a value to invent. Without it the server
+   * cannot send a GA4 event at all, so its absence is worth seeing.
+   */
+  gaClientId: z.string().max(64).optional(),
 });
 
 /**
@@ -209,6 +217,7 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
           codFee,
           ...(signals.customerId ? { customerId: signals.customerId } : {}),
           phoneVerified: signals.phoneVerified,
+          ...(body.gaClientId ? { gaClientId: body.gaClientId } : {}),
         });
 
         if (!placed.ok) return { ok: false as const, message: placed.message };

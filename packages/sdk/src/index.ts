@@ -317,6 +317,8 @@ export class SiumoraClient {
       address: Order["address"];
       paymentMethod: Order["paymentMethod"];
       eventId: string;
+      /** The browser's GA4 client id; GA4 refuses a server event without one. */
+      gaClientId?: string;
     },
     idempotencyKey?: string,
   ): Promise<{

@@ -21,6 +21,10 @@ export const META_EVENT_MAP: Partial<Record<EventName, string>> = {
   begin_checkout: "InitiateCheckout",
   add_payment_info: "AddPaymentInfo",
   purchase: "Purchase",
+  // To Meta this *is* the purchase, just confirmed later. Without the mapping a
+  // COD delivery reaches Meta as nothing at all — and COD is the majority of
+  // Indian orders, so the platform would be optimising against prepaid alone.
+  cod_delivered: "Purchase",
   refund: "Refund",
   sign_up: "CompleteRegistration",
 };

@@ -1,5 +1,9 @@
+import type { FastifyInstance } from "fastify";
+
 import { financialYear, invoiceNumber } from "@siumora/core";
 import { eq, schema, sql, type Database } from "@siumora/db";
+
+import { queueOrderConversion } from "./conversions.ts";
 
 /**
  * Move an order to a status, allocating its invoice number if it is the one
@@ -14,27 +18,40 @@ import { eq, schema, sql, type Database } from "@siumora/db";
  * The number is only ever issued once per order, and the series is serialised
  * on a table lock: two confirmations landing together must not take the same
  * number out of a series that has to be unique within its financial year.
+ *
+ * The conversion is queued here too, for the same reason: this is the one place
+ * a status changes, so no path can move an order without the analytics side
+ * being considered. Queueing it from each caller instead is how the payment
+ * webhook ends up silently not reporting revenue.
  */
 export async function setOrderStatus(
-  db: Database,
-  order: { id: string; status: string; placedAt: Date; invoiceNumber: string | null },
+  server: FastifyInstance,
+  order: {
+    id: string;
+    status: string;
+    placedAt: Date;
+    invoiceNumber: string | null;
+    lines: ReadonlyArray<typeof schema.orderLines.$inferSelect>;
+  },
   status: string,
   extra: Partial<typeof schema.orders.$inferInsert> = {},
 ) {
+  const db: Database = server.db;
   // Only `confirmed` raises an invoice, and only for an order without one. A
   // held order that is never confirmed must not burn a number from the series.
   const needsInvoice = status === "confirmed" && !order.invoiceNumber;
 
   if (!needsInvoice) {
-    const [row] = await db
+    const [plain] = await db
       .update(schema.orders)
       .set({ status, ...extra })
       .where(eq(schema.orders.id, order.id))
       .returning();
-    return row!;
+    await queueOrderConversion(server, plain!, order.lines);
+    return plain!;
   }
 
-  return db.transaction(async (tx) => {
+  const updated = await db.transaction(async (tx) => {
     await tx.execute(sql`LOCK TABLE orders IN SHARE ROW EXCLUSIVE MODE`);
     const fy = financialYear(order.placedAt);
 
@@ -57,4 +74,9 @@ export async function setOrderStatus(
 
     return row!;
   });
+
+  // Outside the transaction on purpose: the ledger write must not be able to
+  // roll back an invoice number that has already been taken out of the series.
+  await queueOrderConversion(server, updated, order.lines);
+  return updated;
 }

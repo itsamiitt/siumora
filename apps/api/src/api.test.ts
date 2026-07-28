@@ -1186,3 +1186,207 @@ apiTest("keeps the restock queue away from a customer", async () => {
   });
   assert.equal(response.statusCode, 403);
 });
+
+// ── Conversions ───────────────────────────────────────────────
+
+/** The ledger rows for an order, by event name and destination. */
+async function ledgerFor(orderNumber: string) {
+  const { rows } = await app.pool.query(
+    `SELECT t.event_name, t.destination, t.status
+     FROM tracking_events t
+     JOIN orders o ON o.event_id = t.event_id
+     WHERE o.number = $1
+     ORDER BY t.event_name, t.destination`,
+    [orderNumber],
+  );
+  return rows.map((r) => `${r.event_name}/${r.destination}/${r.status}`);
+}
+
+async function placeAndMove(payment: string, sku: string, statuses: string[]) {
+  const { cartId } = await newCartWith(sku);
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: {
+        cartId,
+        address: ADDRESS,
+        paymentMethod: payment,
+        eventId: crypto.randomUUID(),
+      },
+    }),
+  );
+
+  for (const status of statuses) {
+    await app.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status },
+    });
+  }
+  return placed;
+}
+
+apiTest("counts a prepaid order at confirmation", async () => {
+  const placed = await placeAndMove("upi", "SIU-PS-GLD", ["confirmed"]);
+  assert.deepEqual(await ledgerFor(placed.orderNumber), [
+    "purchase/ga4/skipped",
+    "purchase/meta/skipped",
+  ]);
+});
+
+apiTest("does not count a COD order until it is actually delivered", async () => {
+  // Roughly a fifth of COD orders come back. A purchase fired at checkout
+  // inflates revenue and teaches the ad platforms to buy the traffic that
+  // returns most.
+  const placed = await placeAndMove("cod", "SIU-TB-12", ["confirmed", "processing", "shipped"]);
+  assert.deepEqual(await ledgerFor(placed.orderNumber), []);
+
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+    payload: { status: "out_for_delivery" },
+  });
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+    payload: { status: "delivered" },
+  });
+
+  assert.deepEqual(await ledgerFor(placed.orderNumber), [
+    "cod_delivered/ga4/skipped",
+    "cod_delivered/meta/skipped",
+  ]);
+});
+
+apiTest("a prepaid order that is returned keeps its purchase, and only one", async () => {
+  const placed = await placeAndMove("upi", "SIU-PS-GLD", [
+    "confirmed",
+    "processing",
+    "shipped",
+    "out_for_delivery",
+    "delivered",
+  ]);
+
+  // `delivered` is not a second conversion for a prepaid order — it already
+  // converted at confirmation.
+  assert.deepEqual(await ledgerFor(placed.orderNumber), [
+    "purchase/ga4/skipped",
+    "purchase/meta/skipped",
+  ]);
+});
+
+apiTest("a replayed payment webhook does not count the sale twice", async () => {
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  const body = JSON.stringify({
+    event: "payment.captured",
+    payload: {
+      payment: { entity: { id: "pay_dup", notes: { order_number: placed.orderNumber } } },
+    },
+  });
+  const deliver = () =>
+    app.server.inject({
+      method: "POST",
+      url: "/webhooks/razorpay",
+      headers: {
+        "content-type": "application/json",
+        "x-razorpay-signature": sign(body, RAZORPAY_SECRET),
+      },
+      payload: body,
+    });
+
+  await deliver();
+  await deliver();
+
+  // Providers retry for days. The ledger's unique index on
+  // (event_id, destination) is what makes that safe.
+  assert.deepEqual(await ledgerFor(placed.orderNumber), [
+    "purchase/ga4/skipped",
+    "purchase/meta/skipped",
+  ]);
+});
+
+apiTest("the payment webhook reports revenue at all", async () => {
+  // It bypasses the courier route entirely, so queueing conversions per-caller
+  // was how it ended up silently reporting nothing.
+  const { cartId } = await newCartWith("SIU-PS-SLV");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  const body = JSON.stringify({
+    event: "payment.captured",
+    payload: {
+      payment: { entity: { id: "pay_x", notes: { order_number: placed.orderNumber } } },
+    },
+  });
+  await app.server.inject({
+    method: "POST",
+    url: "/webhooks/razorpay",
+    headers: {
+      "content-type": "application/json",
+      "x-razorpay-signature": sign(body, RAZORPAY_SECRET),
+    },
+    payload: body,
+  });
+
+  assert.ok((await ledgerFor(placed.orderNumber)).length > 0);
+});
+
+apiTest("carries the order's own event id, so the pixel and the server agree", async () => {
+  const eventId = crypto.randomUUID();
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId },
+    }),
+  );
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+    payload: { status: "confirmed" },
+  });
+
+  const { rows } = await app.pool.query(
+    "SELECT event_id, payload FROM tracking_events WHERE destination = 'meta' AND event_id = $1",
+    [eventId],
+  );
+  assert.equal(rows.length, 1);
+  // The dedup key has to survive into the payload, or the two sends land as
+  // two conversions.
+  assert.equal(rows[0].payload.event_id, eventId);
+  assert.equal(rows[0].payload.event_name, "Purchase");
+});
+
+apiTest("reports orders that produced no conversion at all", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  await placeAndMove("upi", "SIU-PS-GLD", ["confirmed"]);
+
+  // An order confirmed with the ledger emptied behind it is exactly the parity
+  // gap doc 08 §8 asks to be watched.
+  await app.pool.query("DELETE FROM tracking_events");
+
+  const metrics = json(
+    await app.server.inject({
+      method: "GET",
+      url: "/admin/metrics",
+      headers: operator.headers,
+    }),
+  );
+  assert.equal(metrics.tracking.missingConversions.length, 1);
+  assert.equal(metrics.tracking.health.sent, 0);
+});

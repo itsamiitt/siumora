@@ -20,4 +20,5 @@ export * from "./schema.ts";
 export { migrate, MIGRATIONS } from "./migrate.ts";
 export * from "./repositories.ts";
 export * from "./auth-repository.ts";
+export * from "./tracking-repository.ts";
 export { createTestDatabase, type TestDatabase } from "./testing.ts";

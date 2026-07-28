@@ -10,7 +10,12 @@ import {
   type CartTotals,
   type Order,
 } from "@siumora/core";
-import { desc, schema } from "@siumora/db";
+import {
+  desc,
+  ordersMissingConversion,
+  schema,
+  trackingHealth,
+} from "@siumora/db";
 
 import { requireAdmin } from "../lib/auth.ts";
 
@@ -73,6 +78,13 @@ export async function registerAdminRoutes(server: FastifyInstance) {
 
     const orders = rows.map(toDomainOrder);
 
+    // Doc 08 §8: order-to-conversion parity, as a query rather than a metric
+    // somebody eyeballs. Any gap here is revenue the ad platforms cannot see.
+    const [health, missingConversions] = await Promise.all([
+      trackingHealth(server.db),
+      ordersMissingConversion(server.db),
+    ]);
+
     reply.header("Cache-Control", "no-store");
     return {
       operator: maskPhone(viewer.customer.phone),
@@ -87,6 +99,7 @@ export async function registerAdminRoutes(server: FastifyInstance) {
       })),
       statuses: statusCounts(orders),
       invoiceSeries: invoiceSeriesHealth(orders),
+      tracking: { health, missingConversions },
       recentOrders: rows.slice(0, 50),
     };
   });
