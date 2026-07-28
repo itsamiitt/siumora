@@ -10,7 +10,7 @@ import {
   setPrivacyRequestStatus,
 } from "@siumora/db";
 
-import { requireAdmin, requireCustomer } from "../lib/auth.ts";
+import { audit, requireCustomer, requirePermission } from "../lib/auth.ts";
 
 /**
  * Data-principal rights (DPDP Act 2023, plan/11 §5).
@@ -96,7 +96,7 @@ export async function registerPrivacyRoutes(server: FastifyInstance) {
 
   /** The queue, with the deadline attached. Reading it is the point. */
   server.get("/admin/privacy-requests", async (request, reply) => {
-    const viewer = await requireAdmin(request, reply);
+    const viewer = await requirePermission(request, reply, "privacy:write");
     if (!viewer) return;
 
     reply.header("Cache-Control", "no-store");
@@ -111,7 +111,7 @@ export async function registerPrivacyRoutes(server: FastifyInstance) {
    * person who would have to sort that out is the one clicking the button.
    */
   server.post("/admin/privacy-requests/:id/complete", async (request, reply) => {
-    const viewer = await requireAdmin(request, reply);
+    const viewer = await requirePermission(request, reply, "privacy:write");
     if (!viewer) return;
 
     const { id } = z.object({ id: z.uuid() }).parse(request.params);
@@ -137,6 +137,13 @@ export async function registerPrivacyRoutes(server: FastifyInstance) {
     }
 
     await setPrivacyRequestStatus(server.db, record.id, "completed");
+    // The one irreversible action in the system. A record of who ran it is the
+    // difference between an erasure and a disappearance.
+    await audit(request, viewer, "privacy.erase", {
+      subject: record.id,
+      detail: { ordersRedacted: result.ordersRedacted },
+    });
+
     reply.header("Cache-Control", "no-store");
     return result;
   });

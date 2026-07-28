@@ -50,7 +50,7 @@ before(async () => {
 beforeEach(async () => {
   if (!url) return;
   await app.pool.query(
-    "DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM cod_remittances; DELETE FROM privacy_requests; DELETE FROM tracking_events; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
+    "TRUNCATE audit_log; DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM cod_remittances; DELETE FROM privacy_requests; DELETE FROM tracking_events; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
   );
   await seed(testDb!.url);
 });
@@ -2243,4 +2243,237 @@ apiTest("keeps the privacy queue away from a customer", async () => {
     headers: shopper.headers,
   });
   assert.equal(response.statusCode, 403);
+});
+
+// ── Roles and the audit log ───────────────────────────────────
+
+/** An app with three distinct roles, so a refusal proves the role and not luck. */
+async function rolesApp() {
+  return buildApp({
+    connectionString: testDb!.url,
+    adminPhones: "9000000001:owner,9000000002:operator,9000000003:viewer",
+    otpEcho: true,
+    courierSimulation: true,
+    rateLimiter: createRateLimiter([]),
+  });
+}
+
+apiTest("keeps a packer away from the things that cannot be undone", async () => {
+  const roles = await rolesApp();
+  try {
+    const signInAs = async (phone: string) => {
+      const issued = json(
+        await roles.server.inject({ method: "POST", url: "/auth/otp", payload: { phone } }),
+      );
+      const verified = json(
+        await roles.server.inject({
+          method: "POST",
+          url: "/auth/verify",
+          payload: { phone, code: issued.code },
+        }),
+      );
+      return { authorization: `Bearer ${verified.token}` };
+    };
+
+    const owner = await signInAs("9000000001");
+    const operator = await signInAs("9000000002");
+    const viewer = await signInAs("9000000003");
+
+    // Everyone on the list can read the dashboard.
+    for (const [label, headers] of [["owner", owner], ["operator", operator], ["viewer", viewer]] as const) {
+      const response = await roles.server.inject({
+        method: "GET",
+        url: "/admin/metrics",
+        headers,
+      });
+      assert.equal(response.statusCode, 200, label);
+    }
+
+    // A GSTR-1 export is every customer's state and every registered buyer's
+    // GSTIN in one file.
+    const gstPath = `/admin/gstr1?period=${thisPeriod()}`;
+    assert.equal((await roles.server.inject({ method: "GET", url: gstPath, headers: owner })).statusCode, 200);
+    assert.equal((await roles.server.inject({ method: "GET", url: gstPath, headers: operator })).statusCode, 403);
+
+    // Erasure is irreversible.
+    assert.equal(
+      (await roles.server.inject({ method: "GET", url: "/admin/privacy-requests", headers: operator })).statusCode,
+      403,
+    );
+
+    // The everyday job stays available to the everyday role.
+    assert.equal(
+      (await roles.server.inject({ method: "GET", url: "/admin/restock-queue", headers: operator })).statusCode,
+      200,
+    );
+    assert.equal(
+      (await roles.server.inject({ method: "GET", url: "/admin/restock-queue", headers: viewer })).statusCode,
+      403,
+    );
+  } finally {
+    await roles.server.close();
+    await roles.pool.end();
+  }
+});
+
+apiTest("names the permission it is refusing for", async () => {
+  const roles = await rolesApp();
+  try {
+    const issued = json(
+      await roles.server.inject({
+        method: "POST",
+        url: "/auth/otp",
+        payload: { phone: "9000000002" },
+      }),
+    );
+    const verified = json(
+      await roles.server.inject({
+        method: "POST",
+        url: "/auth/verify",
+        payload: { phone: "9000000002", code: issued.code },
+      }),
+    );
+
+    const response = await roles.server.inject({
+      method: "GET",
+      url: `/admin/gstr1?period=${thisPeriod()}`,
+      headers: { authorization: `Bearer ${verified.token}` },
+    });
+
+    // Told only "no", an operator asks an owner to try it too — two people's
+    // time to learn one fact.
+    const body = json(response);
+    assert.equal(body.error, "insufficient_role");
+    assert.equal(body.needs, "gst:read");
+    assert.equal(body.role, "operator");
+  } finally {
+    await roles.server.close();
+    await roles.pool.end();
+  }
+});
+
+apiTest("records who moved an order, and does not blame the courier on a person", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const placed = await placeAndMove("upi", "SIU-PS-GLD", []);
+
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status`,
+    headers: operator.headers,
+    payload: { status: "confirmed" },
+  });
+  // The same route, driven by the courier simulation with no operator session.
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+    payload: { status: "processing" },
+  });
+
+  const { rows } = await app.pool.query(
+    "SELECT action, subject, detail, actor_phone, actor_role FROM audit_log ORDER BY created_at",
+  );
+
+  // One entry, not two: putting somebody's name against a move they never made
+  // is worse than not logging it.
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, "order.status");
+  assert.equal(rows[0].subject, placed.orderNumber);
+  assert.equal(rows[0].detail.to, "confirmed");
+  assert.equal(rows[0].actor_phone, OPERATOR_PHONE);
+  assert.equal(rows[0].actor_role, "owner");
+});
+
+apiTest("records a remittance batch and a bulk export", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const order = await deliveredCod();
+
+  await app.server.inject({
+    method: "POST",
+    url: "/admin/remittances",
+    headers: operator.headers,
+    payload: batch([
+      {
+        orderNumber: order.number,
+        collected: order.total,
+        deductions: 6500,
+        remitted: order.total - 6500,
+      },
+    ]),
+  });
+  await app.server.inject({
+    method: "GET",
+    url: `/admin/gstr1?period=${thisPeriod()}`,
+    headers: operator.headers,
+  });
+
+  const { rows } = await app.pool.query(
+    "SELECT action, subject FROM audit_log ORDER BY created_at",
+  );
+  const actions = rows.map((row: { action: string }) => row.action);
+
+  assert.ok(actions.includes("remittance.ingest"));
+  // A read, recorded unusually: a bulk export of customer data is worth knowing
+  // about even though it changed nothing.
+  assert.ok(actions.includes("gst.export"));
+});
+
+apiTest("will not let the application rewrite its own log", async () => {
+  // The credentials worth stealing are the application's. A log those
+  // credentials can edit is not evidence, so the database refuses.
+  const operator = await signIn(OPERATOR_PHONE);
+  const placed = await placeAndMove("upi", "SIU-PS-GLD", []);
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status`,
+    headers: operator.headers,
+    payload: { status: "confirmed" },
+  });
+
+  await app.pool.query("UPDATE audit_log SET action = 'order.restock'");
+  await app.pool.query("DELETE FROM audit_log");
+
+  const { rows } = await app.pool.query("SELECT action FROM audit_log");
+  assert.equal(rows.length, 1, "the delete did nothing");
+  assert.equal(rows[0].action, "order.status", "the update did nothing");
+});
+
+apiTest("shows an operator the log without the phone numbers", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const placed = await placeAndMove("upi", "SIU-PS-GLD", []);
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status`,
+    headers: operator.headers,
+    payload: { status: "confirmed" },
+  });
+
+  const log = json(
+    await app.server.inject({
+      method: "GET",
+      url: "/admin/audit",
+      headers: operator.headers,
+    }),
+  );
+
+  assert.equal(log.entries.length, 1);
+  assert.equal(log.entries[0].action, "order.status");
+  // Full numbers stay in the table for accountability; a screen anybody can
+  // shoulder-surf does not need them.
+  assert.equal(log.entries[0].actorPhone.includes(OPERATOR_PHONE), false);
+  assert.match(log.entries[0].actorPhone, /•/);
+});
+
+apiTest("tells the dashboard what this operator may do", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const metrics = json(
+    await app.server.inject({
+      method: "GET",
+      url: "/admin/metrics",
+      headers: operator.headers,
+    }),
+  );
+
+  // A button that 403s on click is worse than a button that is not there.
+  assert.equal(metrics.role, "owner");
+  assert.ok(metrics.permissions.includes("gst:read"));
 });

@@ -509,6 +509,50 @@ ALTER TABLE customers ADD CONSTRAINT customers_erasure_consistent
   CHECK ((phone LIKE 'erased:%') = (erased_at IS NOT NULL));
 `,
   },
+  {
+    id: "0010_audit_log",
+    sql: `
+-- Every admin write, with the person who made it (plan/11 §4). Until now an
+-- order could be cancelled, a remittance booked or a customer erased with no
+-- record of who did it — which is the same as nobody having done it.
+CREATE TABLE audit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Deliberately not a foreign key. The log outlives the rows it describes, and
+  -- a cascade or a SET NULL is the database editing an append-only table — which
+  -- the rules below refuse, leaving the constraint permanently unsatisfiable.
+  -- An operator who is erased must not take the record of their actions away.
+  actor_id uuid,
+  -- Which is why the number is stored beside it. This is an internal
+  -- accountability record, so it is stored whole.
+  actor_phone text NOT NULL,
+  actor_role text NOT NULL,
+  action text NOT NULL,
+  -- What was acted on: an order number, a batch id, a request id.
+  subject text,
+  detail jsonb,
+  ip text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT audit_actor_role_known
+    CHECK (actor_role IN ('viewer', 'operator', 'owner'))
+);
+
+CREATE INDEX audit_log_recent_idx ON audit_log(created_at DESC);
+CREATE INDEX audit_log_actor_idx ON audit_log(actor_phone, created_at DESC);
+CREATE INDEX audit_log_subject_idx ON audit_log(subject) WHERE subject IS NOT NULL;
+
+-- Append-only, enforced rather than intended.
+--
+-- A log the application merely promises not to edit is a log an attacker with
+-- the application's credentials can edit, and those are the credentials worth
+-- taking. The rule refuses at the database, so covering tracks needs a
+-- privilege the API does not have. TRUNCATE is not intercepted, which is what
+-- the test suite uses to reset between cases — it is also a privilege no
+-- production role should hold.
+CREATE RULE audit_log_no_update AS ON UPDATE TO audit_log DO INSTEAD NOTHING;
+CREATE RULE audit_log_no_delete AS ON DELETE TO audit_log DO INSTEAD NOTHING;
+`,
+  },
 ];
 
 /**

@@ -253,6 +253,46 @@ export async function getTrackingReport(): Promise<TrackingReport | undefined> {
   }
 }
 
+export interface OperatorAccess {
+  readonly role: "viewer" | "operator" | "owner";
+  readonly permissions: string[];
+}
+
+/**
+ * What this operator may do.
+ *
+ * The dashboard renders against it rather than guessing: a button that 403s on
+ * click is worse than a button that is not there.
+ */
+export async function getOperatorAccess(): Promise<OperatorAccess | undefined> {
+  try {
+    const metrics = (await (await apiAs()).getMetrics()) as Partial<OperatorAccess>;
+    if (!metrics.role) return undefined;
+    return { role: metrics.role, permissions: metrics.permissions ?? [] };
+  } catch {
+    return undefined;
+  }
+}
+
+export interface AuditEntry {
+  readonly id: string;
+  readonly action: string;
+  readonly actorPhone: string;
+  readonly actorRole: string;
+  readonly subject: string | null;
+  readonly createdAt: string;
+}
+
+/** Recent admin writes. Empty for anyone who may not read the log. */
+export async function getAuditLog(): Promise<AuditEntry[]> {
+  try {
+    const log = (await (await apiAs()).getAuditLog()) as { entries?: AuditEntry[] };
+    return log.entries ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export interface RemittanceReport {
   readonly batches: Array<{
     batchId: string;

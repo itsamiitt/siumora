@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import {
+  can,
   canTransition,
   evaluateReturn,
   hsnSummary,
@@ -23,7 +24,13 @@ import {
   schema,
 } from "@siumora/db";
 
-import { requireAdmin, requireCustomer, resolveViewer, type Viewer } from "../lib/auth.ts";
+import {
+  audit,
+  requireCustomer,
+  requirePermission,
+  resolveViewer,
+  type Viewer,
+} from "../lib/auth.ts";
 import { setOrderStatus } from "../lib/invoicing.ts";
 import { isUniqueViolation } from "../lib/pg-errors.ts";
 
@@ -211,7 +218,9 @@ export async function registerOrderRoutes(server: FastifyInstance) {
     const found = await authorised(request, reply, number);
     if (!found) return;
 
-    if (!found.viewer?.isAdmin && !server.config.courierSimulation) {
+    // A viewer is on the operator list but cannot move parcels, so the check
+    // is the permission rather than the list.
+    if (!can(found.viewer?.role, "orders:write") && !server.config.courierSimulation) {
       return reply.code(403).send({
         error: "not_an_operator",
         message: "Only the courier or an operator can move this order.",
@@ -248,6 +257,17 @@ export async function registerOrderRoutes(server: FastifyInstance) {
     if (!result.ok) {
       return reply.code(result.code).send({ error: result.error, message: result.message });
     }
+
+    // Only when a person did it. The courier simulation and the signed webhook
+    // both come through here, and logging them as operator actions would put
+    // somebody's name against a move they never made.
+    if (found.viewer?.role) {
+      await audit(request, found.viewer, "order.status", {
+        subject: number,
+        detail: { to: body.status, ...(body.ndrReason ? { ndrReason: body.ndrReason } : {}) },
+      });
+    }
+
     return { ok: true, order: result.order };
   });
 
@@ -299,7 +319,7 @@ export async function registerOrderRoutes(server: FastifyInstance) {
    * guard exists to protect.
    */
   server.get("/admin/restock-queue", async (request, reply) => {
-    const viewer = await requireAdmin(request, reply);
+    const viewer = await requirePermission(request, reply, "orders:write");
     if (!viewer) return;
 
     const rows = await listAwaitingRestock(server.db);
@@ -322,7 +342,7 @@ export async function registerOrderRoutes(server: FastifyInstance) {
    * is days away and may arrive damaged. Somebody has to have it in their hands.
    */
   server.post("/orders/:number/restock", async (request, reply) => {
-    const viewer = await requireAdmin(request, reply);
+    const viewer = await requirePermission(request, reply, "orders:write");
     if (!viewer) return;
 
     const { number } = numberParam.parse(request.params);

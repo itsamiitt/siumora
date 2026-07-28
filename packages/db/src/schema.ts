@@ -403,6 +403,37 @@ export const trackingEvents = pgTable(
 );
 
 /**
+ * Every admin write, with the person who made it.
+ *
+ * Append-only, enforced by a database rule rather than by the application
+ * promising not to edit it — the credentials worth stealing are the
+ * application's, and a log those credentials can rewrite is not evidence.
+ */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /**
+     * Deliberately not a foreign key: the log outlives the rows it describes,
+     * and a cascade is the database editing a table it is forbidden to edit.
+     */
+    actorId: uuid("actor_id"),
+    actorPhone: text("actor_phone").notNull(),
+    actorRole: text("actor_role").notNull(),
+    action: text("action").notNull(),
+    /** An order number, a batch id, a request id. */
+    subject: text("subject"),
+    detail: jsonb("detail"),
+    ip: text("ip"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("audit_log_recent_idx").on(table.createdAt),
+    index("audit_log_actor_idx").on(table.actorPhone, table.createdAt),
+  ],
+);
+
+/**
  * COD remittance ledger.
  *
  * One row per line of a courier's remittance file, kept after reconciliation

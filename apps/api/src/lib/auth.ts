@@ -1,7 +1,13 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 
-import { isAdminPhone } from "@siumora/core";
-import { findSession, type CustomerRow } from "@siumora/db";
+import {
+  can,
+  roleFor,
+  type AuditAction,
+  type Permission,
+  type Role,
+} from "@siumora/core";
+import { findSession, recordAudit, type CustomerRow } from "@siumora/db";
 
 /**
  * Who is making this request?
@@ -20,6 +26,8 @@ export interface Viewer {
    * immediately rather than whenever a 30-day session happens to lapse.
    */
   readonly isAdmin: boolean;
+  /** Undefined for a shopper. Demoting somebody takes effect on the next call. */
+  readonly role?: Role;
 }
 
 const SESSION_COOKIE = "siumora_session";
@@ -54,10 +62,13 @@ export async function resolveViewer(
   const session = await findSession(request.server.db, token);
   if (!session) return undefined;
 
+  const role = roleFor(session.customer.phone, request.server.adminRoles);
+
   return {
     customer: session.customer,
     sessionId: session.sessionId,
-    isAdmin: isAdminPhone(session.customer.phone, request.server.adminPhones),
+    isAdmin: role !== undefined,
+    ...(role ? { role } : {}),
   };
 }
 
@@ -109,4 +120,73 @@ export async function requireAdmin(
     return undefined;
   }
   return viewer;
+}
+
+/**
+ * Require a specific permission.
+ *
+ * The refusal names the permission rather than saying "no". An operator told
+ * only that they cannot do something goes and asks an owner to try it too,
+ * which is two people's time to learn one fact.
+ *
+ * Checked against the environment on every call, like the allow-list it
+ * replaces: demoting somebody takes effect on their next request, not when
+ * their session lapses.
+ */
+export async function requirePermission(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  permission: Permission,
+): Promise<Viewer | undefined> {
+  const viewer = await requireAdmin(request, reply);
+  if (!viewer) return undefined;
+
+  if (!can(viewer.role, permission)) {
+    await reply.code(403).send({
+      error: "insufficient_role",
+      message: `${article(viewer.role)} ${viewer.role} cannot do this. Needs: ${permission}.`,
+      needs: permission,
+      role: viewer.role,
+    });
+    return undefined;
+  }
+
+  return viewer;
+}
+
+/** "an operator", "an owner", "a viewer". Two of the three roles need "an". */
+function article(role: Role | undefined): string {
+  return role && /^[aeiou]/i.test(role) ? "An" : "A";
+}
+
+/**
+ * Write an audit entry for the action just taken.
+ *
+ * Takes the viewer rather than a phone so the actor cannot be mistyped, and
+ * never throws: the write it describes has already happened, and failing after
+ * the fact would leave the log and the world disagreeing in the worse
+ * direction. A failure is logged loudly instead.
+ */
+export async function audit(
+  request: FastifyRequest,
+  viewer: Viewer,
+  action: AuditAction,
+  options: { subject?: string; detail?: unknown } = {},
+): Promise<void> {
+  const result = await recordAudit(request.server.db, {
+    actorId: viewer.customer.id,
+    actorPhone: viewer.customer.phone,
+    actorRole: viewer.role ?? "viewer",
+    action,
+    ...(options.subject ? { subject: options.subject } : {}),
+    ...(options.detail !== undefined ? { detail: options.detail } : {}),
+    ip: request.ip,
+  });
+
+  if (!result.recorded) {
+    request.log?.error?.(
+      { err: result.error, action, subject: options.subject },
+      "audit entry not recorded",
+    );
+  }
 }

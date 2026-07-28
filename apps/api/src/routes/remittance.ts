@@ -9,7 +9,7 @@ import {
   remittanceLedger,
 } from "@siumora/db";
 
-import { requireAdmin } from "../lib/auth.ts";
+import { audit, requireAdmin, requirePermission } from "../lib/auth.ts";
 
 /**
  * COD remittance desk.
@@ -46,7 +46,7 @@ const batchSchema = z.object({
 
 export async function registerRemittanceRoutes(server: FastifyInstance) {
   server.post("/admin/remittances", async (request, reply) => {
-    const viewer = await requireAdmin(request, reply);
+    const viewer = await requirePermission(request, reply, "remittance:write");
     if (!viewer) return;
 
     const batch = batchSchema.parse(request.body);
@@ -56,6 +56,16 @@ export async function registerRemittanceRoutes(server: FastifyInstance) {
       courier: batch.courier,
       ...(batch.remittedOn ? { remittedOn: new Date(batch.remittedOn) } : {}),
       rows: batch.rows,
+    });
+
+    await audit(request, viewer, "remittance.ingest", {
+      subject: result.batchId,
+      detail: {
+        courier: batch.courier,
+        rows: batch.rows.length,
+        recorded: result.recorded,
+        shortfall: result.shortfall,
+      },
     });
 
     reply.header("Cache-Control", "no-store");

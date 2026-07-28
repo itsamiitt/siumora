@@ -18,9 +18,12 @@ import { formatPaise } from "@siumora/in-locale";
 import { CollectionTitle, Display, MicroLabel } from "@siumora/ui";
 
 import {
+  getAuditLog,
+  getOperatorAccess,
   getRemittanceReport,
   getTrackingReport,
   listAllOrders,
+  type AuditEntry,
   type RemittanceReport,
 } from "@/lib/order-store";
 import { currentViewer } from "@/lib/session";
@@ -59,11 +62,17 @@ async function AdminPageContents() {
     );
   }
 
-  const [orders, tracking, remittances] = await Promise.all([
+  const [orders, tracking, remittances, access] = await Promise.all([
     listAllOrders(),
     getTrackingReport(),
     getRemittanceReport(),
+    getOperatorAccess(),
   ]);
+
+  const may = (permission: string) => access?.permissions.includes(permission) ?? false;
+  // Only fetched when it can be read, so a viewer's dashboard does not make a
+  // request that comes back 403 every time it loads.
+  const auditEntries = may("audit:read") ? await getAuditLog() : [];
 
   const revenue = summariseRevenue(orders);
   const byPincode = rtoBreakdown(orders, (o) => o.address.pincode);
@@ -81,9 +90,10 @@ async function AdminPageContents() {
       {/* 2FA beyond the sign-in code is still outstanding, and this page is
           worth being straight about rather than implying it is fully hardened. */}
       <p className="mt-3 text-sm text-content-faint">
-        Signed in as {viewer.customer.maskedPhone}. Operator access comes from
-        the <code>ADMIN_PHONES</code> allow-list; a second factor beyond the
-        sign-in code is not built yet.
+        Signed in as {viewer.customer.maskedPhone}
+        {access ? ` · ${access.role}` : ""}. Roles come from the{" "}
+        <code>ADMIN_PHONES</code> allow-list; a second factor beyond the sign-in
+        code is not built yet.
       </p>
 
       <section className="mt-10">
@@ -131,6 +141,7 @@ async function AdminPageContents() {
         <RtoTable rows={byPayment} emptyNote="No settled orders yet." />
       </Section>
 
+      {may("gst:read") && (
       <Section title="GST desk">
         <div className="flex flex-wrap gap-x-10 gap-y-3 text-sm">
           <span>
@@ -146,10 +157,13 @@ async function AdminPageContents() {
         </div>
         <HsnTable orders={orders} />
       </Section>
+      )}
 
-      <Section title="COD remittances">
-        <RemittancePanel report={remittances} />
-      </Section>
+      {may("remittance:write") && (
+        <Section title="COD remittances">
+          <RemittancePanel report={remittances} />
+        </Section>
+      )}
 
       <Section title="Marketing health">
         {tracking ? (
@@ -205,6 +219,12 @@ async function AdminPageContents() {
         )}
       </Section>
 
+      {may("audit:read") && (
+        <Section title="Recent activity">
+          <AuditTable entries={auditEntries} />
+        </Section>
+      )}
+
       <Section title="Order states">
         {Object.keys(counts).length === 0 ? (
           <Empty>No orders yet.</Empty>
@@ -222,6 +242,61 @@ async function AdminPageContents() {
         )}
       </Section>
     </div>
+  );
+}
+
+/** Plain-language names. The action slugs are for grouping, not for reading. */
+const ACTION_LABEL: Record<string, string> = {
+  "order.status": "Moved an order",
+  "order.restock": "Put stock back",
+  "remittance.ingest": "Booked a remittance file",
+  "privacy.erase": "Erased a customer",
+  "privacy.refuse": "Refused a privacy request",
+  "gst.export": "Exported the GST return",
+  "auth.admin_signin": "Signed in",
+};
+
+function AuditTable({ entries }: { entries: readonly AuditEntry[] }) {
+  if (entries.length === 0) {
+    return <Empty>Nothing recorded yet.</Empty>;
+  }
+
+  return (
+    <table className="w-full text-sm">
+      <thead className="text-content-muted">
+        <tr className="text-left">
+          <th className="pb-2 font-normal">What</th>
+          <th className="pb-2 font-normal">Who</th>
+          <th className="pb-2 text-right font-normal">When</th>
+        </tr>
+      </thead>
+      <tbody>
+        {entries.slice(0, 20).map((entry) => (
+          <tr key={entry.id} className="border-t border-[var(--color-rule)]">
+            <td className="py-2">
+              {ACTION_LABEL[entry.action] ?? entry.action}
+              {entry.subject && (
+                <span className="text-content-faint"> · {entry.subject}</span>
+              )}
+            </td>
+            {/* Masked. Full numbers stay in the table for accountability; a
+                screen anybody can shoulder-surf does not need them. */}
+            <td className="py-2 text-content-muted">
+              {entry.actorPhone}{" "}
+              <span className="text-content-faint">({entry.actorRole})</span>
+            </td>
+            <td className="py-2 text-right tabular-nums text-content-muted">
+              {new Date(entry.createdAt).toLocaleString("en-IN", {
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

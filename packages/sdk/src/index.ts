@@ -489,6 +489,11 @@ export class SiumoraClient {
     );
   }
 
+  /** The audit log, newest first. Owner only, and read-only by construction. */
+  async getAuditLog(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/admin/audit", undefined, { cache: "no-store" });
+  }
+
   async getMetrics(): Promise<Record<string, unknown>> {
     return this.request("GET", "/admin/metrics", undefined, { cache: "no-store" });
   }

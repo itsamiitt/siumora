@@ -199,6 +199,21 @@ export {
 } from "./facets.ts";
 
 export {
+  ACTION_PERMISSION,
+  AUDIT_ACTIONS,
+  ROLES,
+  can,
+  isAuditAction,
+  isRole,
+  parseAdminRoles,
+  permissionsFor,
+  roleFor,
+  type AuditAction,
+  type Permission,
+  type Role,
+} from "./rbac.ts";
+
+export {
   ACKNOWLEDGE_HOURS,
   EXPORT_SCOPE,
   REDACTED,

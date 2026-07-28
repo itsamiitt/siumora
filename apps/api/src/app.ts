@@ -1,6 +1,6 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 
-import { parseAdminPhones } from "@siumora/core";
+import { parseAdminPhones, parseAdminRoles, type Role } from "@siumora/core";
 import { createDb, createPool, migrate, type Database } from "@siumora/db";
 
 import { registerAuthRoutes } from "./routes/auth.ts";
@@ -22,7 +22,14 @@ export interface AppConfig {
   corsOrigins?: string[];
   razorpayWebhookSecret?: string;
   courierWebhookSecret?: string;
-  /** Numbers that may open the ops dashboard. Comma separated. */
+  /**
+   * Who may open the ops dashboard, comma separated.
+   *
+   * `9876543210` or `9876543210:operator`. An unsuffixed number is an owner —
+   * a one-person shop sets one number and expects to do everything, and a
+   * default that quietly removed the GST desk would surprise worse than a
+   * permissive one. See `parseAdminRoles`.
+   */
   adminPhones?: string;
   /** Set once a WhatsApp/DLT sender is wired up. */
   otpDeliveryConfigured?: boolean;
@@ -78,6 +85,8 @@ declare module "fastify" {
     config: AppConfig;
     /** Parsed once at boot, so every request is not re-parsing an env string. */
     adminPhones: string[];
+    /** Phone to role. Read on every request; a demotion takes effect at once. */
+    adminRoles: Map<string, Role>;
     rateLimiter: RateLimiter;
   }
 }
@@ -109,6 +118,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
   server.decorate("db", db);
   server.decorate("config", config);
   server.decorate("adminPhones", parseAdminPhones(config.adminPhones));
+  server.decorate("adminRoles", parseAdminRoles(config.adminPhones));
 
   server.addContentTypeParser(
     "application/json",

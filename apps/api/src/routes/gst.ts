@@ -4,7 +4,7 @@ import { z } from "zod";
 import { buildGstr1, type CartLine, type Gstr1Order } from "@siumora/core";
 import { desc, inArray, schema } from "@siumora/db";
 
-import { requireAdmin } from "../lib/auth.ts";
+import { audit, requirePermission } from "../lib/auth.ts";
 
 /**
  * The GST desk.
@@ -36,7 +36,9 @@ const SUPPLIED = [
 
 export async function registerGstRoutes(server: FastifyInstance) {
   server.get("/admin/gstr1", async (request, reply) => {
-    const viewer = await requireAdmin(request, reply);
+    // Owner only. A GSTR-1 export is every customer's state and every
+    // registered buyer's GSTIN in one file.
+    const viewer = await requirePermission(request, reply, "gst:read");
     if (!viewer) return;
 
     const { period, format } = periodQuery.parse(request.query);
@@ -92,6 +94,13 @@ export async function registerGstRoutes(server: FastifyInstance) {
     }));
 
     const gstr1 = buildGstr1(orders, period);
+
+    // Recorded as a read, unusually: a bulk export of customer data is worth
+    // knowing about even though it changed nothing.
+    await audit(request, viewer, "gst.export", {
+      subject: period,
+      detail: { format: format ?? "json", invoices: gstr1.totals.invoices },
+    });
 
     reply.header("Cache-Control", "no-store");
 
