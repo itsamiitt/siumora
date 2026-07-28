@@ -254,6 +254,68 @@ CREATE INDEX products_title_trgm ON products USING gin (title gin_trgm_ops);
 CREATE INDEX products_subtitle_trgm ON products USING gin (subtitle gin_trgm_ops);
 `,
   },
+  {
+    id: "0003_customers_and_sessions",
+    sql: `
+CREATE TABLE customers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone text NOT NULL UNIQUE,
+  name text NOT NULL DEFAULT '',
+  email text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  -- Numbers are stored in one normalised form and nothing else. Without this a
+  -- shopper who typed +91 once and 0 the next time becomes two customers, and
+  -- their order history splits in half.
+  CONSTRAINT customers_phone_normalised CHECK (phone ~ '^[6-9][0-9]{9}$')
+);
+
+CREATE TABLE otp_challenges (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone text NOT NULL,
+  -- Hashed, never the code itself. A database dump must not be a set of live
+  -- sign-in codes, and nobody with read access should be able to take over an
+  -- account by watching this table.
+  code_hash text NOT NULL,
+  attempts integer NOT NULL DEFAULT 0,
+  requested_ip text NOT NULL DEFAULT '',
+  expires_at timestamptz NOT NULL,
+  consumed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT otp_attempts_nonneg CHECK (attempts >= 0),
+  CONSTRAINT otp_expiry_after_creation CHECK (expires_at > created_at)
+);
+-- The throttle reads the recent sends for one number; this is that query.
+CREATE INDEX otp_phone_created_idx ON otp_challenges(phone, created_at DESC);
+
+CREATE TABLE sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Hash again: the bearer token exists only in the customer's cookie.
+  token_hash text NOT NULL UNIQUE,
+  customer_id uuid NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  revoked_at timestamptz,
+  user_agent text NOT NULL DEFAULT '',
+  CONSTRAINT sessions_expiry_after_creation CHECK (expires_at > created_at)
+);
+CREATE INDEX sessions_customer_idx ON sessions(customer_id);
+
+-- Orders become ownable. Nullable, because guest checkout stays: making
+-- sign-in compulsory to buy costs more orders than the account is worth.
+ALTER TABLE orders ADD COLUMN customer_id uuid REFERENCES customers(id) ON DELETE SET NULL;
+CREATE INDEX orders_customer_idx ON orders(customer_id, placed_at DESC);
+
+-- Order numbers are a readable sequence, so they are guessable. The access key
+-- is what actually authorises reading a guest order; without it SIU-00001 and a
+-- for-loop would walk every customer's address and phone number.
+ALTER TABLE orders ADD COLUMN access_key uuid NOT NULL DEFAULT gen_random_uuid();
+
+-- Recorded on the order rather than recomputed, because the RTO score that
+-- decided the COD terms used this value at the time it was placed.
+ALTER TABLE orders ADD COLUMN phone_verified boolean NOT NULL DEFAULT false;
+`,
+  },
 ];
 
 /**

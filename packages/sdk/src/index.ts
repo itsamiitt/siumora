@@ -36,6 +36,17 @@ export interface ClientOptions {
   /** Per-request timeout. A hung API must not hold a page render open. */
   timeoutMs?: number;
   fetch?: typeof globalThis.fetch;
+  /** Session token, sent as a bearer on every call. */
+  token?: string;
+}
+
+export interface AccountCustomer {
+  id: string;
+  phone: string;
+  /** Safe to print on a page — the middle four digits are dropped. */
+  maskedPhone: string;
+  name: string;
+  email: string | null;
 }
 
 export interface RequestOptions {
@@ -55,11 +66,28 @@ export class SiumoraClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly doFetch: typeof globalThis.fetch;
+  private readonly token: string | undefined;
 
   constructor(options: ClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.doFetch = options.fetch ?? globalThis.fetch;
+    this.token = options.token;
+  }
+
+  /**
+   * The same client, signed in.
+   *
+   * A new instance rather than a mutable field: a request already in flight
+   * must not pick up a token that arrived after it started.
+   */
+  withToken(token: string | undefined): SiumoraClient {
+    return new SiumoraClient({
+      baseUrl: this.baseUrl,
+      timeoutMs: this.timeoutMs,
+      fetch: this.doFetch,
+      ...(token ? { token } : {}),
+    });
   }
 
   private async request<T>(
@@ -82,6 +110,7 @@ export class SiumoraClient {
         ...(options.idempotencyKey
           ? { "idempotency-key": options.idempotencyKey }
           : {}),
+        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       ...(options.cache ? { cache: options.cache } : {}),
@@ -111,6 +140,60 @@ export class SiumoraClient {
     }
 
     return (await response.json()) as T;
+  }
+
+  // ── Sign-in ─────────────────────────────────────────────────
+
+  /**
+   * Ask for a code.
+   *
+   * `code` comes back only in an environment with no WhatsApp/DLT sender wired
+   * up, and `delivery` says which situation you are in.
+   */
+  async requestOtp(phone: string): Promise<{
+    ok: boolean;
+    maskedPhone: string;
+    expiresAt: string;
+    delivery: "sent" | "not_configured";
+    code?: string;
+  }> {
+    return this.request("POST", "/auth/otp", { phone }, { cache: "no-store" });
+  }
+
+  async verifyOtp(
+    phone: string,
+    code: string,
+  ): Promise<{
+    ok: true;
+    token: string;
+    expiresAt: string;
+    isAdmin: boolean;
+    claimedOrders: number;
+    customer: AccountCustomer;
+  }> {
+    return this.request("POST", "/auth/verify", { phone, code }, { cache: "no-store" });
+  }
+
+  async getSession(): Promise<
+    | { signedIn: false }
+    | { signedIn: true; isAdmin: boolean; customer: AccountCustomer }
+  > {
+    return this.request("GET", "/auth/session", undefined, { cache: "no-store" });
+  }
+
+  async signOut(): Promise<void> {
+    await this.request("POST", "/auth/signout");
+  }
+
+  async signOutEverywhere(): Promise<{ ok: boolean; revoked: number }> {
+    return this.request("POST", "/auth/signout-everywhere");
+  }
+
+  async updateProfile(input: {
+    name?: string;
+    email?: string;
+  }): Promise<{ ok: boolean; customer: AccountCustomer }> {
+    return this.request("PATCH", "/auth/profile", input);
   }
 
   // ── Catalogue ───────────────────────────────────────────────
@@ -215,12 +298,15 @@ export class SiumoraClient {
     address?: string;
     city?: string;
     stateCode?: string;
+    /** Lets the API tell whether this is the number the shopper proved. */
+    phone?: string;
   }): Promise<{
     serviceable: boolean;
     estimatedDays: string;
     addressQuality: { score: number; issues: string[]; needsReview: boolean };
     rto: { risk: "low" | "medium" | "high"; score: number };
     cod: CodDecision;
+    phoneVerified: boolean;
   }> {
     return this.request("POST", "/checkout/quote", input, { cache: "no-store" });
   }
@@ -238,13 +324,39 @@ export class SiumoraClient {
     orderNumber: string;
     status: string;
     invoiceNumber: string | null;
+    accessKey: string;
   }> {
     return this.request("POST", "/checkout", input, { idempotencyKey });
   }
 
   // ── Orders ──────────────────────────────────────────────────
 
-  async getOrder(number: string): Promise<
+  /**
+   * The access key, as a query suffix.
+   *
+   * Order numbers are a readable sequence, so the API will not serve one on the
+   * number alone. A signed-in owner needs no key; a guest passes the one they
+   * were given at checkout.
+   */
+  private keySuffix(accessKey?: string): string {
+    return accessKey ? `?key=${encodeURIComponent(accessKey)}` : "";
+  }
+
+  /** The signed-in customer's own orders. */
+  async listOrders(): Promise<Array<Record<string, unknown>>> {
+    const data = await this.request<{ orders: Array<Record<string, unknown>> }>(
+      "GET",
+      "/orders",
+      undefined,
+      { cache: "no-store" },
+    );
+    return data.orders;
+  }
+
+  async getOrder(
+    number: string,
+    accessKey?: string,
+  ): Promise<
     | {
         order: Record<string, unknown>;
         invoice: { rows: HsnSummaryRow[]; totals: InvoiceTotals };
@@ -253,32 +365,46 @@ export class SiumoraClient {
     | undefined
   > {
     try {
-      return await this.request("GET", `/orders/${number}`, undefined, {
-        cache: "no-store",
-      });
+      return await this.request(
+        "GET",
+        `/orders/${number}${this.keySuffix(accessKey)}`,
+        undefined,
+        { cache: "no-store" },
+      );
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) return undefined;
       throw error;
     }
   }
 
-  async confirmOrder(number: string): Promise<{ ok: boolean }> {
-    return this.request("POST", `/orders/${number}/confirm`);
+  async confirmOrder(number: string, accessKey?: string): Promise<{ ok: boolean }> {
+    return this.request(
+      "POST",
+      `/orders/${number}/confirm${this.keySuffix(accessKey)}`,
+    );
   }
 
   async advanceOrder(
     number: string,
     status: string,
     ndrReason?: string,
+    accessKey?: string,
   ): Promise<{ ok: boolean }> {
-    return this.request("POST", `/orders/${number}/status`, { status, ndrReason });
+    return this.request(
+      "POST",
+      `/orders/${number}/status${this.keySuffix(accessKey)}`,
+      { status, ndrReason },
+    );
   }
 
   async answerNdr(
     number: string,
     action: "reattempt" | "update_address" | "cancel",
+    accessKey?: string,
   ): Promise<{ ok: boolean }> {
-    return this.request("POST", `/orders/${number}/ndr`, { action });
+    return this.request("POST", `/orders/${number}/ndr${this.keySuffix(accessKey)}`, {
+      action,
+    });
   }
 
   async requestReturn(
@@ -290,8 +416,13 @@ export class SiumoraClient {
       sealIntact?: boolean;
       note?: string;
     },
+    accessKey?: string,
   ): Promise<{ ok: boolean }> {
-    return this.request("POST", `/orders/${number}/returns`, input);
+    return this.request(
+      "POST",
+      `/orders/${number}/returns${this.keySuffix(accessKey)}`,
+      input,
+    );
   }
 
   // ── Wishlist ────────────────────────────────────────────────

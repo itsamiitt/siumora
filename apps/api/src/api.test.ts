@@ -22,6 +22,7 @@ let testDb: TestDatabase | undefined;
 
 const RAZORPAY_SECRET = "test_razorpay_secret";
 const COURIER_SECRET = "test_courier_secret";
+const OPERATOR_PHONE = "9000000001";
 
 let app: App;
 
@@ -33,13 +34,18 @@ before(async () => {
     corsOrigins: ["http://localhost:3000"],
     razorpayWebhookSecret: RAZORPAY_SECRET,
     courierWebhookSecret: COURIER_SECRET,
+    adminPhones: OPERATOR_PHONE,
+    // No WhatsApp sender in a test run, so the code comes back in the response.
+    otpEcho: true,
+    // The courier-simulation transitions the delivered and NDR paths depend on.
+    courierSimulation: true,
   });
 });
 
 beforeEach(async () => {
   if (!url) return;
   await app.pool.query(
-    "DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys;",
+    "DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
   );
   await seed(testDb!.url);
 });
@@ -67,6 +73,31 @@ async function newCartWith(sku: string, quantity = 1) {
   });
 
   return { cartId: cart.cartId as string, variantId: variant.id as string };
+}
+
+/** Walk the real two-step sign-in and hand back a bearer header. */
+async function signIn(phone: string) {
+  const issued = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/auth/otp",
+      payload: { phone },
+    }),
+  );
+
+  const verified = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/auth/verify",
+      payload: { phone, code: issued.code },
+    }),
+  );
+
+  return {
+    token: verified.token as string,
+    headers: { authorization: `Bearer ${verified.token}` },
+    body: verified,
+  };
 }
 
 const ADDRESS = {
@@ -371,7 +402,7 @@ apiTest("refuses an illegal order transition", async () => {
 
   const response = await app.server.inject({
     method: "POST",
-    url: `/orders/${placed.orderNumber}/status`,
+    url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
     payload: { status: "delivered" },
   });
 
@@ -392,7 +423,7 @@ apiTest("returns the parcel to origin once attempts are exhausted", async () => 
   const move = (status: string, ndrReason?: string) =>
     app.server.inject({
       method: "POST",
-      url: `/orders/${placed.orderNumber}/status`,
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
       payload: { status, ndrReason },
     });
 
@@ -403,13 +434,13 @@ apiTest("returns the parcel to origin once attempts are exhausted", async () => 
   await move("ndr", "customer_unavailable");
   await app.server.inject({
     method: "POST",
-    url: `/orders/${placed.orderNumber}/ndr`,
+    url: `/orders/${placed.orderNumber}/ndr?key=${placed.accessKey}`,
     payload: { action: "reattempt" },
   });
   await move("ndr", "customer_unavailable");
   await app.server.inject({
     method: "POST",
-    url: `/orders/${placed.orderNumber}/ndr`,
+    url: `/orders/${placed.orderNumber}/ndr?key=${placed.accessKey}`,
     payload: { action: "reattempt" },
   });
   await move("ndr", "customer_unavailable");
@@ -435,14 +466,14 @@ apiTest("refuses a return on pierced jewellery with a broken seal", async () => 
   for (const status of ["confirmed", "processing", "shipped", "out_for_delivery", "delivered"]) {
     await app.server.inject({
       method: "POST",
-      url: `/orders/${placed.orderNumber}/status`,
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
       payload: { status },
     });
   }
 
   const refused = await app.server.inject({
     method: "POST",
-    url: `/orders/${placed.orderNumber}/returns`,
+    url: `/orders/${placed.orderNumber}/returns?key=${placed.accessKey}`,
     payload: {
       variantIds: [variantId],
       reason: "changed_mind",
@@ -456,7 +487,7 @@ apiTest("refuses a return on pierced jewellery with a broken seal", async () => 
   // The same item comes back regardless of the seal when it is faulty.
   const accepted = await app.server.inject({
     method: "POST",
-    url: `/orders/${placed.orderNumber}/returns`,
+    url: `/orders/${placed.orderNumber}/returns?key=${placed.accessKey}`,
     payload: {
       variantIds: [variantId],
       reason: "damaged",
@@ -480,7 +511,7 @@ apiTest("refuses a second open return on one order", async () => {
   for (const status of ["confirmed", "processing", "shipped", "out_for_delivery", "delivered"]) {
     await app.server.inject({
       method: "POST",
-      url: `/orders/${placed.orderNumber}/status`,
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
       payload: { status },
     });
   }
@@ -492,12 +523,12 @@ apiTest("refuses a second open return on one order", async () => {
   };
   await app.server.inject({
     method: "POST",
-    url: `/orders/${placed.orderNumber}/returns`,
+    url: `/orders/${placed.orderNumber}/returns?key=${placed.accessKey}`,
     payload: body,
   });
   const second = await app.server.inject({
     method: "POST",
-    url: `/orders/${placed.orderNumber}/returns`,
+    url: `/orders/${placed.orderNumber}/returns?key=${placed.accessKey}`,
     payload: body,
   });
 
@@ -513,14 +544,17 @@ apiTest("admin metrics keep transit value out of recognised revenue", async () =
     payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
   });
 
+  const operator = await signIn(OPERATOR_PHONE);
   const metrics = json(
-    await app.server.inject({ method: "GET", url: "/admin/metrics" }),
+    await app.server.inject({
+      method: "GET",
+      url: "/admin/metrics",
+      headers: operator.headers,
+    }),
   );
 
   assert.equal(metrics.revenue.recognised, 0);
   assert.ok(metrics.revenue.inFlight > 0);
-  // The route is honest about being unprotected.
-  assert.equal(metrics.unauthenticated, true);
 });
 
 apiTest("does not echo an origin that is not allow-listed", async () => {
@@ -537,4 +571,445 @@ apiTest("does not echo an origin that is not allow-listed", async () => {
 
   assert.equal(allowed.headers["access-control-allow-origin"], "http://localhost:3000");
   assert.equal(denied.headers["access-control-allow-origin"], undefined);
+});
+
+// ── Sign-in ───────────────────────────────────────────────────
+
+apiTest("signs in with a code and returns a usable session", async () => {
+  const { headers, body } = await signIn("9812345678");
+
+  assert.equal(body.ok, true);
+  assert.equal(body.isAdmin, false);
+  assert.equal(body.customer.maskedPhone, "98••••5678");
+
+  const session = json(
+    await app.server.inject({ method: "GET", url: "/auth/session", headers }),
+  );
+  assert.equal(session.signedIn, true);
+  assert.equal(session.customer.phone, "9812345678");
+});
+
+apiTest("accepts a number however it is typed and keeps one customer", async () => {
+  await signIn("9812345678");
+  await signIn("+91 98123 45678");
+
+  const rows = await app.pool.query(
+    "SELECT count(*)::int AS n FROM customers WHERE phone = '9812345678'",
+  );
+  assert.equal(rows.rows[0].n, 1);
+});
+
+apiTest("refuses a wrong code and counts the attempt down", async () => {
+  const phone = "9812345679";
+  await app.server.inject({ method: "POST", url: "/auth/otp", payload: { phone } });
+
+  const wrong = await app.server.inject({
+    method: "POST",
+    url: "/auth/verify",
+    payload: { phone, code: "000000" },
+  });
+
+  assert.equal(wrong.statusCode, 401);
+  assert.equal(json(wrong).attemptsRemaining, 4);
+});
+
+apiTest("locks a code after five wrong guesses", async () => {
+  const phone = "9812345670";
+  const issued = json(
+    await app.server.inject({ method: "POST", url: "/auth/otp", payload: { phone } }),
+  );
+
+  // Deliberately never the real code, so the lock is what stops it.
+  const wrong = issued.code === "000000" ? "111111" : "000000";
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await app.server.inject({
+      method: "POST",
+      url: "/auth/verify",
+      payload: { phone, code: wrong },
+    });
+  }
+
+  // Even the right code no longer works: otherwise the limit is decorative.
+  const correct = await app.server.inject({
+    method: "POST",
+    url: "/auth/verify",
+    payload: { phone, code: issued.code },
+  });
+  assert.equal(correct.statusCode, 410);
+});
+
+apiTest("will not let one code sign in twice", async () => {
+  const phone = "9812345671";
+  const issued = json(
+    await app.server.inject({ method: "POST", url: "/auth/otp", payload: { phone } }),
+  );
+
+  const first = await app.server.inject({
+    method: "POST",
+    url: "/auth/verify",
+    payload: { phone, code: issued.code },
+  });
+  const replay = await app.server.inject({
+    method: "POST",
+    url: "/auth/verify",
+    payload: { phone, code: issued.code },
+  });
+
+  assert.equal(first.statusCode, 200);
+  assert.equal(replay.statusCode, 410);
+});
+
+apiTest("throttles a second code to the same number", async () => {
+  const phone = "9812345672";
+  await app.server.inject({ method: "POST", url: "/auth/otp", payload: { phone } });
+  const again = await app.server.inject({
+    method: "POST",
+    url: "/auth/otp",
+    payload: { phone },
+  });
+
+  assert.equal(again.statusCode, 429);
+  assert.ok(Number(again.headers["retry-after"]) > 0);
+});
+
+apiTest("rejects a number that is not an Indian mobile before spending a send", async () => {
+  const response = await app.server.inject({
+    method: "POST",
+    url: "/auth/otp",
+    payload: { phone: "1234567890" },
+  });
+
+  assert.equal(response.statusCode, 400);
+  const rows = await app.pool.query("SELECT count(*)::int AS n FROM otp_challenges");
+  assert.equal(rows.rows[0].n, 0);
+});
+
+apiTest("never stores the code in the clear", async () => {
+  const phone = "9812345673";
+  const issued = json(
+    await app.server.inject({ method: "POST", url: "/auth/otp", payload: { phone } }),
+  );
+
+  const rows = await app.pool.query(
+    "SELECT code_hash FROM otp_challenges WHERE phone = $1",
+    [phone],
+  );
+  assert.ok(!rows.rows[0].code_hash.includes(issued.code));
+});
+
+apiTest("a signed-out session stops working", async () => {
+  const { headers } = await signIn("9812345674");
+  await app.server.inject({ method: "POST", url: "/auth/signout", headers });
+
+  const session = json(
+    await app.server.inject({ method: "GET", url: "/auth/session", headers }),
+  );
+  assert.equal(session.signedIn, false);
+});
+
+// ── Order ownership ───────────────────────────────────────────
+
+apiTest("will not hand an order to someone holding only its number", async () => {
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  const guessed = await app.server.inject({
+    method: "GET",
+    url: `/orders/${placed.orderNumber}`,
+  });
+  // 404, not 403: a 403 confirms the number is real, which is the whole point
+  // of walking SIU-00001 upward.
+  assert.equal(guessed.statusCode, 404);
+
+  const withKey = await app.server.inject({
+    method: "GET",
+    url: `/orders/${placed.orderNumber}?key=${placed.accessKey}`,
+  });
+  assert.equal(withKey.statusCode, 200);
+});
+
+apiTest("attaches an order to the customer who was signed in", async () => {
+  const buyer = await signIn(ADDRESS.phone);
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      headers: buyer.headers,
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  const own = json(
+    await app.server.inject({
+      method: "GET",
+      url: `/orders/${placed.orderNumber}`,
+      headers: buyer.headers,
+    }),
+  );
+  assert.equal(own.order.number, placed.orderNumber);
+  assert.equal(own.order.phoneVerified, true);
+
+  const mine = json(
+    await app.server.inject({ method: "GET", url: "/orders", headers: buyer.headers }),
+  );
+  assert.equal(mine.orders.length, 1);
+});
+
+apiTest("keeps one customer's order out of another's hands", async () => {
+  const buyer = await signIn(ADDRESS.phone);
+  const stranger = await signIn("9812345675");
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      headers: buyer.headers,
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  const peek = await app.server.inject({
+    method: "GET",
+    url: `/orders/${placed.orderNumber}`,
+    headers: stranger.headers,
+  });
+  assert.equal(peek.statusCode, 404);
+
+  const theirs = json(
+    await app.server.inject({ method: "GET", url: "/orders", headers: stranger.headers }),
+  );
+  assert.equal(theirs.orders.length, 0);
+});
+
+apiTest("claims a guest order when its number signs in later", async () => {
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  await app.server.inject({
+    method: "POST",
+    url: "/checkout",
+    payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+  });
+
+  const buyer = await signIn(ADDRESS.phone);
+  assert.equal(buyer.body.claimedOrders, 1);
+
+  const mine = json(
+    await app.server.inject({ method: "GET", url: "/orders", headers: buyer.headers }),
+  );
+  assert.equal(mine.orders.length, 1);
+});
+
+apiTest("an operator can read any order", async () => {
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  const operator = await signIn(OPERATOR_PHONE);
+  const response = await app.server.inject({
+    method: "GET",
+    url: `/orders/${placed.orderNumber}`,
+    headers: operator.headers,
+  });
+  assert.equal(response.statusCode, 200);
+});
+
+// ── Operator access ───────────────────────────────────────────
+
+apiTest("refuses the ops dashboard to an anonymous caller", async () => {
+  const response = await app.server.inject({ method: "GET", url: "/admin/metrics" });
+  assert.equal(response.statusCode, 401);
+});
+
+apiTest("refuses the ops dashboard to a customer who is not on the allow-list", async () => {
+  const shopper = await signIn("9812345676");
+  const response = await app.server.inject({
+    method: "GET",
+    url: "/admin/metrics",
+    headers: shopper.headers,
+  });
+  assert.equal(response.statusCode, 403);
+});
+
+apiTest("gives a verified repeat buyer the trusted COD terms", async () => {
+  // Three delivered orders is what COD_TRUSTED_ORDER_COUNT asks for, and it
+  // was unreachable while every checkout was anonymous.
+  const buyer = await signIn(ADDRESS.phone);
+  const operator = await signIn(OPERATOR_PHONE);
+
+  for (let round = 0; round < 3; round += 1) {
+    const { cartId } = await newCartWith("SIU-PS-SLV");
+    const placed = json(
+      await app.server.inject({
+        method: "POST",
+        url: "/checkout",
+        headers: buyer.headers,
+        payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+      }),
+    );
+
+    for (const status of [
+      "confirmed",
+      "processing",
+      "shipped",
+      "out_for_delivery",
+      "delivered",
+    ]) {
+      await app.server.inject({
+        method: "POST",
+        url: `/orders/${placed.orderNumber}/status`,
+        headers: operator.headers,
+        payload: { status },
+      });
+    }
+  }
+
+  const { cartId } = await newCartWith("SIU-PS-SLV");
+  const quote = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout/quote",
+      headers: buyer.headers,
+      payload: { cartId, pincode: ADDRESS.pincode, phone: ADDRESS.phone },
+    }),
+  );
+
+  assert.equal(quote.phoneVerified, true);
+  assert.equal(quote.cod.available, true);
+  assert.equal(quote.cod.fee, 0);
+});
+
+// ── Invoicing and the courier webhook ─────────────────────────
+
+apiTest("issues an invoice however an order reaches confirmed", async () => {
+  // Three paths reach `confirmed` and each used to allocate its own number.
+  // An order that ends up delivered with no invoice number is a compliance
+  // problem for a GST-registered seller, so every path is checked.
+  const operator = await signIn(OPERATOR_PHONE);
+
+  const place = async () => {
+    const { cartId } = await newCartWith("SIU-PS-SLV");
+    return json(
+      await app.server.inject({
+        method: "POST",
+        url: "/checkout",
+        payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+      }),
+    );
+  };
+
+  // 1. The courier-simulation transition.
+  const viaStatus = await place();
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${viaStatus.orderNumber}/status?key=${viaStatus.accessKey}`,
+    payload: { status: "confirmed" },
+  });
+
+  // 2. The explicit confirmation.
+  const viaConfirm = await place();
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${viaConfirm.orderNumber}/confirm?key=${viaConfirm.accessKey}`,
+  });
+
+  // 3. The signed payment webhook.
+  const viaWebhook = await place();
+  const payload = JSON.stringify({
+    event: "payment.captured",
+    payload: {
+      payment: {
+        entity: { id: "pay_1", notes: { order_number: viaWebhook.orderNumber } },
+      },
+    },
+  });
+  await app.server.inject({
+    method: "POST",
+    url: "/webhooks/razorpay",
+    headers: {
+      "content-type": "application/json",
+      "x-razorpay-signature": sign(payload, RAZORPAY_SECRET),
+    },
+    payload,
+  });
+
+  const { rows } = await app.pool.query(
+    "SELECT number, invoice_number FROM orders WHERE number = ANY($1::text[]) ORDER BY number",
+    [[viaStatus.orderNumber, viaConfirm.orderNumber, viaWebhook.orderNumber]],
+  );
+
+  assert.equal(rows.length, 3);
+  for (const row of rows) {
+    assert.match(row.invoice_number ?? "", /^SIU\/\d{4}-\d{2}\/\d{6}$/, row.number);
+  }
+
+  // And the series stays unique within the year.
+  const distinct = new Set(rows.map((row: { invoice_number: string }) => row.invoice_number));
+  assert.equal(distinct.size, 3);
+
+  // The operator dashboard should see all three.
+  const metrics = json(
+    await app.server.inject({
+      method: "GET",
+      url: "/admin/metrics",
+      headers: operator.headers,
+    }),
+  );
+  assert.equal(metrics.invoiceSeries.issued, 3);
+});
+
+apiTest("lets a signed courier webhook move an order it has no session for", async () => {
+  // The webhook carries a signature, not a session or an order access key.
+  // Routing it through the authorised HTTP route would refuse every callback.
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+    payload: { status: "confirmed" },
+  });
+
+  // Processing is the legal next step from confirmed; the webhook applies the
+  // same state machine the HTTP route does.
+  const body = JSON.stringify({
+    order_number: placed.orderNumber,
+    status: "processing",
+  });
+  const response = await app.server.inject({
+    method: "POST",
+    url: "/webhooks/courier",
+    headers: {
+      "content-type": "application/json",
+      "x-courier-signature": sign(body, COURIER_SECRET),
+    },
+    payload: body,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(json(response).ok, true);
+
+  const { rows } = await app.pool.query(
+    "SELECT status FROM orders WHERE number = $1",
+    [placed.orderNumber],
+  );
+  assert.equal(rows[0].status, "processing");
 });

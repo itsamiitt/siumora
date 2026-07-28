@@ -9,8 +9,8 @@ import {
   type ShippingAddress,
 } from "@siumora/core";
 
-import { api } from "./api";
 import { currentCartId } from "./cart-store";
+import { apiAs, orderAccessKey, rememberOrderKey } from "./session";
 
 /**
  * Orders.
@@ -94,7 +94,7 @@ export async function placeOrder(
   if (!cartId) return { ok: false, message: "Your bag is empty." };
 
   try {
-    const result = await api().checkout(
+    const result = await (await apiAs()).checkout(
       {
         cartId,
         address: input.address,
@@ -103,6 +103,11 @@ export async function placeOrder(
       },
       input.idempotencyKey,
     );
+
+    // Kept so this browser can reopen the order later. A signed-in customer
+    // does not need it, but they may have placed this one as a guest.
+    await rememberOrderKey(result.orderNumber, result.accessKey);
+
     return { ok: true, orderNumber: result.orderNumber };
   } catch (error) {
     return {
@@ -116,7 +121,7 @@ export async function placeOrder(
 }
 
 export async function getOrder(number: string): Promise<Order | undefined> {
-  const result = await api().getOrder(number);
+  const result = await (await apiAs()).getOrder(number, await orderAccessKey(number));
   return result ? toDomain(result.order) : undefined;
 }
 
@@ -124,7 +129,7 @@ export async function confirmOrder(
   number: string,
 ): Promise<{ ok: boolean; message?: string }> {
   try {
-    await api().confirmOrder(number);
+    await (await apiAs()).confirmOrder(number, await orderAccessKey(number));
     return { ok: true };
   } catch (error) {
     return { ok: false, message: (error as Error).message };
@@ -137,7 +142,12 @@ export async function advanceOrder(
   ndrReason?: string,
 ): Promise<{ ok: boolean; message?: string }> {
   try {
-    await api().advanceOrder(number, to, ndrReason);
+    await (await apiAs()).advanceOrder(
+      number,
+      to,
+      ndrReason,
+      await orderAccessKey(number),
+    );
     return { ok: true };
   } catch (error) {
     return { ok: false, message: (error as Error).message };
@@ -149,7 +159,7 @@ export async function resolveNdr(
   action: "reattempt" | "update_address" | "cancel",
 ): Promise<{ ok: boolean; message?: string }> {
   try {
-    await api().answerNdr(number, action);
+    await (await apiAs()).answerNdr(number, action, await orderAccessKey(number));
     return { ok: true };
   } catch (error) {
     return { ok: false, message: (error as Error).message };
@@ -174,14 +184,34 @@ export function nextStatuses(status: OrderStatus): OrderStatus[] {
 }
 
 /**
- * Orders for the account page.
+ * The signed-in customer's own orders.
  *
- * Reads the admin metrics feed, which is the only listing the API exposes.
- * Once sign-in exists this becomes a customer-scoped query instead.
+ * Returns nothing when nobody is signed in, rather than falling back to a
+ * wider listing: an account page that shows other people's orders is worse
+ * than an empty one.
  */
 export async function listOrders(): Promise<Order[]> {
-  const metrics = (await api().getMetrics()) as {
-    recentOrders?: Array<Record<string, unknown>>;
-  };
-  return (metrics.recentOrders ?? []).map(toDomain);
+  try {
+    const rows = await (await apiAs()).listOrders();
+    return rows.map(toDomain);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Every recent order, for the ops dashboard.
+ *
+ * Reads the metrics endpoint, which the API serves only to a signed-in
+ * operator. A caller who is not one gets nothing rather than a partial view.
+ */
+export async function listAllOrders(): Promise<Order[]> {
+  try {
+    const metrics = (await (await apiAs()).getMetrics()) as {
+      recentOrders?: Array<Record<string, unknown>>;
+    };
+    return (metrics.recentOrders ?? []).map(toDomain);
+  } catch {
+    return [];
+  }
 }

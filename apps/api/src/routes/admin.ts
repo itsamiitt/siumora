@@ -5,18 +5,21 @@ import {
   ndrQueue,
   rtoBreakdown,
   statusCounts,
+  maskPhone,
   summariseRevenue,
   type CartTotals,
   type Order,
 } from "@siumora/core";
 import { desc, schema } from "@siumora/db";
 
+import { requireAdmin } from "../lib/auth.ts";
+
 /**
  * Admin metrics.
  *
- * Reads only. There is no authentication yet, so the route announces that in
- * its own response rather than looking like a secured endpoint — a caller
- * should not have to guess whether something is protecting this.
+ * Reads only, and only for a signed-in operator. The allow-list is checked on
+ * every request rather than baked into the session, so taking a number out of
+ * `ADMIN_PHONES` closes the door immediately.
  */
 
 /** Rehydrate the domain order shape the metrics functions expect. */
@@ -58,7 +61,10 @@ function toDomainOrder(row: typeof schema.orders.$inferSelect): Order {
 }
 
 export async function registerAdminRoutes(server: FastifyInstance) {
-  server.get("/admin/metrics", async (_request, reply) => {
+  server.get("/admin/metrics", async (request, reply) => {
+    const viewer = await requireAdmin(request, reply);
+    if (!viewer) return;
+
     const rows = await server.db
       .select()
       .from(schema.orders)
@@ -69,9 +75,7 @@ export async function registerAdminRoutes(server: FastifyInstance) {
 
     reply.header("Cache-Control", "no-store");
     return {
-      // Stated in the payload so a consumer cannot mistake this for a
-      // protected endpoint.
-      unauthenticated: true,
+      operator: maskPhone(viewer.customer.phone),
       revenue: summariseRevenue(orders),
       byPincode: rtoBreakdown(orders, (order) => order.address.pincode),
       byPayment: rtoBreakdown(orders, (order) => order.paymentMethod),
@@ -83,8 +87,6 @@ export async function registerAdminRoutes(server: FastifyInstance) {
       })),
       statuses: statusCounts(orders),
       invoiceSeries: invoiceSeriesHealth(orders),
-      // The account page needs a listing and this is the only one the API
-      // exposes. It becomes a customer-scoped query once sign-in exists.
       recentOrders: rows.slice(0, 50),
     };
   });

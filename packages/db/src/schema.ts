@@ -120,6 +120,75 @@ export const cartLines = pgTable(
   ],
 );
 
+/**
+ * A person, identified by their mobile number.
+ *
+ * The number is the identity because it is already the delivery contact and
+ * the WhatsApp thread — an email and password would be a second, weaker copy
+ * of the same fact. Stored normalised to ten digits, enforced by a CHECK, so
+ * one shopper is always one row.
+ */
+export const customers = pgTable(
+  "customers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    phone: text("phone").notNull(),
+    name: text("name").notNull().default(""),
+    email: text("email"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("customers_phone_key").on(table.phone)],
+);
+
+/**
+ * One issued sign-in code.
+ *
+ * `codeHash` rather than the code: this table is read by anyone with database
+ * access, and a live code is a live account.
+ */
+export const otpChallenges = pgTable(
+  "otp_challenges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    phone: text("phone").notNull(),
+    codeHash: text("code_hash").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    requestedIp: text("requested_ip").notNull().default(""),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("otp_phone_created_idx").on(table.phone, table.createdAt)],
+);
+
+/**
+ * A signed-in session.
+ *
+ * Admin is deliberately not a column here. Operator access is derived at
+ * request time from the `ADMIN_PHONES` allow-list, so removing a number from
+ * the environment takes effect on the next request rather than whenever a
+ * long-lived session happens to expire.
+ */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tokenHash: text("token_hash").notNull(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    userAgent: text("user_agent").notNull().default(""),
+  },
+  (table) => [
+    uniqueIndex("sessions_token_hash_key").on(table.tokenHash),
+    index("sessions_customer_idx").on(table.customerId),
+  ],
+);
+
 export const orders = pgTable(
   "orders",
   {
@@ -151,6 +220,15 @@ export const orders = pgTable(
     /** Shared analytics dedup id — the same value goes to pixel and server. */
     eventId: uuid("event_id").notNull(),
 
+    /** Null for a guest order. Guest checkout stays: sign-in gates cost sales. */
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
+    /** What actually authorises reading a guest order — the number is guessable. */
+    accessKey: uuid("access_key").notNull().defaultRandom(),
+    /** Snapshotted, because it is what the RTO score used at placement. */
+    phoneVerified: boolean("phone_verified").notNull().default(false),
+
     deliveryAttempts: integer("delivery_attempts").notNull().default(0),
     ndrReason: text("ndr_reason"),
 
@@ -164,6 +242,7 @@ export const orders = pgTable(
     uniqueIndex("orders_invoice_key").on(table.financialYear, table.invoiceSequence),
     index("orders_status_idx").on(table.status),
     index("orders_placed_idx").on(table.placedAt),
+    index("orders_customer_idx").on(table.customerId, table.placedAt),
   ],
 );
 
@@ -334,10 +413,19 @@ export const variantsRelations = relations(variants, ({ one }) => ({
   }),
 }));
 
-export const ordersRelations = relations(orders, ({ many }) => ({
+export const ordersRelations = relations(orders, ({ many, one }) => ({
   lines: many(orderLines),
   returns: many(returnRequests),
   ndrEvents: many(ndrEvents),
+  customer: one(customers, {
+    fields: [orders.customerId],
+    references: [customers.id],
+  }),
+}));
+
+export const customersRelations = relations(customers, ({ many }) => ({
+  orders: many(orders),
+  sessions: many(sessions),
 }));
 
 export const orderLinesRelations = relations(orderLines, ({ one }) => ({

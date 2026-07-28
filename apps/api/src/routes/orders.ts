@@ -1,12 +1,10 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import {
   canTransition,
   evaluateReturn,
-  financialYear,
   hsnSummary,
-  invoiceNumber,
   ndrState,
   outcomeFor,
   summariseInvoice,
@@ -14,8 +12,16 @@ import {
   type NdrReason,
   type OrderStatus,
 } from "@siumora/core";
-import { eq, getOrderByNumber, schema, sql } from "@siumora/db";
+import {
+  eq,
+  getOrderByNumber,
+  inArray,
+  listOrdersForCustomer,
+  schema,
+} from "@siumora/db";
 
+import { requireCustomer, resolveViewer, type Viewer } from "../lib/auth.ts";
+import { setOrderStatus } from "../lib/invoicing.ts";
 import { isUniqueViolation } from "../lib/pg-errors.ts";
 
 /**
@@ -52,11 +58,74 @@ function toCartLines(
   }));
 }
 
+/** An order row as far as authorisation is concerned. */
+interface OwnedOrder {
+  readonly customerId: string | null;
+  readonly accessKey: string;
+}
+
+/**
+ * May this caller see this order?
+ *
+ * Order numbers are a readable sequence, so knowing one is not evidence of
+ * anything — SIU-00001 and a for-loop would otherwise walk every customer's
+ * name, address and phone number. Three things grant access: owning the order,
+ * holding the access key issued at checkout, or being an operator.
+ */
+function mayAccess(order: OwnedOrder, viewer: Viewer | undefined, key?: string): boolean {
+  if (viewer?.isAdmin) return true;
+  if (viewer && order.customerId && order.customerId === viewer.customer.id) {
+    return true;
+  }
+  return Boolean(key) && key === order.accessKey;
+}
+
+const accessQuery = z.object({ key: z.uuid().optional() });
+
 export async function registerOrderRoutes(server: FastifyInstance) {
+  /** The signed-in customer's own orders. */
+  server.get("/orders", async (request, reply) => {
+    const viewer = await requireCustomer(request, reply);
+    if (!viewer) return;
+
+    const rows = await listOrdersForCustomer(server.db, viewer.customer.id);
+
+    // Lines come along in one extra query rather than N. Without them the
+    // account page can only say "0 pieces" against every order.
+    const ids = rows.map((row) => row.id);
+    const lines = ids.length
+      ? await server.db
+          .select()
+          .from(schema.orderLines)
+          .where(inArray(schema.orderLines.orderId, ids))
+      : [];
+
+    const byOrder = new Map<string, typeof lines>();
+    for (const line of lines) {
+      const bucket = byOrder.get(line.orderId) ?? [];
+      bucket.push(line);
+      byOrder.set(line.orderId, bucket);
+    }
+
+    reply.header("Cache-Control", "no-store");
+    return {
+      orders: rows.map((row) => ({ ...row, lines: byOrder.get(row.id) ?? [] })),
+    };
+  });
+
   server.get("/orders/:number", async (request, reply) => {
     const { number } = numberParam.parse(request.params);
+    const { key } = accessQuery.parse(request.query);
+
     const order = await getOrderByNumber(server.db, number);
     if (!order) return reply.code(404).send({ error: "not_found" });
+
+    const viewer = await resolveViewer(request);
+    if (!mayAccess(order, viewer, key)) {
+      // 404, not 403: a 403 would confirm the order number is real, which is
+      // exactly the fact the enumeration is after.
+      return reply.code(404).send({ error: "not_found" });
+    }
 
     const lines = toCartLines(order.lines);
     const rows = hsnSummary(lines, { interState: order.interState });
@@ -75,12 +144,40 @@ export async function registerOrderRoutes(server: FastifyInstance) {
     };
   });
 
+  /**
+   * Load an order the caller is entitled to, or reply and return undefined.
+   *
+   * Every route that acts on an order goes through this. Authorising the read
+   * but not the write would leave the interesting half open.
+   */
+  async function authorised(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    number: string,
+  ) {
+    const { key } = accessQuery.parse(request.query);
+    const order = await getOrderByNumber(server.db, number);
+    if (!order) {
+      await reply.code(404).send({ error: "not_found" });
+      return undefined;
+    }
+
+    const viewer = await resolveViewer(request);
+    if (!mayAccess(order, viewer, key)) {
+      await reply.code(404).send({ error: "not_found" });
+      return undefined;
+    }
+
+    return { order, viewer };
+  }
+
   /** Confirm a held COD order. Stands in for the WhatsApp OTP callback. */
   server.post("/orders/:number/confirm", async (request, reply) => {
     const { number } = numberParam.parse(request.params);
 
-    const order = await getOrderByNumber(server.db, number);
-    if (!order) return reply.code(404).send({ error: "not_found" });
+    const found = await authorised(request, reply, number);
+    if (!found) return;
+    const { order } = found;
 
     if (!canTransition(order.status as OrderStatus, "confirmed")) {
       return reply.code(409).send({
@@ -89,41 +186,35 @@ export async function registerOrderRoutes(server: FastifyInstance) {
       });
     }
 
-    // The invoice number is allocated here, not at placement: a held order
-    // that is never confirmed must not burn a number from a gapless series.
-    const updated = await server.db.transaction(async (tx) => {
-      await tx.execute(sql`LOCK TABLE orders IN SHARE ROW EXCLUSIVE MODE`);
-      const fy = financialYear(order.placedAt);
-
-      const next = await tx.execute(
-        sql`SELECT COALESCE(MAX(invoice_sequence), 0) + 1 AS next FROM orders WHERE financial_year = ${fy}`,
-      );
-      const sequence = Number((next.rows[0] as { next: number }).next);
-
-      const [row] = await tx
-        .update(schema.orders)
-        .set({
-          status: "confirmed",
-          ...(order.invoiceNumber
-            ? {}
-            : {
-                invoiceNumber: invoiceNumber(sequence, order.placedAt),
-                invoiceSequence: sequence,
-                financialYear: fy,
-              }),
-        })
-        .where(eq(schema.orders.id, order.id))
-        .returning();
-
-      return row!;
-    });
+    // The invoice number is allocated on confirmation, not at placement: a
+    // held order that is never confirmed must not burn a number from a
+    // gapless series.
+    const updated = await setOrderStatus(server.db, order, "confirmed");
 
     return { ok: true, order: updated };
   });
 
-  /** Courier-driven transition. The real driver is the webhook below. */
+  /**
+   * Courier-driven transition. The real driver is the signed webhook.
+   *
+   * Operators may always call it. Everyone else may only when the courier
+   * simulation is switched on, because marking your own parcel delivered opens
+   * the return window and recognises the revenue — a customer must not be able
+   * to do that to a parcel that is still on a van.
+   */
   server.post("/orders/:number/status", async (request, reply) => {
     const { number } = numberParam.parse(request.params);
+
+    const found = await authorised(request, reply, number);
+    if (!found) return;
+
+    if (!found.viewer?.isAdmin && !server.config.courierSimulation) {
+      return reply.code(403).send({
+        error: "not_an_operator",
+        message: "Only the courier or an operator can move this order.",
+      });
+    }
+
     const body = z
       .object({
         status: z.enum([
@@ -164,8 +255,10 @@ export async function registerOrderRoutes(server: FastifyInstance) {
       .object({ action: z.enum(["reattempt", "update_address", "cancel"]) })
       .parse(request.body);
 
-    const order = await getOrderByNumber(server.db, number);
-    if (!order) return reply.code(404).send({ error: "not_found" });
+    const found = await authorised(request, reply, number);
+    if (!found) return;
+    const { order } = found;
+
     if (order.status !== "ndr") {
       return reply
         .code(409)
@@ -215,8 +308,9 @@ export async function registerOrderRoutes(server: FastifyInstance) {
       })
       .parse(request.body);
 
-    const order = await getOrderByNumber(server.db, number);
-    if (!order) return reply.code(404).send({ error: "not_found" });
+    const found = await authorised(request, reply, number);
+    if (!found) return;
+    const { order } = found;
 
     const lines = toCartLines(order.lines).filter((line) =>
       body.variantIds.includes(line.variantId),
@@ -274,7 +368,7 @@ export async function registerOrderRoutes(server: FastifyInstance) {
   });
 }
 
-type AdvanceResult =
+export type AdvanceResult =
   | { ok: true; order: unknown }
   | { ok: false; code: 404 | 409; error: string; message?: string };
 
@@ -284,7 +378,7 @@ type AdvanceResult =
  * An attempt that cannot be recovered continues straight to RTO, so the stored
  * status never says "delivery attempted" on a parcel already travelling back.
  */
-async function advance(
+export async function advance(
   server: FastifyInstance,
   number: string,
   to: OrderStatus,
@@ -311,16 +405,13 @@ async function advance(
     status = "rto";
   }
 
-  const [updated] = await server.db
-    .update(schema.orders)
-    .set({
-      status,
-      deliveryAttempts: attempts,
-      ...(reason ? { ndrReason: reason } : {}),
-      ...(to === "delivered" ? { deliveredAt: new Date() } : {}),
-    })
-    .where(eq(schema.orders.id, order.id))
-    .returning();
+  // Routed through setOrderStatus so a confirmation reached this way raises an
+  // invoice exactly like one reached through the payment webhook.
+  const updated = await setOrderStatus(server.db, order, status, {
+    deliveryAttempts: attempts,
+    ...(reason ? { ndrReason: reason } : {}),
+    ...(to === "delivered" ? { deliveredAt: new Date() } : {}),
+  });
 
   if (to === "ndr") {
     await server.db.insert(schema.ndrEvents).values({

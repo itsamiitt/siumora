@@ -149,3 +149,26 @@ export {
   type Product,
   type Variant,
 } from "./catalog.ts";
+
+export {
+  ADMIN_SESSION_TTL_SECONDS,
+  OTP_LENGTH,
+  OTP_MAX_ATTEMPTS,
+  OTP_MAX_SENDS_PER_WINDOW,
+  OTP_RESEND_COOLDOWN_SECONDS,
+  OTP_SEND_WINDOW_SECONDS,
+  OTP_TTL_SECONDS,
+  SESSION_TTL_SECONDS,
+  evaluateOtpRequest,
+  evaluateOtpVerification,
+  isAdminPhone,
+  maskPhone,
+  normalisePhone,
+  parseAdminPhones,
+  toE164,
+  type OtpRequestDecision,
+  type OtpRequestInput,
+  type OtpVerification,
+  type OtpVerificationInput,
+  type OtpVerificationStatus,
+} from "./auth.ts";

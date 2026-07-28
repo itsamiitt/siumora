@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
@@ -42,6 +43,7 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
     needsReview: boolean;
   } | null>(null);
   const [delivery, setDelivery] = useState<string | null>(null);
+  const [phoneVerified, setPhoneVerified] = useState(false);
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -67,18 +69,22 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
         address: addressLine,
         city,
         stateCode,
+        // Sent so the API can tell whether this is the number the shopper
+        // proved at sign-in — a verified number changes the COD terms.
+        phone,
       });
       if (cancelled) return;
 
       setDelivery(quote.serviceable ? quote.estimatedDays : null);
       setAddressQuality(quote.addressQuality);
       setCod(quote.cod);
+      setPhoneVerified(quote.phoneVerified);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [pincode, pincodeValid, subtotal, addressLine, stateCode, city]);
+  }, [pincode, pincodeValid, subtotal, addressLine, stateCode, city, phone]);
 
   // A pincode change can withdraw COD while it is selected. Fall back to UPI
   // rather than leaving an unavailable method chosen.
@@ -299,6 +305,26 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
             This order needs a {formatPaise(cod.partialPayment)} advance to
             confirm. The rest is paid on delivery.
           </p>
+        )}
+
+        {/* Terms that differ between visits need a reason on screen, or a fee
+            that quietly appears reads as a mistake. */}
+        {phoneVerified ? (
+          <p className="mt-3 text-xs text-ink-faint">
+            This number is verified on your account.
+          </p>
+        ) : (
+          phoneValid && (
+            <p className="mt-3 text-xs text-ink-faint">
+              <Link
+                href="/signin?next=/checkout"
+                className="border-b border-ink/40 pb-0.5 hover:border-mulberry hover:text-mulberry"
+              >
+                Sign in
+              </Link>{" "}
+              with this number for better cash-on-delivery terms.
+            </p>
+          )
         )}
       </Section>
 

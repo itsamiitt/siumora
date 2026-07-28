@@ -202,3 +202,69 @@ describeDb("is idempotent when migrations run twice", async () => {
   const applied = await migrate(pool);
   assert.deepEqual(applied, []);
 });
+
+describeDb("stores mobile numbers in exactly one normalised form", async () => {
+  // Two spellings of one number is two customers, and half an order history
+  // each. The application normalises; this makes it impossible to get wrong.
+  for (const bad of ["+919876543210", "09876543210", "98765", "1234567890"]) {
+    await assert.rejects(
+      pool.query("INSERT INTO customers (phone) VALUES ($1)", [bad]),
+      /customers_phone_normalised/,
+      bad,
+    );
+  }
+
+  const phone = `9${Math.floor(100000000 + Math.random() * 899999999)}`;
+  await pool.query("INSERT INTO customers (phone) VALUES ($1)", [phone]);
+  await assert.rejects(
+    pool.query("INSERT INTO customers (phone) VALUES ($1)", [phone]),
+    /customers_phone_key|duplicate key/,
+  );
+});
+
+describeDb("refuses a sign-in code that expires before it is issued", async () => {
+  await assert.rejects(
+    pool.query(
+      `INSERT INTO otp_challenges (phone, code_hash, expires_at)
+       VALUES ('9876543210', 'x', now() - interval '1 minute')`,
+    ),
+    /otp_expiry_after_creation/,
+  );
+});
+
+describeDb("will not let one session token hash exist twice", async () => {
+  const phone = `9${Math.floor(100000000 + Math.random() * 899999999)}`;
+  const { rows } = await pool.query(
+    "INSERT INTO customers (phone) VALUES ($1) RETURNING id",
+    [phone],
+  );
+  const customerId = rows[0].id;
+  const hash = crypto.randomUUID();
+
+  const insert = () =>
+    pool.query(
+      `INSERT INTO sessions (token_hash, customer_id, expires_at)
+       VALUES ($1, $2, now() + interval '1 day')`,
+      [hash, customerId],
+    );
+
+  await insert();
+  await assert.rejects(insert(), /sessions_token_hash_key|duplicate key/);
+});
+
+describeDb("gives every order its own access key", async () => {
+  const first = `T-${crypto.randomUUID().slice(0, 8)}`;
+  const second = `T-${crypto.randomUUID().slice(0, 8)}`;
+  await insertOrder({ number: first });
+  await insertOrder({ number: second });
+
+  const { rows } = await pool.query(
+    "SELECT access_key FROM orders WHERE number = ANY($1::text[])",
+    [[first, second]],
+  );
+
+  assert.equal(rows.length, 2);
+  assert.ok(rows[0].access_key);
+  // A shared key would make one leaked order a key to all of them.
+  assert.notEqual(rows[0].access_key, rows[1].access_key);
+});

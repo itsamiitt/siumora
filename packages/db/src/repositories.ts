@@ -237,6 +237,10 @@ export interface PlaceOrderInput {
   eventId: string;
   codFee?: number;
   now?: Date;
+  /** Set when the shopper was signed in. Guest checkout leaves it undefined. */
+  customerId?: string;
+  /** Whether the contact number was proven by a code before the order was placed. */
+  phoneVerified?: boolean;
 }
 
 export interface PlacedOrder {
@@ -244,6 +248,8 @@ export interface PlacedOrder {
   number: string;
   status: OrderStatus;
   invoiceNumber: string | null;
+  /** Handed to the placer once. Reading a guest order later requires it. */
+  accessKey: string;
 }
 
 /**
@@ -332,6 +338,8 @@ export async function placeOrder(
         igst: totals.gst.igst,
         eventId: input.eventId,
         placedAt: now,
+        ...(input.customerId ? { customerId: input.customerId } : {}),
+        phoneVerified: input.phoneVerified ?? false,
         ...(issueInvoice
           ? {
               invoiceNumber: invoiceNumber(invoiceSeq, now),
@@ -378,6 +386,7 @@ export async function placeOrder(
         number: order!.number,
         status: order!.status as OrderStatus,
         invoiceNumber: order!.invoiceNumber,
+        accessKey: order!.accessKey,
       },
     };
   });
@@ -397,4 +406,44 @@ export async function getOrderByNumber(db: Database, number: string) {
 
 export async function listOrders(db: Database, limit = 100) {
   return db.select().from(orders).orderBy(desc(orders.placedAt)).limit(limit);
+}
+
+/** One customer's orders, newest first. What the account page actually wants. */
+export async function listOrdersForCustomer(
+  db: Database,
+  customerId: string,
+  limit = 100,
+) {
+  return db
+    .select()
+    .from(orders)
+    .where(eq(orders.customerId, customerId))
+    .orderBy(desc(orders.placedAt))
+    .limit(limit);
+}
+
+/**
+ * Attach past guest orders to a customer who has now signed in.
+ *
+ * Matched on the delivery phone, which is the same number they just proved.
+ * Without this, signing in makes a shopper's own order history disappear —
+ * the orders are there, they are simply owned by nobody.
+ */
+export async function claimGuestOrders(
+  db: Database,
+  customerId: string,
+  phone: string,
+): Promise<number> {
+  const claimed = await db
+    .update(orders)
+    .set({ customerId })
+    .where(
+      and(
+        sql`${orders.customerId} IS NULL`,
+        sql`${orders.address}->>'phone' = ${phone}`,
+      ),
+    )
+    .returning({ id: orders.id });
+
+  return claimed.length;
 }

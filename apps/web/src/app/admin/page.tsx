@@ -14,7 +14,8 @@ import {
 import { formatPaise } from "@siumora/in-locale";
 import { CollectionTitle, Display, MicroLabel } from "@siumora/ui";
 
-import { listOrders } from "@/lib/order-store";
+import { listAllOrders } from "@/lib/order-store";
+import { currentViewer } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Ops",
@@ -24,7 +25,34 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  const orders = await listOrders();
+  const viewer = await currentViewer();
+
+  // Checked here so the page does not render, and again by the API before it
+  // returns a figure. Either alone would be a single point of failure.
+  if (!viewer?.isAdmin) {
+    return (
+      <div className="mx-auto flex max-w-md flex-col items-center px-5 py-32 text-center">
+        <Display as="h1" size="sm">
+          Ops
+        </Display>
+        <p className="mt-4 text-ink-muted">
+          {viewer
+            ? "This account is not on the operator list."
+            : "Sign in with an operator number to open the dashboard."}
+        </p>
+        {!viewer && (
+          <Link
+            href="/signin?next=/admin"
+            className="mt-8 border-b border-ink pb-1 transition-colors hover:border-mulberry hover:text-mulberry"
+          >
+            <MicroLabel>Sign in</MicroLabel>
+          </Link>
+        )}
+      </div>
+    );
+  }
+
+  const orders = await listAllOrders();
 
   const revenue = summariseRevenue(orders);
   const byPincode = rtoBreakdown(orders, (o) => o.address.pincode);
@@ -39,11 +67,12 @@ export default async function AdminPage() {
         Ops
       </Display>
 
-      {/* There is no auth on this route. Saying so beats letting someone
-          assume a login is protecting it. */}
-      <p className="mt-3 text-sm text-mulberry">
-        No authentication yet — this route is open. It must sit behind admin
-        sign-in and 2FA before the site is public.
+      {/* 2FA beyond the sign-in code is still outstanding, and this page is
+          worth being straight about rather than implying it is fully hardened. */}
+      <p className="mt-3 text-sm text-ink-faint">
+        Signed in as {viewer.customer.maskedPhone}. Operator access comes from
+        the <code>ADMIN_PHONES</code> allow-list; a second factor beyond the
+        sign-in code is not built yet.
       </p>
 
       <section className="mt-10">

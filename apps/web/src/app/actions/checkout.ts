@@ -4,6 +4,7 @@ import type { CodDecision } from "@siumora/core";
 
 import { api } from "@/lib/api";
 import { currentCartId } from "@/lib/cart-store";
+import { apiAs } from "@/lib/session";
 
 /**
  * Checkout quote.
@@ -18,6 +19,8 @@ export interface QuoteResult {
   estimatedDays: string;
   addressQuality: { score: number; issues: string[]; needsReview: boolean };
   cod: CodDecision | null;
+  /** True when the delivery number is the one this shopper signed in with. */
+  phoneVerified: boolean;
 }
 
 export async function quoteCheckout(input: {
@@ -25,6 +28,7 @@ export async function quoteCheckout(input: {
   address?: string;
   city?: string;
   stateCode?: string;
+  phone?: string;
 }): Promise<QuoteResult> {
   const cartId = await currentCartId();
 
@@ -33,17 +37,21 @@ export async function quoteCheckout(input: {
     estimatedDays: "—",
     addressQuality: { score: 0, issues: [], needsReview: false },
     cod: null,
+    phoneVerified: false,
   };
 
   if (!cartId) return empty;
 
   try {
-    const quote = await api().quoteCheckout({ cartId, ...input });
+    // Sent as the signed-in shopper when there is one: a proven number lowers
+    // the RTO score, and a repeat buyer stops paying the COD fee.
+    const quote = await (await apiAs()).quoteCheckout({ cartId, ...input });
     return {
       serviceable: quote.serviceable,
       estimatedDays: quote.estimatedDays,
       addressQuality: quote.addressQuality,
       cod: quote.cod,
+      phoneVerified: quote.phoneVerified,
     };
   } catch {
     // A quote failure must not block the page; the customer simply sees no

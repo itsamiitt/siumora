@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
-import { canTransition, financialYear, invoiceNumber, type OrderStatus } from "@siumora/core";
-import { eq, getOrderByNumber, schema, sql } from "@siumora/db";
+import { canTransition, type OrderStatus } from "@siumora/core";
+import { getOrderByNumber } from "@siumora/db";
 
+import { setOrderStatus } from "../lib/invoicing.ts";
+import { advance } from "./orders.ts";
 import { verifyCourierSignature, verifyRazorpaySignature } from "../lib/webhooks.ts";
 
 /**
@@ -73,30 +75,7 @@ export async function registerWebhookRoutes(server: FastifyInstance) {
       return { ok: true, replayed: true, status: order.status };
     }
 
-    const updated = await server.db.transaction(async (tx) => {
-      await tx.execute(sql`LOCK TABLE orders IN SHARE ROW EXCLUSIVE MODE`);
-      const fy = financialYear(order.placedAt);
-      const next = await tx.execute(
-        sql`SELECT COALESCE(MAX(invoice_sequence), 0) + 1 AS next FROM orders WHERE financial_year = ${fy}`,
-      );
-      const sequence = Number((next.rows[0] as { next: number }).next);
-
-      const [row] = await tx
-        .update(schema.orders)
-        .set({
-          status: "confirmed",
-          ...(order.invoiceNumber
-            ? {}
-            : {
-                invoiceNumber: invoiceNumber(sequence, order.placedAt),
-                invoiceSequence: sequence,
-                financialYear: fy,
-              }),
-        })
-        .where(eq(schema.orders.id, order.id))
-        .returning();
-      return row!;
-    });
+    const updated = await setOrderStatus(server.db, order, "confirmed");
 
     return { ok: true, orderNumber, status: updated.status };
   });
@@ -145,12 +124,11 @@ export async function registerWebhookRoutes(server: FastifyInstance) {
       return { ok: true, replayed: true, status: order.status };
     }
 
-    const response = await server.inject({
-      method: "POST",
-      url: `/orders/${body.order_number}/status`,
-      payload: { status: body.status, ndrReason: body.ndr_reason },
-    });
+    // Called directly rather than re-injected through the HTTP route: that
+    // route now authorises the caller, and a signed courier webhook has no
+    // session and no order access key. The signature is the authorisation.
+    const result = await advance(server, body.order_number, body.status, body.ndr_reason);
 
-    return { ok: response.statusCode < 400, status: body.status };
+    return { ok: result.ok, status: body.status };
   });
 }

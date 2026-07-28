@@ -5,7 +5,9 @@ import type { OrderStatus } from "@siumora/core";
 import { formatPaise } from "@siumora/in-locale";
 import { Display, MicroLabel } from "@siumora/ui";
 
+import { SignOutButton } from "@/components/sign-out-button";
 import { listOrders } from "@/lib/order-store";
+import { currentViewer } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Your orders",
@@ -30,19 +32,52 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
 };
 
 export default async function AccountPage() {
+  const viewer = await currentViewer();
+
+  if (!viewer) {
+    return (
+      <div className="mx-auto flex max-w-md flex-col items-center px-5 py-32 text-center">
+        <Display as="h1" size="sm">
+          Your orders
+        </Display>
+        <p className="mt-4 text-ink-muted">
+          Sign in with your mobile number to see everything you have ordered.
+        </p>
+        <Link
+          href="/signin?next=/account"
+          className="mt-8 border-b border-ink pb-1 transition-colors hover:border-mulberry hover:text-mulberry"
+        >
+          <MicroLabel>Sign in</MicroLabel>
+        </Link>
+      </div>
+    );
+  }
+
   const orders = await listOrders();
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-14">
-      <Display as="h1" size="sm">
-        Your orders
-      </Display>
+      <div className="flex flex-wrap items-baseline justify-between gap-4">
+        <Display as="h1" size="sm">
+          Your orders
+        </Display>
+        <SignOutButton />
+      </div>
 
-      {/* Phone-OTP auth lands with the Medusa auth module; saying so beats a
-          fake sign-in that implies these orders are scoped to a person. */}
       <p className="mt-3 text-sm text-ink-faint">
-        Sign-in is not connected yet, so every order placed in this environment
-        is listed.
+        Signed in as {viewer.customer.maskedPhone}.
+        {viewer.isAdmin && (
+          <>
+            {" "}
+            <Link
+              href="/admin"
+              className="border-b border-ink/40 pb-0.5 hover:border-mulberry hover:text-mulberry"
+            >
+              Open the ops dashboard
+            </Link>
+            .
+          </>
+        )}
       </p>
 
       {orders.length === 0 ? (

@@ -1,7 +1,9 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 
+import { parseAdminPhones } from "@siumora/core";
 import { createDb, createPool, migrate, type Database } from "@siumora/db";
 
+import { registerAuthRoutes } from "./routes/auth.ts";
 import { registerCatalogRoutes } from "./routes/catalog.ts";
 import { registerCartRoutes } from "./routes/cart.ts";
 import { registerCheckoutRoutes } from "./routes/checkout.ts";
@@ -16,6 +18,20 @@ export interface AppConfig {
   corsOrigins?: string[];
   razorpayWebhookSecret?: string;
   courierWebhookSecret?: string;
+  /** Numbers that may open the ops dashboard. Comma separated. */
+  adminPhones?: string;
+  /** Set once a WhatsApp/DLT sender is wired up. */
+  otpDeliveryConfigured?: boolean;
+  /** Return the code in the response. Development only; refused in production. */
+  otpEcho?: boolean;
+  /**
+   * Let a non-operator drive courier transitions.
+   *
+   * On in development so the delivered/NDR/returns paths can be walked without
+   * a courier account. Off in production, where the signed webhook is the only
+   * thing that should be moving a parcel.
+   */
+  courierSimulation?: boolean;
   logger?: boolean;
 }
 
@@ -30,10 +46,20 @@ declare module "fastify" {
   interface FastifyInstance {
     db: Database;
     config: AppConfig;
+    /** Parsed once at boot, so every request is not re-parsing an env string. */
+    adminPhones: string[];
   }
 }
 
 export async function buildApp(config: AppConfig): Promise<App> {
+  if (config.otpEcho && process.env.NODE_ENV === "production") {
+    // Refuse at boot rather than at the first sign-in. A production deploy that
+    // hands sign-in codes back over HTTP is every account on the site.
+    throw new Error(
+      "OTP_ECHO must not be set in production — it returns sign-in codes to the caller.",
+    );
+  }
+
   const pool = createPool({
     connectionString: config.connectionString,
     ssl: config.ssl ?? false,
@@ -50,6 +76,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
 
   server.decorate("db", db);
   server.decorate("config", config);
+  server.decorate("adminPhones", parseAdminPhones(config.adminPhones));
 
   server.addContentTypeParser(
     "application/json",
@@ -74,7 +101,10 @@ export async function buildApp(config: AppConfig): Promise<App> {
       reply.header("Access-Control-Allow-Credentials", "true");
       reply.header("Vary", "Origin");
     }
-    reply.header("Access-Control-Allow-Headers", "content-type,idempotency-key");
+    reply.header(
+      "Access-Control-Allow-Headers",
+      "content-type,idempotency-key,authorization",
+    );
     reply.header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
 
     if (request.method === "OPTIONS") reply.code(204).send();
@@ -98,6 +128,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
     return { ok: true };
   });
 
+  await registerAuthRoutes(server);
   await registerCatalogRoutes(server);
   await registerCartRoutes(server);
   await registerCheckoutRoutes(server);

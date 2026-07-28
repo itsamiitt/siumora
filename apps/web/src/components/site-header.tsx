@@ -46,6 +46,12 @@ export function SiteHeader() {
           <Link href="/wishlist" className="transition-colors hover:text-mulberry">
             <MicroLabel>Saved</MicroLabel>
           </Link>
+          {/* A plain link, not a signed-in/signed-out label. Reading the
+              session here would make every page dynamic and cost the static
+              tier the LCP budget depends on; /account handles both states. */}
+          <Link href="/account" className="transition-colors hover:text-mulberry">
+            <MicroLabel>Account</MicroLabel>
+          </Link>
           <CartBadge />
         </div>
       </div>

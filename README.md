@@ -15,7 +15,8 @@ Single-vendor e-commerce platform for the Indian market. Demi-fine jewellery,
 | Commerce API (catalog, cart, checkout, orders, returns, webhooks) | done, integration-tested |
 | Storefront on the API | done |
 | Razorpay, Shiprocket, WhatsApp | not connected — needs credentials |
-| Auth (phone OTP), admin sign-in | not built |
+| Phone-OTP sign-in, operator access, order ownership | done, integration-tested |
+| Second factor for operators, back-in-stock, recommendations | not built |
 
 ## Layout
 
@@ -117,7 +118,8 @@ choice. The OG cards set prices in Cormorant for that reason.
 
 ## Not yet safe to publish
 
-- `/admin` has **no authentication**. It says so on the page.
+- `/admin` is behind sign-in, but operator access is a phone allow-list with no
+  second factor. Anyone who can receive a code on a listed number gets in.
 - The statutory disclosures — registered entity, GSTIN, CIN, grievance officer —
   are unset. Any page carrying them renders a "not ready to publish" notice.
   They are deliberately not invented; a plausible GSTIN is a false regulatory

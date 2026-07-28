@@ -12,6 +12,15 @@ const { server, pool } = await buildApp({
     .filter(Boolean),
   razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
   courierWebhookSecret: process.env.COURIER_WEBHOOK_SECRET,
+  adminPhones: process.env.ADMIN_PHONES,
+  // Flipped on once a WhatsApp/DLT template sender exists. Until then sign-in
+  // is either refused or, under OTP_ECHO, returns the code for development.
+  otpDeliveryConfigured: process.env.WHATSAPP_OTP_TEMPLATE !== undefined,
+  otpEcho: process.env.OTP_ECHO === "true",
+  courierSimulation:
+    process.env.COURIER_SIMULATION === "true" ||
+    (process.env.COURIER_SIMULATION === undefined &&
+      process.env.NODE_ENV !== "production"),
   logger: true,
 });
 

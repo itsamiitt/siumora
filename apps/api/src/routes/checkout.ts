@@ -2,8 +2,15 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import { evaluateCod, initialStatus, scoreAddress, scoreRto } from "@siumora/core";
-import { eq, getCartLines, placeOrder, schema } from "@siumora/db";
+import {
+  eq,
+  getCartLines,
+  listOrdersForCustomer,
+  placeOrder,
+  schema,
+} from "@siumora/db";
 
+import { resolveViewer, type Viewer } from "../lib/auth.ts";
 import { withIdempotency } from "../lib/idempotency.ts";
 
 /**
@@ -34,6 +41,37 @@ const checkoutSchema = z.object({
   eventId: z.uuid(),
 });
 
+/**
+ * What a signed-in shopper's history contributes to the risk picture.
+ *
+ * The delivery number must be the number they actually proved. Without that
+ * check a single verified account would launder any address into the lower
+ * risk band — which is precisely the RTO the score exists to catch.
+ */
+async function customerSignals(
+  server: FastifyInstance,
+  viewer: Viewer | undefined,
+  deliveryPhone: string | undefined,
+): Promise<{
+  phoneVerified: boolean;
+  isNewCustomer: boolean;
+  successfulOrders: number;
+  customerId?: string;
+}> {
+  if (!viewer) {
+    return { phoneVerified: false, isNewCustomer: true, successfulOrders: 0 };
+  }
+
+  const past = await listOrdersForCustomer(server.db, viewer.customer.id);
+
+  return {
+    phoneVerified: deliveryPhone === viewer.customer.phone,
+    isNewCustomer: past.length === 0,
+    successfulOrders: past.filter((order) => order.status === "delivered").length,
+    customerId: viewer.customer.id,
+  };
+}
+
 export async function registerCheckoutRoutes(server: FastifyInstance) {
   /**
    * Quote the checkout: delivery promise, COD eligibility and any fee.
@@ -49,8 +87,12 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
         address: z.string().max(300).optional(),
         city: z.string().max(120).optional(),
         stateCode: z.string().regex(/^\d{2}$/).optional(),
+        phone: z.string().max(20).optional(),
       })
       .parse(request.body);
+
+    const viewer = await resolveViewer(request);
+    const signals = await customerSignals(server, viewer, body.phone);
 
     const lines = await getCartLines(server.db, body.cartId);
     const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
@@ -71,9 +113,8 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
       paymentMethod: "cod",
       orderValue: subtotal,
       addressScore: quality.score,
-      // The phone is verified after this step, so it is scored as unverified.
-      phoneVerified: false,
-      isNewCustomer: true,
+      phoneVerified: signals.phoneVerified,
+      isNewCustomer: signals.isNewCustomer,
       pincodeRtoRate: service ? service.rtoRateBps / 10_000 : undefined,
     });
 
@@ -81,6 +122,7 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
       subtotal,
       pincodeCodServiceable: service?.codAvailable ?? false,
       rtoRisk: risk.risk,
+      successfulOrders: signals.successfulOrders,
     });
 
     return {
@@ -89,12 +131,18 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
       addressQuality: quality,
       rto: { risk: risk.risk, score: risk.score },
       cod,
+      // Told to the storefront so it can explain why the terms differ, rather
+      // than a fee that silently appears or disappears between visits.
+      phoneVerified: signals.phoneVerified,
     };
   });
 
   server.post("/checkout", async (request, reply) => {
     const body = checkoutSchema.parse(request.body);
     const key = request.headers["idempotency-key"];
+
+    const viewer = await resolveViewer(request);
+    const signals = await customerSignals(server, viewer, body.address.phone);
 
     const outcome = await withIdempotency(
       server.db,
@@ -123,8 +171,8 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
           paymentMethod: body.paymentMethod === "cod" ? "cod" : "prepaid",
           orderValue: subtotal,
           addressScore: quality.score,
-          phoneVerified: false,
-          isNewCustomer: true,
+          phoneVerified: signals.phoneVerified,
+          isNewCustomer: signals.isNewCustomer,
           pincodeRtoRate: service ? service.rtoRateBps / 10_000 : undefined,
         });
 
@@ -136,6 +184,7 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
             subtotal,
             pincodeCodServiceable: service?.codAvailable ?? false,
             rtoRisk: risk.risk,
+            successfulOrders: signals.successfulOrders,
           });
           if (!cod.available) {
             return {
@@ -158,6 +207,8 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
           status,
           eventId: body.eventId,
           codFee,
+          ...(signals.customerId ? { customerId: signals.customerId } : {}),
+          phoneVerified: signals.phoneVerified,
         });
 
         if (!placed.ok) return { ok: false as const, message: placed.message };
@@ -167,6 +218,9 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
           orderNumber: placed.order.number,
           status: placed.order.status,
           invoiceNumber: placed.order.invoiceNumber,
+          // Returned once. It is what lets a guest reopen their own order
+          // later without the number alone being enough.
+          accessKey: placed.order.accessKey,
         };
       },
     );
