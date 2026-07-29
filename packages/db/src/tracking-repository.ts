@@ -64,6 +64,7 @@ export interface RecordTrackingInput {
   readonly payload: unknown;
   readonly orderId?: string;
   readonly status?: TrackingStatus;
+  readonly now?: Date;
 }
 
 /**
@@ -88,6 +89,13 @@ export async function recordTrackingEvent(
       destination: input.destination,
       payload: input.payload,
       status: input.status ?? "pending",
+      // Explicitly from the JS clock, not the column's now() default. The
+      // claim compares this against a millisecond-precision JS timestamp; the
+      // database's microsecond now() lands *after* that same millisecond, so a
+      // row inserted and drained within one millisecond was invisible to the
+      // drain that should have taken it. Notifications already set it this
+      // way; a driver-side timestamp keeps both sides at the same precision.
+      nextAttemptAt: input.now ?? new Date(),
       ...(input.orderId ? { orderId: input.orderId } : {}),
     })
     .onConflictDoNothing()
