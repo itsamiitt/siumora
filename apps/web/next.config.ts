@@ -21,9 +21,9 @@ const CSP = [
   "default-src 'self'",
   // 'unsafe-eval' is absent: nothing here compiles code at runtime, and its
   // absence is what stops a JSON payload becoming an execution path.
-  // checkout.razorpay.com serves Checkout.js — per-host, never a wildcard
-  // (eng review OV-1). Meta Pixel hosts arrive with the tags work, not before.
-  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://checkout.razorpay.com",
+  // checkout.razorpay.com serves Checkout.js; connect.facebook.net serves the
+  // Pixel base (consent- and idle-gated) — per-host, never a wildcard (OV-1).
+  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://checkout.razorpay.com https://connect.facebook.net",
   // Tailwind v4 emits a stylesheet, but React inlines style attributes for
   // view transitions and the same nonce problem applies.
   "style-src 'self' 'unsafe-inline'",
@@ -31,7 +31,7 @@ const CSP = [
   "font-src 'self' data:",
   // lumberjack is Checkout.js's telemetry beacon; blocked, every payment
   // attempt logs a console error that reads like a failure.
-  "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://api.razorpay.com https://lumberjack.razorpay.com",
+  "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://api.razorpay.com https://lumberjack.razorpay.com https://www.facebook.com",
   // The payment modal is an iframe to the provider; default-src 'self' would
   // refuse it and the Pay button would open nothing.
   "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com",

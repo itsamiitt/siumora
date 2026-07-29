@@ -35,7 +35,7 @@ test("script-src names its hosts exactly — no wildcards", async () => {
   const policy = await csp();
   assert.equal(
     directive(policy, "script-src"),
-    "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://checkout.razorpay.com",
+    "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://checkout.razorpay.com https://connect.facebook.net",
   );
 });
 
@@ -47,11 +47,11 @@ test("the payment modal's iframe hosts are allowed, per-host", async () => {
   );
 });
 
-test("connect-src carries analytics and the payment provider, nothing wider", async () => {
+test("connect-src carries analytics, payments and the pixel, nothing wider", async () => {
   const policy = await csp();
   assert.equal(
     directive(policy, "connect-src"),
-    "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://api.razorpay.com https://lumberjack.razorpay.com",
+    "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://api.razorpay.com https://lumberjack.razorpay.com https://www.facebook.com",
   );
 });
 

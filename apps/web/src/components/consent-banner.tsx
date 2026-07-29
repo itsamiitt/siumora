@@ -44,6 +44,10 @@ function applyConsent(state: ConsentState, decided = true) {
   // state rather than falling back to their own defaults.
   window.dataLayer ??= [];
   window.dataLayer.push({ event: "consent_update", ...state });
+
+  // Tell the lazy loaders (the Meta Pixel) a decision landed — including the
+  // restored one on a return visit — so they never have to poll.
+  if (decided) window.dispatchEvent(new Event("siumora:consent"));
 }
 
 export function ConsentBanner() {

@@ -88,6 +88,22 @@ export const signUpSchema = base.extend({
  */
 export const codDeliveredSchema = purchaseSchema;
 
+/**
+ * Field Core Web Vitals (eng review 8A / W2).
+ *
+ * The launch gate carries numeric LCP/INP/CLS budgets; without field data the
+ * criterion is unmeasurable — Lighthouse CI does not exist and lab numbers on
+ * a dev machine say nothing about a low-end Android on 4G. `event_id` is the
+ * metric's own id, unique per page load per metric.
+ */
+export const webVitalsSchema = base.extend({
+  metric_name: z.enum(["LCP", "INP", "CLS", "FCP", "TTFB"]),
+  /** Milliseconds, except CLS which is unitless — as web-vitals reports it. */
+  value: z.number(),
+  rating: z.enum(["good", "needs-improvement", "poor"]).optional(),
+  navigation_type: z.string().optional(),
+});
+
 export const EVENT_SCHEMAS = {
   view_item: viewItemSchema,
   view_item_list: viewItemListSchema,
@@ -104,6 +120,7 @@ export const EVENT_SCHEMAS = {
   refund: refundSchema,
   sign_up: signUpSchema,
   cod_delivered: codDeliveredSchema,
+  web_vitals: webVitalsSchema,
 } as const;
 
 export type EventName = keyof typeof EVENT_SCHEMAS;

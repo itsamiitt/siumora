@@ -1,8 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Jost, Marcellus } from "next/font/google";
+import { GoogleTagManager } from "@next/third-parties/google";
 
 import { SITE, organizationJsonLd, websiteJsonLd } from "@siumora/seo";
 
+import { MetaPixelLoader, WebVitalsReporter } from "@/components/analytics-loaders";
 import { ConsentBanner } from "@/components/consent-banner";
 import { JsonLdScript } from "@/components/json-ld";
 import { SiteFooter } from "@/components/site-footer";
@@ -82,6 +84,17 @@ export default function RootLayout({
         <SiteFooter />
         <ConsentBanner />
         <ServiceWorker />
+        {/* Tags load via the framework's optimized loader, never raw script
+            tags (eng review 8A); the Pixel additionally waits for ads consent
+            and first idle. Consent Mode v2 defaults are denied until the
+            banner grants — the GTM container sees the dataLayer state. */}
+        {process.env.NEXT_PUBLIC_GTM_ID && (
+          <GoogleTagManager gtmId={process.env.NEXT_PUBLIC_GTM_ID} />
+        )}
+        {process.env.NEXT_PUBLIC_META_PIXEL_ID && (
+          <MetaPixelLoader pixelId={process.env.NEXT_PUBLIC_META_PIXEL_ID} />
+        )}
+        <WebVitalsReporter />
       </body>
     </html>
   );
