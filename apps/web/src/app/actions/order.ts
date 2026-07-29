@@ -5,12 +5,14 @@ import { revalidatePath } from "next/cache";
 import type { PaymentMethod, ShippingAddress } from "@siumora/core";
 
 import { clearCart } from "@/lib/cart-store";
-import { confirmOrder, placeOrder } from "@/lib/order-store";
+import { confirmOrder, placeOrder, type RazorpayHandoff } from "@/lib/order-store";
 
 export interface PlaceOrderResult {
   ok: boolean;
   orderNumber?: string;
   message?: string;
+  /** Present when the browser should open the payment modal for this order. */
+  razorpay?: RazorpayHandoff;
 }
 
 /**
@@ -57,7 +59,11 @@ export async function submitOrder(input: {
   revalidatePath("/cart");
   revalidatePath("/", "layout");
 
-  return { ok: true, orderNumber: result.orderNumber };
+  return {
+    ok: true,
+    orderNumber: result.orderNumber,
+    ...(result.razorpay ? { razorpay: result.razorpay } : {}),
+  };
 }
 
 /**

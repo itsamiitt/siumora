@@ -25,6 +25,7 @@ import { registerTwoFactorRoutes } from "./routes/two-factor.ts";
 import { registerSettingsRoutes } from "./routes/settings.ts";
 import { registerWishlistRoutes } from "./routes/wishlist.ts";
 import { createRateLimiter, type RateLimiter } from "./lib/rate-limit.ts";
+import { createRazorpayClient, type RazorpayClient } from "./lib/razorpay.ts";
 import { createSettingsCache, type SettingsReader } from "./lib/settings.ts";
 
 export interface AppConfig {
@@ -32,6 +33,14 @@ export interface AppConfig {
   ssl?: boolean;
   corsOrigins?: string[];
   razorpayWebhookSecret?: string;
+  /**
+   * API credentials for the payment provider. Absent, checkout still records
+   * the order and says plainly that no payment was taken — the pre-KYC state.
+   */
+  razorpayKeyId?: string;
+  razorpayKeySecret?: string;
+  /** Injected in tests; built from the key pair otherwise. */
+  payments?: RazorpayClient;
   courierWebhookSecret?: string;
   /**
    * Who may open the ops dashboard, comma separated.
@@ -133,6 +142,8 @@ declare module "fastify" {
     rateLimiter: RateLimiter;
     /** Cached runtime settings — the kill-switch and the COD caps. */
     settings: SettingsReader;
+    /** Undefined until the provider is configured — the pre-KYC state. */
+    payments: RazorpayClient | undefined;
   }
 }
 
@@ -183,6 +194,16 @@ export async function buildApp(config: AppConfig): Promise<App> {
   server.decorate("db", db);
   server.decorate("config", config);
   server.decorate("settings", createSettingsCache(db, config.settingsTtlMs));
+  server.decorate(
+    "payments",
+    config.payments ??
+      (config.razorpayKeyId && config.razorpayKeySecret
+        ? createRazorpayClient({
+            keyId: config.razorpayKeyId,
+            keySecret: config.razorpayKeySecret,
+          })
+        : undefined),
+  );
   server.decorate("adminPhones", parseAdminPhones(config.adminPhones));
   server.decorate("adminRoles", parseAdminRoles(config.adminPhones));
   server.decorate("seller", { ...PLACEHOLDER_SELLER, ...config.seller });

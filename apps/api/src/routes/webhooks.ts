@@ -66,6 +66,33 @@ export async function registerWebhookRoutes(server: FastifyInstance) {
     const order = await getOrderByNumber(server.db, orderNumber);
     if (!order) return { ok: true, ignored: "unknown order" };
 
+    const paymentId = body.payload.payment?.entity.id;
+
+    // The drop-off case: the customer paid, the bank authorised, and the
+    // browser never came back to trigger the client-side flow. Auto-capture
+    // usually covers it; when the event arrives as bare `authorized`, capture
+    // explicitly — this is the single most valuable webhook to act on, because
+    // it is exactly the payment nobody else will complete.
+    if (body.event === "payment.authorized") {
+      if (order.status !== "pending_payment" || !server.payments || !paymentId) {
+        return { ok: true, ignored: "authorized" };
+      }
+      const captured = await server.payments.capturePayment(paymentId, order.total);
+      if (!captured.ok) {
+        // Acknowledged, not errored: the recon sweep retries this. A non-2xx
+        // would make the provider retry a capture that may already be racing.
+        request.log?.warn?.(
+          { orderNumber, error: captured.error },
+          "authorized-payment capture failed — recon will retry",
+        );
+        return { ok: true, capture: "failed" };
+      }
+      const updated = await setOrderStatus(server, order, "confirmed", {
+        razorpayPaymentId: paymentId,
+      });
+      return { ok: true, orderNumber, status: updated.status };
+    }
+
     if (body.event !== "payment.captured") {
       return { ok: true, ignored: body.event };
     }
@@ -75,7 +102,9 @@ export async function registerWebhookRoutes(server: FastifyInstance) {
       return { ok: true, replayed: true, status: order.status };
     }
 
-    const updated = await setOrderStatus(server, order, "confirmed");
+    const updated = await setOrderStatus(server, order, "confirmed", {
+      ...(paymentId ? { razorpayPaymentId: paymentId } : {}),
+    });
 
     return { ok: true, orderNumber, status: updated.status };
   });

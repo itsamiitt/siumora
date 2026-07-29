@@ -2455,6 +2455,286 @@ apiTest("refuses a customer-driven transition when the courier simulation is off
   }
 });
 
+// ── Razorpay: handoff, capture, recon, refund (plan W1) ───────
+
+import { reconcilePayments } from "./lib/recon.ts";
+import type { RazorpayClient, RazorpayPayment } from "./lib/razorpay.ts";
+
+/** A provider that answers from a script and records every call. */
+function razorpayStub() {
+  const calls = {
+    created: [] as Array<{ amountPaise: number; receipt: string }>,
+    captured: [] as Array<{ paymentId: string; amountPaise: number }>,
+    refunded: [] as Array<{ paymentId: string; amountPaise: number }>,
+    fetched: [] as string[],
+  };
+  let orderPayments: RazorpayPayment[] = [];
+
+  const client: RazorpayClient = {
+    async createOrder(input) {
+      calls.created.push({ amountPaise: input.amountPaise, receipt: input.receipt });
+      return { ok: true, orderId: `order_stub_${input.receipt}` };
+    },
+    async fetchOrderPayments(orderId) {
+      calls.fetched.push(orderId);
+      return { ok: true, payments: orderPayments };
+    },
+    async capturePayment(paymentId, amountPaise) {
+      calls.captured.push({ paymentId, amountPaise });
+      return { ok: true, status: "captured" };
+    },
+    async refundPayment(paymentId, input) {
+      calls.refunded.push({ paymentId, amountPaise: input.amountPaise });
+      return { ok: true, refundId: "rfnd_stub_1" };
+    },
+  };
+
+  return {
+    client,
+    calls,
+    setOrderPayments(payments: RazorpayPayment[]) {
+      orderPayments = payments;
+    },
+  };
+}
+
+/** An app with the provider wired — same database, own instance. */
+async function paymentsApp(stub: ReturnType<typeof razorpayStub>): Promise<App> {
+  return buildApp({
+    connectionString: testDb!.url,
+    razorpayWebhookSecret: RAZORPAY_SECRET,
+    courierWebhookSecret: COURIER_SECRET,
+    adminPhones: OPERATOR_PHONE,
+    otpEcho: true,
+    courierSimulation: true,
+    rateLimiter: createRateLimiter([]),
+    settingsTtlMs: 0,
+    razorpayKeyId: "rzp_test_stub",
+    razorpayKeySecret: "stub_secret",
+    payments: stub.client,
+  });
+}
+
+/** newCartWith, against a specific app instance. */
+async function newCartOn(theApp: App, sku: string) {
+  const cart = json(await theApp.server.inject({ method: "POST", url: "/carts" }));
+  const products = json(await theApp.server.inject({ method: "GET", url: "/products" }));
+  const variant = products.products
+    .flatMap((p: { variants: Array<{ id: string; sku: string }> }) => p.variants)
+    .find((v: { sku: string }) => v.sku === sku);
+  await theApp.server.inject({
+    method: "POST",
+    url: `/carts/${cart.cartId}/lines`,
+    payload: { variantId: variant.id, quantity: 1 },
+  });
+  return { cartId: cart.cartId as string };
+}
+
+async function placeOn(theApp: App, sku = "SIU-PS-GLD") {
+  const { cartId } = await newCartOn(theApp, sku);
+  return json(
+    await theApp.server.inject({
+      method: "POST",
+      url: "/checkout",
+      payload: {
+        cartId,
+        address: ADDRESS,
+        paymentMethod: "upi",
+        eventId: crypto.randomUUID(),
+      },
+    }),
+  );
+}
+
+function signedRazorpayEvent(event: string, paymentId: string, orderNumber: string) {
+  const payload = JSON.stringify({
+    event,
+    payload: {
+      payment: { entity: { id: paymentId, notes: { order_number: orderNumber } } },
+    },
+  });
+  return { payload, signature: sign(payload, RAZORPAY_SECRET) };
+}
+
+apiTest("a prepaid checkout hands the browser a provider order", async () => {
+  const stub = razorpayStub();
+  const paid = await paymentsApp(stub);
+  try {
+    const placed = await placeOn(paid);
+
+    assert.equal(placed.status, "pending_payment");
+    assert.equal(placed.razorpay.keyId, "rzp_test_stub");
+    assert.equal(placed.razorpay.orderId, `order_stub_${placed.orderNumber}`);
+
+    const { rows } = await paid.pool.query(
+      "SELECT razorpay_order_id, total FROM orders WHERE number = $1",
+      [placed.orderNumber],
+    );
+    assert.equal(rows[0].razorpay_order_id, placed.razorpay.orderId);
+    // The provider was asked for exactly the order's total, in paise.
+    assert.equal(stub.calls.created[0]?.amountPaise, rows[0].total);
+    assert.equal(placed.razorpay.amountPaise, rows[0].total);
+  } finally {
+    await paid.server.close();
+    await paid.pool.end();
+  }
+});
+
+apiTest("a captured payment confirms the order and remembers the payment id", async () => {
+  const stub = razorpayStub();
+  const paid = await paymentsApp(stub);
+  try {
+    const placed = await placeOn(paid);
+    const { payload, signature } = signedRazorpayEvent(
+      "payment.captured",
+      "pay_stub_cap",
+      placed.orderNumber,
+    );
+
+    const response = await paid.server.inject({
+      method: "POST",
+      url: "/webhooks/razorpay",
+      headers: { "x-razorpay-signature": signature, "content-type": "application/json" },
+      payload,
+    });
+    assert.equal(json(response).status, "confirmed");
+
+    const { rows } = await paid.pool.query(
+      "SELECT status, invoice_number, razorpay_payment_id FROM orders WHERE number = $1",
+      [placed.orderNumber],
+    );
+    assert.equal(rows[0].status, "confirmed");
+    assert.ok(rows[0].invoice_number, "confirmation allocated the invoice");
+    assert.equal(rows[0].razorpay_payment_id, "pay_stub_cap");
+  } finally {
+    await paid.server.close();
+    await paid.pool.end();
+  }
+});
+
+apiTest("a bare authorized payment is captured — the drop-off case", async () => {
+  const stub = razorpayStub();
+  const paid = await paymentsApp(stub);
+  try {
+    const placed = await placeOn(paid);
+    const { payload, signature } = signedRazorpayEvent(
+      "payment.authorized",
+      "pay_stub_auth",
+      placed.orderNumber,
+    );
+
+    await paid.server.inject({
+      method: "POST",
+      url: "/webhooks/razorpay",
+      headers: { "x-razorpay-signature": signature, "content-type": "application/json" },
+      payload,
+    });
+
+    const { rows } = await paid.pool.query(
+      "SELECT status, total, razorpay_payment_id FROM orders WHERE number = $1",
+      [placed.orderNumber],
+    );
+    assert.equal(rows[0].status, "confirmed");
+    assert.equal(rows[0].razorpay_payment_id, "pay_stub_auth");
+    // Captured explicitly, for the full order total.
+    assert.deepEqual(stub.calls.captured[0], {
+      paymentId: "pay_stub_auth",
+      amountPaise: rows[0].total,
+    });
+  } finally {
+    await paid.server.close();
+    await paid.pool.end();
+  }
+});
+
+apiTest("the recon sweep confirms what the webhook missed", async () => {
+  const stub = razorpayStub();
+  const paid = await paymentsApp(stub);
+  try {
+    const placed = await placeOn(paid);
+    // The webhook never arrives; the provider knows the payment was captured.
+    stub.setOrderPayments([{ id: "pay_stub_recon", status: "captured" }]);
+
+    const report = await reconcilePayments(paid.server);
+
+    assert.equal(report.checked, 1);
+    assert.equal(report.confirmed, 1);
+    assert.ok(stub.calls.fetched.includes(`order_stub_${placed.orderNumber}`));
+
+    const { rows } = await paid.pool.query(
+      "SELECT status, invoice_number, razorpay_payment_id FROM orders WHERE number = $1",
+      [placed.orderNumber],
+    );
+    assert.equal(rows[0].status, "confirmed");
+    assert.ok(rows[0].invoice_number);
+    assert.equal(rows[0].razorpay_payment_id, "pay_stub_recon");
+  } finally {
+    await paid.server.close();
+    await paid.pool.end();
+  }
+});
+
+apiTest("a returned prepaid order is refunded once, never twice", async () => {
+  const stub = razorpayStub();
+  const paid = await paymentsApp(stub);
+  try {
+    const placed = await placeOn(paid);
+    const captured = signedRazorpayEvent(
+      "payment.captured",
+      "pay_stub_refund",
+      placed.orderNumber,
+    );
+    await paid.server.inject({
+      method: "POST",
+      url: "/webhooks/razorpay",
+      headers: {
+        "x-razorpay-signature": captured.signature,
+        "content-type": "application/json",
+      },
+      payload: captured.payload,
+    });
+
+    // The parcel goes out and comes back — the courier simulation drives the
+    // same transitions the signed webhook would.
+    for (const status of [
+      "processing",
+      "shipped",
+      "out_for_delivery",
+      "delivered",
+      "returned",
+    ]) {
+      const moved = await paid.server.inject({
+        method: "POST",
+        url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+        payload: { status },
+      });
+      assert.equal(moved.statusCode, 200, `transition to ${status}`);
+    }
+
+    const { rows } = await paid.pool.query(
+      "SELECT status, total, razorpay_refund_id FROM orders WHERE number = $1",
+      [placed.orderNumber],
+    );
+    assert.equal(rows[0].status, "returned");
+    assert.equal(rows[0].razorpay_refund_id, "rfnd_stub_1");
+    assert.deepEqual(stub.calls.refunded, [
+      { paymentId: "pay_stub_refund", amountPaise: rows[0].total },
+    ]);
+
+    // A replayed "returned" is refused as an illegal transition and must not
+    // reach the refund path — one parcel, one refund.
+    await paid.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status: "returned" },
+    });
+    assert.equal(stub.calls.refunded.length, 1);
+  } finally {
+    await paid.server.close();
+    await paid.pool.end();
+  }
+});
+
 // ── Runtime settings and the kill-switch (eng review 5A) ──────
 
 apiTest("serves the public config, uncacheable", async () => {

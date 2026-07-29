@@ -354,6 +354,8 @@ export class SiumoraClient {
     status: string;
     invoiceNumber: string | null;
     accessKey: string;
+    /** Present when a payment provider order was created for the handoff. */
+    razorpay?: { orderId: string; keyId: string; amountPaise: number };
   }> {
     return this.request("POST", "/checkout", input, { idempotencyKey });
   }
@@ -548,6 +550,7 @@ export class SiumoraClient {
 
 export interface StoreConfig {
   readonly paymentsEnabled: boolean;
+  readonly razorpayConfigured: boolean;
 }
 
 /**

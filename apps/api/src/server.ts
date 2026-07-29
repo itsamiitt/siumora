@@ -2,6 +2,7 @@ import { connectionStringFromEnv } from "@siumora/db";
 
 import { buildApp } from "./app.ts";
 import { resolveAppEnv } from "./lib/env.ts";
+import { startPaymentRecon } from "./lib/recon.ts";
 
 /**
  * Deployment tier: APP_ENV when set, else derived from NODE_ENV. Every
@@ -20,6 +21,12 @@ const { server, pool } = await buildApp({
     .map((origin) => origin.trim())
     .filter(Boolean),
   razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
+  ...(process.env.RAZORPAY_KEY_ID
+    ? { razorpayKeyId: process.env.RAZORPAY_KEY_ID }
+    : {}),
+  ...(process.env.RAZORPAY_KEY_SECRET
+    ? { razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET }
+    : {}),
   courierWebhookSecret: process.env.COURIER_WEBHOOK_SECRET,
   adminPhones: process.env.ADMIN_PHONES,
   // Flipped on once a WhatsApp/DLT template sender exists. Until then sign-in
@@ -55,6 +62,11 @@ const { server, pool } = await buildApp({
 const port = Number(process.env.PORT ?? 4000);
 await server.listen({ port, host: "0.0.0.0" });
 
+// The reconciliation sweep (plan W1): every 15 minutes, capture what the
+// browser dropped and confirm what the webhook missed. A no-op until the
+// provider is configured.
+const stopRecon = startPaymentRecon(server);
+
 /**
  * Drain on shutdown.
  *
@@ -65,6 +77,7 @@ await server.listen({ port, host: "0.0.0.0" });
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     void (async () => {
+      stopRecon();
       await server.close();
       await pool.end();
       process.exit(0);

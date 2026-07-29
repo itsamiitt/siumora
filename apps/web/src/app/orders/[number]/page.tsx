@@ -7,6 +7,7 @@ import { MAX_DELIVERY_ATTEMPTS, hsnSummary, summariseInvoice } from "@siumora/co
 import { formatPaise } from "@siumora/in-locale";
 import { CollectionTitle, Display, MicroLabel, SiumoraMark } from "@siumora/ui";
 
+import { api } from "@/lib/api";
 import { ConfirmOrder } from "@/components/confirm-order";
 import { NdrRecovery } from "@/components/ndr-recovery";
 import { OrderProgress } from "@/components/order-progress";
@@ -52,6 +53,10 @@ export default async function OrderPage({ params }: PageProps) {
   const order = await getOrder(number);
   if (!order) notFound();
 
+  // Which truth to tell about a pending payment: "confirming automatically"
+  // when the provider is live, "not connected" when it is not.
+  const { razorpayConfigured: paymentsLive } = await api().getStoreConfig();
+
   const openReturn = await getReturnForOrder(order.number);
   const rows = hsnSummary(order.lines, { interState: order.interState });
   const invoice = summariseInvoice(rows);
@@ -69,8 +74,9 @@ export default async function OrderPage({ params }: PageProps) {
       : order.status === "pending_payment"
         ? {
             title: "Order received.",
-            detail:
-              "Payment is still to be collected — Razorpay is not connected in this environment, so nothing has been charged.",
+            detail: paymentsLive
+              ? "Payment has not reached us yet. If you just paid, this page will update within a few minutes — payments are confirmed automatically."
+              : "Payment is still to be collected — Razorpay is not connected in this environment, so nothing has been charged.",
           }
         : {
             title: "Thank you.",

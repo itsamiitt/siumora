@@ -665,6 +665,23 @@ CREATE TABLE settings (
 );
 `,
   },
+  {
+    id: "0014_razorpay",
+    sql: `
+-- The provider's identifiers, on the order they belong to (plan W1 payments).
+-- order_id links the checkout handoff and the reconciliation sweep; payment_id
+-- is what a capture confirms and what a refund is issued against; refund_id is
+-- the receipt that a refund happened, and its presence is the idempotency
+-- guard that stops a replayed "returned" refunding twice.
+ALTER TABLE orders ADD COLUMN razorpay_order_id text;
+ALTER TABLE orders ADD COLUMN razorpay_payment_id text;
+ALTER TABLE orders ADD COLUMN razorpay_refund_id text;
+
+-- The recon sweep and the webhook both look orders up by the provider's id.
+CREATE INDEX orders_razorpay_order_idx ON orders(razorpay_order_id)
+  WHERE razorpay_order_id IS NOT NULL;
+`,
+  },
 ];
 
 /**

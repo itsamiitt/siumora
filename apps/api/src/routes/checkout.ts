@@ -266,6 +266,39 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
 
         if (!placed.ok) return { ok: false as const, message: placed.message };
 
+        // Prepaid orders get a provider order for the browser handoff. The
+        // failure path is deliberate: the order stands and the response says
+        // nothing about payment — the storefront then shows the same honest
+        // "no payment taken" note as the pre-KYC state, and the log shouts.
+        let razorpay:
+          | { orderId: string; keyId: string; amountPaise: number }
+          | undefined;
+        if (body.paymentMethod !== "cod" && server.payments && server.config.razorpayKeyId) {
+          const provider = await server.payments.createOrder({
+            amountPaise: placed.order.total,
+            receipt: placed.order.number,
+            // The webhook routes on this note — it is the join key between the
+            // provider's events and this order.
+            notes: { order_number: placed.order.number },
+          });
+          if (provider.ok) {
+            await server.db
+              .update(schema.orders)
+              .set({ razorpayOrderId: provider.orderId })
+              .where(eq(schema.orders.id, placed.order.id));
+            razorpay = {
+              orderId: provider.orderId,
+              keyId: server.config.razorpayKeyId,
+              amountPaise: placed.order.total,
+            };
+          } else {
+            request.log?.error?.(
+              { orderNumber: placed.order.number, error: provider.error },
+              "razorpay order create failed — order stands, payment not started",
+            );
+          }
+        }
+
         return {
           ok: true as const,
           orderNumber: placed.order.number,
@@ -274,6 +307,7 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
           // Returned once. It is what lets a guest reopen their own order
           // later without the number alone being enough.
           accessKey: placed.order.accessKey,
+          ...(razorpay ? { razorpay } : {}),
         };
       },
     );

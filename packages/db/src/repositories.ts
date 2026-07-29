@@ -255,6 +255,8 @@ export interface PlacedOrder {
   invoiceNumber: string | null;
   /** Handed to the placer once. Reading a guest order later requires it. */
   accessKey: string;
+  /** In paise — what a payment provider order is created for. */
+  total: number;
 }
 
 /**
@@ -394,6 +396,7 @@ export async function placeOrder(
         status: order!.status as OrderStatus,
         invoiceNumber: order!.invoiceNumber,
         accessKey: order!.accessKey,
+        total: order!.total,
       },
     };
   });

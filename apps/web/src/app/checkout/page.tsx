@@ -47,7 +47,7 @@ function CheckoutPaused() {
 async function CheckoutPageContents() {
   // Uncached read inside the Suspense boundary (the shell prerenders under
   // Cache Components): the kill-switch must be visible without a rebuild.
-  const { paymentsEnabled } = await api().getStoreConfig();
+  const { paymentsEnabled, razorpayConfigured } = await api().getStoreConfig();
   if (!paymentsEnabled) return <CheckoutPaused />;
 
   const lines = await getCartLines();
@@ -71,7 +71,7 @@ async function CheckoutPageContents() {
       </div>
 
       <div className="mt-10 grid gap-14 lg:grid-cols-[1fr_22rem]">
-        <CheckoutForm subtotal={subtotal} />
+        <CheckoutForm subtotal={subtotal} razorpayConfigured={razorpayConfigured} />
 
         <aside className="lg:sticky lg:top-28 lg:self-start">
           <OrderSummary totals={totals} />

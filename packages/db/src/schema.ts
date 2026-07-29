@@ -273,6 +273,13 @@ export const orders = pgTable(
     /** A registered buyer's GSTIN. Present makes this a B2B supply in GSTR-1. */
     buyerGstin: text("buyer_gstin"),
 
+    /** The provider's order id — links the checkout handoff and the recon sweep. */
+    razorpayOrderId: text("razorpay_order_id"),
+    /** Set when a capture confirms; it is what a refund is issued against. */
+    razorpayPaymentId: text("razorpay_payment_id"),
+    /** The refund receipt — its presence stops a replayed refund going twice. */
+    razorpayRefundId: text("razorpay_refund_id"),
+
     deliveryAttempts: integer("delivery_attempts").notNull().default(0),
     ndrReason: text("ndr_reason"),
 

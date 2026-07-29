@@ -51,6 +51,10 @@ export async function setOrderStatus(
       .returning();
     await queueOrderConversion(server, plain!, order.lines);
     await queueOrderMessage(server, plain!);
+    // Money follows the status here for the same reason the invoice does: this
+    // is the one place an order moves, so no path can reach `returned` without
+    // the refund being considered.
+    if (status === "returned") await maybeRefund(server, plain!);
     return plain!;
   }
 
@@ -83,4 +87,44 @@ export async function setOrderStatus(
   await queueOrderConversion(server, updated, order.lines);
   await queueOrderMessage(server, updated);
   return updated;
+}
+
+/**
+ * Refund a returned prepaid order.
+ *
+ * Idempotent by the `razorpay_refund_id` column: a replayed `returned` finds
+ * the receipt already written and does nothing — a customer must never be
+ * refunded twice for one parcel. COD returns have no capture to reverse; they
+ * take the manual payout rail (design doc, OV-2) and are skipped here.
+ *
+ * A failed refund does not block the status: the parcel genuinely came back,
+ * and holding the state hostage to the provider's uptime would leave the
+ * warehouse and the books disagreeing. It is logged loudly instead — money
+ * owed with a record beats money owed silently.
+ */
+async function maybeRefund(
+  server: FastifyInstance,
+  order: typeof schema.orders.$inferSelect,
+): Promise<void> {
+  if (order.paymentMethod === "cod") return;
+  if (!order.razorpayPaymentId || order.razorpayRefundId) return;
+  if (!server.payments) return;
+
+  const refund = await server.payments.refundPayment(order.razorpayPaymentId, {
+    amountPaise: order.total,
+    notes: { order_number: order.number },
+  });
+
+  if (!refund.ok) {
+    server.log?.error?.(
+      { orderNumber: order.number, error: refund.error },
+      "refund failed for a returned order — money is owed, follow up",
+    );
+    return;
+  }
+
+  await server.db
+    .update(schema.orders)
+    .set({ razorpayRefundId: refund.refundId })
+    .where(eq(schema.orders.id, order.id));
 }

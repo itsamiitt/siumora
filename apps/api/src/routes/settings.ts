@@ -19,7 +19,12 @@ export async function registerSettingsRoutes(server: FastifyInstance): Promise<v
   server.get("/config", async (_request, reply) => {
     const settings = await server.settings.get();
     reply.header("Cache-Control", "no-store");
-    return { paymentsEnabled: settings.paymentsEnabled };
+    return {
+      paymentsEnabled: settings.paymentsEnabled,
+      // Whether a payment provider is wired up at all — the storefront tells
+      // the truth about money either way, and this is which truth.
+      razorpayConfigured: server.payments !== undefined,
+    };
   });
 
   server.get("/admin/settings", async (request, reply) => {

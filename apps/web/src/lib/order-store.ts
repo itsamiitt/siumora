@@ -92,9 +92,18 @@ export interface PlaceOrderInput {
   readonly buyerGstin?: string;
 }
 
+export interface RazorpayHandoff {
+  readonly orderId: string;
+  readonly keyId: string;
+  readonly amountPaise: number;
+}
+
 export async function placeOrder(
   input: PlaceOrderInput,
-): Promise<{ ok: true; orderNumber: string } | { ok: false; message: string }> {
+): Promise<
+  | { ok: true; orderNumber: string; razorpay?: RazorpayHandoff }
+  | { ok: false; message: string }
+> {
   const cartId = await currentCartId();
   if (!cartId) return { ok: false, message: "Your bag is empty." };
 
@@ -115,7 +124,11 @@ export async function placeOrder(
     // does not need it, but they may have placed this one as a guest.
     await rememberOrderKey(result.orderNumber, result.accessKey);
 
-    return { ok: true, orderNumber: result.orderNumber };
+    return {
+      ok: true,
+      orderNumber: result.orderNumber,
+      ...(result.razorpay ? { razorpay: result.razorpay } : {}),
+    };
   } catch (error) {
     return {
       ok: false,

@@ -18,6 +18,7 @@ import { Button, MicroLabel } from "@siumora/ui";
 
 import { submitOrder } from "@/app/actions/order";
 import { quoteCheckout } from "@/app/actions/checkout";
+import { openRazorpayCheckout } from "@/lib/razorpay-checkout";
 
 
 /**
@@ -30,7 +31,13 @@ import { quoteCheckout } from "@/app/actions/checkout";
  */
 export type PaymentMethod = "upi" | "card" | "netbanking" | "cod";
 
-export function CheckoutForm({ subtotal }: { subtotal: number }) {
+export function CheckoutForm({
+  subtotal,
+  razorpayConfigured = false,
+}: {
+  subtotal: number;
+  razorpayConfigured?: boolean;
+}) {
   const [phone, setPhone] = useState("");
   const [pincode, setPincode] = useState("");
   const [stateCode, setStateCode] = useState("");
@@ -143,6 +150,18 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
           });
 
           if (result.ok && result.orderNumber) {
+            if (result.razorpay) {
+              // The modal collects the payment; the signed webhook and the
+              // recon sweep confirm it. Paid or dismissed, the order page is
+              // the next stop — it renders whatever the server knows is true.
+              await openRazorpayCheckout({
+                keyId: result.razorpay.keyId,
+                orderId: result.razorpay.orderId,
+                amountPaise: result.razorpay.amountPaise,
+                contact: phone,
+                ...(name.trim() ? { name: name.trim() } : {}),
+              });
+            }
             router.push(`/orders/${result.orderNumber}`);
           } else {
             setError(result.message ?? "Could not place the order.");
@@ -397,10 +416,13 @@ export function CheckoutForm({ subtotal }: { subtotal: number }) {
           </p>
         )}
 
-        {/* The order is recorded and invoiced, but no money moves: Razorpay is
-            not connected. Saying so beats implying a payment was taken. */}
+        {/* Tell the truth about money either way: a secure-payment line when
+            the provider is live, and an explicit no-payment note when it is
+            not — implying a payment was taken is worse than admitting none was. */}
         <p className="mt-2 text-center text-xs text-content-faint">
-          Razorpay is not connected — the order is recorded, no payment is taken.
+          {razorpayConfigured
+            ? "Payments are processed securely by Razorpay. COD orders pay on delivery."
+            : "Razorpay is not connected — the order is recorded, no payment is taken."}
         </p>
       </div>
     </form>
