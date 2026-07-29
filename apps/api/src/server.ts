@@ -1,9 +1,18 @@
 import { connectionStringFromEnv } from "@siumora/db";
 
 import { buildApp } from "./app.ts";
+import { resolveAppEnv } from "./lib/env.ts";
+
+/**
+ * Deployment tier: APP_ENV when set, else derived from NODE_ENV. Every
+ * behavior gate below keys on this — never on NODE_ENV, which managed hosts
+ * set to "production" on staging deploys too.
+ */
+const appEnv = resolveAppEnv();
 
 /** Process entry point. Configuration comes from the environment only. */
 const { server, pool } = await buildApp({
+  appEnv,
   connectionString: connectionStringFromEnv(),
   ssl: process.env.DATABASE_SSL === "true",
   corsOrigins: (process.env.CORS_ORIGINS ?? "")
@@ -19,11 +28,10 @@ const { server, pool } = await buildApp({
   otpEcho: process.env.OTP_ECHO === "true",
   courierSimulation:
     process.env.COURIER_SIMULATION === "true" ||
-    (process.env.COURIER_SIMULATION === undefined &&
-      process.env.NODE_ENV !== "production"),
+    (process.env.COURIER_SIMULATION === undefined && appEnv !== "production"),
   ga4Configured: process.env.GA4_API_SECRET !== undefined,
   metaConfigured: process.env.META_CAPI_TOKEN !== undefined,
-  hsts: process.env.NODE_ENV === "production",
+  hsts: appEnv === "production",
   ...(process.env.TOTP_ENCRYPTION_KEY
     ? { totpEncryptionKey: process.env.TOTP_ENCRYPTION_KEY }
     : {}),

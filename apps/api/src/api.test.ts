@@ -122,7 +122,7 @@ apiTest("health check proves the database is reachable", async () => {
   assert.equal(json(response).ok, true);
 });
 
-apiTest("serves the catalogue and a single product with its reviews", async () => {
+apiTest("serves the catalogue review-free until customers write them", async () => {
   const list = json(await app.server.inject({ method: "GET", url: "/products" }));
   assert.equal(list.products.length, 4);
 
@@ -130,8 +130,11 @@ apiTest("serves the catalogue and a single product with its reviews", async () =
     await app.server.inject({ method: "GET", url: "/products/petal-studs" }),
   );
   assert.equal(one.product.handle, "petal-studs");
-  assert.equal(one.reviews.length, 2);
-  assert.equal(one.rating.average, 4.5);
+  // The seed ships no reviews — a fabricated verifiedBuyer five-star would
+  // flow straight into aggregateRating structured data (launch gate box 8).
+  assert.equal(one.reviews.length, 0);
+  assert.equal(one.rating.average, null);
+  assert.equal(one.rating.count, 0);
 });
 
 apiTest("search matches Hinglish through the API", async () => {
@@ -2417,6 +2420,36 @@ apiTest("records a remittance batch and a bulk export", async () => {
   // A read, recorded unusually: a bulk export of customer data is worth knowing
   // about even though it changed nothing.
   assert.ok(actions.includes("gst.export"));
+});
+
+// Regression (d): the guard at orders.ts — with the simulation off, a viewer
+// without orders:write must not be able to move a parcel. Marking your own
+// order delivered opens the return window and recognises the revenue.
+apiTest("refuses a customer-driven transition when the courier simulation is off", async () => {
+  const placed = await placeAndMove("upi", "SIU-PS-GLD", []);
+
+  // A second app on the same database with the simulation off — the global
+  // test app keeps it on because the delivered/NDR paths depend on it.
+  const noSim = await buildApp({
+    connectionString: testDb!.url,
+    otpEcho: true,
+    courierSimulation: false,
+    rateLimiter: createRateLimiter([]),
+  });
+  try {
+    // The buyer's own access key: authorised as the order's owner, so this is
+    // literally the customer trying to move their own parcel.
+    const response = await noSim.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status: "confirmed" },
+    });
+    assert.equal(response.statusCode, 403);
+    assert.equal(json(response).error, "not_an_operator");
+  } finally {
+    await noSim.server.close();
+    await noSim.pool.end();
+  }
 });
 
 apiTest("will not let the application rewrite its own log", async () => {

@@ -26,7 +26,12 @@ export default function TermsPage() {
           <Disclosure label="Registered entity" value={LEGAL.registeredName} />
           <Disclosure label="Registered address" value={LEGAL.address} />
           <Disclosure label="GSTIN" value={LEGAL.gstin} />
-          <Disclosure label="CIN" value={LEGAL.cin} />
+          {LEGAL.registrationIdentifier && (
+            <Disclosure
+              label={LEGAL.registrationIdentifier.label}
+              value={LEGAL.registrationIdentifier.value}
+            />
+          )}
           <Disclosure label="Support email" value={LEGAL.supportEmail} />
           <Disclosure label="Support phone" value={LEGAL.supportPhone} />
         </dl>

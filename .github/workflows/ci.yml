@@ -12,6 +12,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A credential that lands in a commit is rotated, not rewritten away — but
+  # the cheapest rotation is the one that never happens. Full history so a
+  # secret buried ten commits deep still fails the scan.
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   check:
     name: Typecheck, test, build
     runs-on: ubuntu-latest

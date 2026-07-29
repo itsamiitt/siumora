@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { Display, MicroLabel } from "@siumora/ui";
 
-import { LEGAL_COMPLETE } from "@/lib/legal";
+import { CONTACT_COMPLETE, LEGAL_COMPLETE } from "@/lib/legal";
 
 /**
  * Shared shell for policy and content pages.
@@ -39,13 +39,23 @@ export function PolicyPage({
       )}
 
       {/* A statutory page with unfilled entity details is not compliant. Say so
-          loudly rather than shipping a page that looks complete. */}
-      {statutory && !LEGAL_COMPLETE && (
+          loudly rather than shipping a page that looks complete. The contact
+          block gates publishing; the registration numbers gate opening sale —
+          they arrive later, from the registrar, and pending is an honest state
+          for a site whose checkout is still paused. */}
+      {statutory && !CONTACT_COMPLETE && (
         <p className="mt-8 border border-accent-ink/30 bg-accent/[0.04] p-4 text-sm">
           <strong className="font-medium">Not ready to publish.</strong> The
           registered entity details, GSTIN and grievance officer below are
           unset. They are statutory disclosures and must be filled in before
           this site goes live.
+        </p>
+      )}
+      {statutory && CONTACT_COMPLETE && !LEGAL_COMPLETE && (
+        <p className="mt-8 border border-[var(--color-rule)] p-4 text-sm text-content-muted">
+          Tax registration in progress. The GSTIN and company registration
+          number below are awaited from the registrar; sale does not open
+          until they are published here.
         </p>
       )}
 

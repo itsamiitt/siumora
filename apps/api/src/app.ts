@@ -10,6 +10,7 @@ import {
 } from "@siumora/core";
 import { createDb, createPool, migrate, type Database } from "@siumora/db";
 
+import type { AppEnv } from "./lib/env.ts";
 import { registerAuthRoutes } from "./routes/auth.ts";
 import { registerCatalogRoutes } from "./routes/catalog.ts";
 import { registerCartRoutes } from "./routes/cart.ts";
@@ -39,6 +40,13 @@ export interface AppConfig {
    * permissive one. See `parseAdminRoles`.
    */
   adminPhones?: string;
+  /**
+   * Deployment tier. Gates key on this, never on NODE_ENV — managed staging
+   * runs NODE_ENV=production and would otherwise refuse the drills it exists
+   * for. Defaults to "development" (tests, local tools); the server entry
+   * point always passes the resolved value.
+   */
+  appEnv?: AppEnv;
   /** Set once a WhatsApp/DLT sender is wired up. */
   otpDeliveryConfigured?: boolean;
   /** Return the code in the response. Development only; refused in production. */
@@ -118,14 +126,34 @@ declare module "fastify" {
   }
 }
 
-export async function buildApp(config: AppConfig): Promise<App> {
-  if (config.otpEcho && process.env.NODE_ENV === "production") {
-    // Refuse at boot rather than at the first sign-in. A production deploy that
-    // hands sign-in codes back over HTTP is every account on the site.
+/**
+ * Refuse at boot rather than at the first request. Exported so the guards can
+ * be tested without a database — they must run before any pool is created.
+ */
+export function assertBootSafety(
+  config: Pick<AppConfig, "appEnv" | "otpEcho" | "courierSimulation">,
+): void {
+  const appEnv = config.appEnv ?? "development";
+  if (config.otpEcho && appEnv === "production") {
+    // A production deploy that hands sign-in codes back over HTTP is every
+    // account on the site.
     throw new Error(
       "OTP_ECHO must not be set in production — it returns sign-in codes to the caller.",
     );
   }
+  if (config.courierSimulation && appEnv === "production") {
+    // The simulation lets a non-operator drive courier transitions — marking
+    // your own parcel delivered opens the return window and recognises the
+    // revenue. The derived default is already off in production; this refuses
+    // the explicit override too.
+    throw new Error(
+      "COURIER_SIMULATION must not be enabled in production — it lets anyone drive courier transitions on their own order.",
+    );
+  }
+}
+
+export async function buildApp(config: AppConfig): Promise<App> {
+  assertBootSafety(config);
 
   const pool = createPool({
     connectionString: config.connectionString,
@@ -147,6 +175,13 @@ export async function buildApp(config: AppConfig): Promise<App> {
   server.decorate("adminPhones", parseAdminPhones(config.adminPhones));
   server.decorate("adminRoles", parseAdminRoles(config.adminPhones));
   server.decorate("seller", { ...PLACEHOLDER_SELLER, ...config.seller });
+  if ((config.appEnv ?? "development") === "production" && !config.seller?.gstin) {
+    // Not fatal — the invoice endpoint already refuses on a placeholder — but
+    // a production boot without a real seller should be loud in the logs.
+    server.log.warn(
+      "invoice seller is the placeholder — set the SELLER_* variables before selling",
+    );
+  }
   server.decorate(
     "totpKey",
     // Derived at boot: scrypt is deliberately slow, and doing it per request

@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import { connectionStringFromEnv, createDb, createPool } from "./client.ts";
 import { migrate } from "./migrate.ts";
 import {
@@ -14,9 +15,15 @@ import {
  *
  * Idempotent: it clears the catalogue tables first, so running it twice leaves
  * the same state rather than four copies of every product.
+ *
+ * Deliberately review-free. A seeded review with an invented author and
+ * `verifiedBuyer: true` would render on the PDP and emit aggregateRating
+ * structured data — a fabricated statutory-adjacent claim, the same class of
+ * invented fact as a plausible GSTIN. Reviews only ever come from customers.
+ * Exported so a test can hold that line.
  */
 
-const CATALOG = [
+export const CATALOG = [
   {
     handle: "petal-studs",
     title: "Petal Studs",
@@ -37,22 +44,6 @@ const CATALOG = [
       { sku: "SIU-PS-GLD", title: "Gold", mrp: 249000, price: 199000, inventory: 24 },
       { sku: "SIU-PS-SLV", title: "Silver", mrp: 229000, price: 189000, inventory: 11 },
     ],
-    reviews: [
-      {
-        rating: 5,
-        title: "Wear them every day",
-        body: "Bought these after my first salary. Have not taken them off since.",
-        authorName: "Asha M.",
-        verifiedBuyer: true,
-      },
-      {
-        rating: 4,
-        title: "Smaller than I expected",
-        body: "Lovely finish and the packing is genuinely gift-ready.",
-        authorName: "Riya S.",
-        verifiedBuyer: true,
-      },
-    ],
   },
   {
     handle: "kernel-pendant",
@@ -72,15 +63,6 @@ const CATALOG = [
     collections: ["gifting", "the-petal-edit"],
     variants: [
       { sku: "SIU-KP-GLD", title: "Gold", mrp: 429000, price: 349000, inventory: 8 },
-    ],
-    reviews: [
-      {
-        rating: 5,
-        title: "Gifted it, then bought my own",
-        body: "Gave this to my sister for her exam result and ended up ordering the same one.",
-        authorName: "Nikhil P.",
-        verifiedBuyer: true,
-      },
     ],
   },
   {
@@ -103,15 +85,6 @@ const CATALOG = [
       { sku: "SIU-JH-GLD", title: "Gold", mrp: 329000, price: 279000, inventory: 16 },
       { sku: "SIU-JH-SLV", title: "Silver", mrp: 299000, price: 259000, inventory: 0 },
     ],
-    reviews: [
-      {
-        rating: 4,
-        title: "Light enough to forget",
-        body: "I usually cannot wear hoops all day. These I forget I have on.",
-        authorName: "Fatima K.",
-        verifiedBuyer: true,
-      },
-    ],
   },
   {
     handle: "tuesday-band",
@@ -133,7 +106,6 @@ const CATALOG = [
       { sku: "SIU-TB-12", title: "Size 12", mrp: 189000, price: 159000, inventory: 19 },
       { sku: "SIU-TB-14", title: "Size 14", mrp: 189000, price: 159000, inventory: 7 },
     ],
-    reviews: [],
   },
 ] as const;
 
@@ -213,11 +185,6 @@ export async function seed(databaseUrl?: string) {
         })),
       );
 
-      if (entry.reviews.length > 0) {
-        await db
-          .insert(reviews)
-          .values(entry.reviews.map((r) => ({ ...r, productId: product!.id })));
-      }
     }
 
     await db.insert(pincodeServiceability).values(PINCODES);
@@ -232,7 +199,7 @@ export async function seed(databaseUrl?: string) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const result = await seed();
   console.log(
     `seeded ${result.products} products, ${result.collections} collections, ${result.pincodes} pincodes`,
