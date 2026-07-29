@@ -2735,6 +2735,190 @@ apiTest("a returned prepaid order is refunded once, never twice", async () => {
   }
 });
 
+// ── Shiprocket: booking, real tracking ids, reverse pickup ────
+
+import type { ShiprocketClient } from "./lib/shiprocket.ts";
+
+function shiprocketStub() {
+  const calls = {
+    created: [] as Array<Record<string, unknown>>,
+    awb: [] as string[],
+    pickups: [] as string[],
+    returns: [] as Array<Record<string, unknown>>,
+  };
+  const client: ShiprocketClient = {
+    async createOrder(input) {
+      calls.created.push(input as unknown as Record<string, unknown>);
+      return { ok: true, orderId: "SR100", shipmentId: "SH100" };
+    },
+    async assignAwb(shipmentId) {
+      calls.awb.push(shipmentId);
+      return { ok: true, awb: "AWB123", courier: "Bluedart Test" };
+    },
+    async schedulePickup(shipmentId) {
+      calls.pickups.push(shipmentId);
+      return { ok: true };
+    },
+    async createReturn(input) {
+      calls.returns.push(input as unknown as Record<string, unknown>);
+      return { ok: true, orderId: "SRR1", shipmentId: "SHR1" };
+    },
+  };
+  return { client, calls };
+}
+
+async function shippingApp(stub: ReturnType<typeof shiprocketStub>): Promise<App> {
+  return buildApp({
+    connectionString: testDb!.url,
+    razorpayWebhookSecret: RAZORPAY_SECRET,
+    courierWebhookSecret: COURIER_SECRET,
+    adminPhones: OPERATOR_PHONE,
+    otpEcho: true,
+    courierSimulation: true,
+    rateLimiter: createRateLimiter([]),
+    settingsTtlMs: 0,
+    shipping: stub.client,
+  });
+}
+
+apiTest("booking takes an AWB and the shipped notice carries it", async () => {
+  const stub = shiprocketStub();
+  const shipper = await shippingApp(stub);
+  try {
+    // COD confirms immediately, so the order is bookable at once.
+    const placed = await placeAndMove("cod", "SIU-PS-GLD", []);
+    const operator = await signIn(OPERATOR_PHONE);
+
+    const booked = await shipper.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/ship`,
+      headers: operator.headers,
+      payload: {},
+    });
+
+    assert.equal(booked.statusCode, 200);
+    assert.equal(json(booked).awb, "AWB123");
+    assert.equal(json(booked).courier, "Bluedart Test");
+    assert.equal(json(booked).status, "processing");
+    assert.equal(json(booked).pickupScheduled, true);
+
+    // The courier got rupees and a state name, not paise and a code.
+    const sent = stub.calls.created[0] as {
+      address: { stateName: string };
+      items: Array<{ sellingPrice: number }>;
+      paymentMethod: string;
+    };
+    assert.equal(sent.address.stateName, "Maharashtra");
+    assert.equal(sent.items[0]!.sellingPrice, 1990);
+    assert.equal(sent.paymentMethod, "COD");
+
+    const { rows } = await shipper.pool.query(
+      "SELECT awb_code, courier_name, shiprocket_shipment_id FROM orders WHERE number = $1",
+      [placed.orderNumber],
+    );
+    assert.equal(rows[0].awb_code, "AWB123");
+    assert.equal(rows[0].courier_name, "Bluedart Test");
+    assert.equal(rows[0].shiprocket_shipment_id, "SH100");
+
+    // Ship it onward: the customer's notice names the real courier and AWB —
+    // the placeholders are gone.
+    await shipper.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status: "shipped" },
+    });
+    const note = await shipper.pool.query(
+      "SELECT variables FROM notifications WHERE template_key = 'order_shipped' AND order_id = (SELECT id FROM orders WHERE number = $1)",
+      [placed.orderNumber],
+    );
+    assert.equal(note.rows[0].variables.courier, "Bluedart Test");
+    assert.equal(note.rows[0].variables.trackingId, "AWB123");
+
+    // Booking twice is refused — one parcel, one AWB.
+    const again = await shipper.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/ship`,
+      headers: operator.headers,
+      payload: {},
+    });
+    assert.equal(again.statusCode, 409);
+    assert.equal(json(again).error, "already_booked");
+  } finally {
+    await shipper.server.close();
+    await shipper.pool.end();
+  }
+});
+
+apiTest("booking is an operator lever behind a real courier account", async () => {
+  // No courier configured: the global app answers 503 and says so.
+  const operator = await signIn(OPERATOR_PHONE);
+  const placed = await placeAndMove("cod", "SIU-PS-GLD", []);
+  const unconfigured = await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/ship`,
+    headers: operator.headers,
+    payload: {},
+  });
+  assert.equal(unconfigured.statusCode, 503);
+  assert.equal(json(unconfigured).error, "shipping_not_configured");
+
+  // And no session gets nowhere near it.
+  const anonymous = await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/ship`,
+    payload: {},
+  });
+  assert.equal(anonymous.statusCode, 401);
+});
+
+apiTest("an approved return books its reverse pickup", async () => {
+  const stub = shiprocketStub();
+  const shipper = await shippingApp(stub);
+  try {
+    const placed = await placeAndMove("cod", "SIU-PS-GLD", [
+      "processing",
+      "shipped",
+      "out_for_delivery",
+      "delivered",
+    ]);
+
+    const response = await shipper.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/returns?key=${placed.accessKey}`,
+      payload: {
+        variantIds: [
+          (
+            await shipper.pool.query(
+              "SELECT variant_id FROM order_lines WHERE order_id = (SELECT id FROM orders WHERE number = $1)",
+              [placed.orderNumber],
+            )
+          ).rows[0].variant_id,
+        ],
+        reason: "size_or_fit",
+        resolution: "refund",
+        sealIntact: true,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(json(response).reversePickup, "booked");
+
+    const { rows } = await shipper.pool.query(
+      "SELECT shiprocket_return_id, shiprocket_shipment_id FROM return_requests WHERE order_id = (SELECT id FROM orders WHERE number = $1)",
+      [placed.orderNumber],
+    );
+    assert.equal(rows[0].shiprocket_return_id, "SRR1");
+    assert.equal(rows[0].shiprocket_shipment_id, "SHR1");
+
+    // The reverse shipment is its own consignment, picked up at the customer.
+    const sentReturn = stub.calls.returns[0] as { orderNumber: string };
+    assert.equal(sentReturn.orderNumber, `${placed.orderNumber}-R`);
+  } finally {
+    await shipper.server.close();
+    await shipper.pool.end();
+  }
+});
+
 // ── Messaging: the OTP channel and delivery receipts (4A, 1A) ─
 
 const MESSAGING_SECRET = "test_messaging_secret";

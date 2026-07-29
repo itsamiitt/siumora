@@ -280,6 +280,12 @@ export const orders = pgTable(
     /** The refund receipt — its presence stops a replayed refund going twice. */
     razorpayRefundId: text("razorpay_refund_id"),
 
+    /** Courier identifiers, set at booking. AWB is what the customer tracks. */
+    shiprocketOrderId: text("shiprocket_order_id"),
+    shiprocketShipmentId: text("shiprocket_shipment_id"),
+    awbCode: text("awb_code"),
+    courierName: text("courier_name"),
+
     deliveryAttempts: integer("delivery_attempts").notNull().default(0),
     ndrReason: text("ndr_reason"),
 
@@ -335,6 +341,10 @@ export const returnRequests = pgTable(
     refundTo: text("refund_to").notNull(),
     freeReturnShipping: boolean("free_return_shipping").notNull().default(false),
     note: text("note"),
+    /** Reverse-pickup identifiers, set when the return is approved and booked. */
+    shiprocketReturnId: text("shiprocket_return_id"),
+    shiprocketShipmentId: text("shiprocket_shipment_id"),
+    reverseAwbCode: text("reverse_awb_code"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("returns_order_idx").on(table.orderId)],

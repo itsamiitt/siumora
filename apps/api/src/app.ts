@@ -23,10 +23,12 @@ import { registerRemittanceRoutes } from "./routes/remittance.ts";
 import { registerPrivacyRoutes } from "./routes/privacy.ts";
 import { registerTwoFactorRoutes } from "./routes/two-factor.ts";
 import { registerSettingsRoutes } from "./routes/settings.ts";
+import { registerShippingRoutes } from "./routes/shipping.ts";
 import { registerWishlistRoutes } from "./routes/wishlist.ts";
 import type { OtpSender } from "@siumora/messaging";
 import { createRateLimiter, type RateLimiter } from "./lib/rate-limit.ts";
 import { createRazorpayClient, type RazorpayClient } from "./lib/razorpay.ts";
+import { createShiprocketClient, type ShiprocketClient } from "./lib/shiprocket.ts";
 import { createSettingsCache, type SettingsReader } from "./lib/settings.ts";
 
 export interface AppConfig {
@@ -42,6 +44,12 @@ export interface AppConfig {
   razorpayKeySecret?: string;
   /** Injected in tests; built from the key pair otherwise. */
   payments?: RazorpayClient;
+  /** Courier credentials — absent, booking answers 503 and says so. */
+  shiprocketEmail?: string;
+  shiprocketPassword?: string;
+  shiprocketPickupLocation?: string;
+  /** Injected in tests; built from the credentials otherwise. */
+  shipping?: ShiprocketClient;
   courierWebhookSecret?: string;
   /**
    * Who may open the ops dashboard, comma separated.
@@ -154,6 +162,8 @@ declare module "fastify" {
     payments: RazorpayClient | undefined;
     /** Undefined until a messaging channel's regulatory clock clears. */
     otp: OtpSender | undefined;
+    /** Undefined until the courier account exists. */
+    shipping: ShiprocketClient | undefined;
   }
 }
 
@@ -205,6 +215,16 @@ export async function buildApp(config: AppConfig): Promise<App> {
   server.decorate("config", config);
   server.decorate("settings", createSettingsCache(db, config.settingsTtlMs));
   server.decorate("otp", config.otp);
+  server.decorate(
+    "shipping",
+    config.shipping ??
+      (config.shiprocketEmail && config.shiprocketPassword
+        ? createShiprocketClient({
+            email: config.shiprocketEmail,
+            password: config.shiprocketPassword,
+          })
+        : undefined),
+  );
   server.decorate(
     "payments",
     config.payments ??
@@ -336,6 +356,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
   await registerCartRoutes(server);
   await registerCheckoutRoutes(server);
   await registerOrderRoutes(server);
+  await registerShippingRoutes(server);
   await registerWebhookRoutes(server);
   await registerWishlistRoutes(server);
   await registerAdminRoutes(server);

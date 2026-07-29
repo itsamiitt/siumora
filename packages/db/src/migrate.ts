@@ -699,6 +699,24 @@ CREATE INDEX notification_provider_message_idx
   WHERE provider_message_id IS NOT NULL;
 `,
   },
+  {
+    id: "0016_shiprocket",
+    sql: `
+-- The courier's identifiers (plan W1 logistics). The AWB is the tracking id a
+-- customer is told and the join key the tracking webhook arrives on; the
+-- Shiprocket ids are what a label, a pickup or a cancellation is requested
+-- against. Their presence is also the booking idempotency guard.
+ALTER TABLE orders ADD COLUMN shiprocket_order_id text;
+ALTER TABLE orders ADD COLUMN shiprocket_shipment_id text;
+ALTER TABLE orders ADD COLUMN awb_code text;
+ALTER TABLE orders ADD COLUMN courier_name text;
+
+-- A return travels on its own reverse AWB, booked when the return is approved.
+ALTER TABLE return_requests ADD COLUMN shiprocket_return_id text;
+ALTER TABLE return_requests ADD COLUMN shiprocket_shipment_id text;
+ALTER TABLE return_requests ADD COLUMN reverse_awb_code text;
+`,
+  },
 ];
 
 /**

@@ -76,10 +76,14 @@ function variablesFor(
     case "order_confirmed":
       return { ...base, total: `INR ${printRupees(order.total)}` };
     case "order_shipped":
-      // No courier integration yet, so these are the honest placeholders until
-      // Shiprocket is wired up — and `renderTemplate` refuses an empty one, so
-      // this cannot silently send "shipped with  ".
-      return { ...base, courier: "our courier partner", trackingId: order.number };
+      // The real courier and AWB once a booking stored them; the honest
+      // placeholders otherwise — `renderTemplate` refuses an empty variable,
+      // so this can never silently send "shipped with  ".
+      return {
+        ...base,
+        courier: order.courierName ?? "our courier partner",
+        trackingId: order.awbCode ?? order.number,
+      };
     case "delivery_failed":
       return {
         ...base,

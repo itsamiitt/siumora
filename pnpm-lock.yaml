@@ -26,6 +26,9 @@ importers:
       '@siumora/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@siumora/in-locale':
+        specifier: workspace:*
+        version: link:../../packages/in-locale
       '@siumora/messaging':
         specifier: workspace:*
         version: link:../../packages/messaging

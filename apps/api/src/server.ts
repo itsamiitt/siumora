@@ -30,6 +30,15 @@ const { server, pool } = await buildApp({
     ? { razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET }
     : {}),
   courierWebhookSecret: process.env.COURIER_WEBHOOK_SECRET,
+  ...(process.env.SHIPROCKET_EMAIL
+    ? { shiprocketEmail: process.env.SHIPROCKET_EMAIL }
+    : {}),
+  ...(process.env.SHIPROCKET_PASSWORD
+    ? { shiprocketPassword: process.env.SHIPROCKET_PASSWORD }
+    : {}),
+  ...(process.env.SHIPROCKET_PICKUP_LOCATION
+    ? { shiprocketPickupLocation: process.env.SHIPROCKET_PICKUP_LOCATION }
+    : {}),
   adminPhones: process.env.ADMIN_PHONES,
   // Resolved per channel from whatever credentials exist: WhatsApp when its
   // template is approved, else DLT SMS. Undefined until a clock clears —

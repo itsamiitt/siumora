@@ -37,6 +37,7 @@ import {
 } from "../lib/auth.ts";
 import { setOrderStatus } from "../lib/invoicing.ts";
 import { isUniqueViolation } from "../lib/pg-errors.ts";
+import { shipmentInputFor } from "./shipping.ts";
 
 /**
  * Orders, returns and delivery outcomes.
@@ -495,7 +496,44 @@ export async function registerOrderRoutes(server: FastifyInstance) {
         })
         .returning();
 
-      return { ok: true, return: created };
+      // Reverse pickup, booked the moment the return is approved (plan W1).
+      // Best-effort on purpose: the approval stands either way — a courier
+      // hiccup must not refuse a return the policy already granted, so a
+      // failure is logged and the pickup is booked again from the panel.
+      let reversePickup: "booked" | "not_booked" = "not_booked";
+      if (server.shipping) {
+        const input = shipmentInputFor(
+          {
+            number: `${order.number}-R`,
+            placedAt: new Date(),
+            address: order.address,
+            paymentMethod: "prepaid",
+            subtotal: lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0),
+            lines,
+          },
+          { pickupLocation: server.config.shiprocketPickupLocation ?? "Primary" },
+        );
+        if (!("error" in input)) {
+          const booked = await server.shipping.createReturn(input);
+          if (booked.ok) {
+            await server.db
+              .update(schema.returnRequests)
+              .set({
+                shiprocketReturnId: booked.orderId,
+                shiprocketShipmentId: booked.shipmentId,
+              })
+              .where(eq(schema.returnRequests.id, created!.id));
+            reversePickup = "booked";
+          } else {
+            request.log?.warn?.(
+              { orderNumber: order.number, error: booked.error },
+              "reverse pickup not booked — book it from the courier panel",
+            );
+          }
+        }
+      }
+
+      return { ok: true, return: created, reversePickup };
     } catch (error) {
       // The partial unique index refuses a second open return on one order,
       // which would otherwise refund the same piece twice.
