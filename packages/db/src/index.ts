@@ -24,6 +24,7 @@ export * from "./tracking-repository.ts";
 export * from "./remittance-repository.ts";
 export * from "./privacy-repository.ts";
 export * from "./audit-repository.ts";
+export * from "./settings-repository.ts";
 export * from "./notification-repository.ts";
 export * from "./totp-repository.ts";
 export { createTestDatabase, type TestDatabase } from "./testing.ts";

@@ -69,3 +69,28 @@ test("still takes a deposit from a trusted customer at high risk", () => {
   const decision = evaluateCod(input({ rtoRisk: "high", successfulOrders: 9 }));
   assert.equal(decision.verification, "partial-payment");
 });
+
+test("runtime limits override the compiled caps", () => {
+  // The settings table drives these in production (eng review 5A) — the weekly
+  // RTO review moves the cap without a deploy.
+  const capped = evaluateCod(
+    input({ subtotal: 150000, limits: { maxOrder: 100000 } }),
+  );
+  assert.equal(capped.available, false);
+  assert.match(capped.reason ?? "", /over ₹1,000/);
+
+  const raisedMin = evaluateCod(
+    input({ subtotal: 60000, limits: { minOrder: 100000 } }),
+  );
+  assert.equal(raisedMin.available, false);
+  assert.match(raisedMin.reason ?? "", /under ₹1,000/);
+
+  const customFee = evaluateCod(input({ limits: { fee: 9900 } }));
+  assert.equal(customFee.available, true);
+  assert.equal(customFee.fee, 9900);
+});
+
+test("absent limits leave the defaults exactly as compiled", () => {
+  const decision = evaluateCod(input({ subtotal: 2_000_000, limits: {} }));
+  assert.match(decision.reason ?? "", /over ₹10,000/);
+});

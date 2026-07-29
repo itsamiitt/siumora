@@ -603,6 +603,22 @@ export const pincodeServiceability = pgTable("pincode_serviceability", {
   rtoRateBps: integer("rto_rate_bps").notNull().default(0),
 });
 
+/**
+ * Runtime-changeable operational settings (eng review 5A).
+ *
+ * One mechanism for anything that must change without a deploy — the payments
+ * kill-switch and the COD caps live here. A dumb key/value store on purpose:
+ * the typed registry, defaults and validation live in the application
+ * (`settings-repository.ts`), where they are testable.
+ */
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const productsRelations = relations(products, ({ many }) => ({
   variants: many(variants),
   reviews: many(reviews),

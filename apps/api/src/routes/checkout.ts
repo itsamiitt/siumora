@@ -144,11 +144,19 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
       pincodeRtoRate: service ? service.rtoRateBps / 10_000 : undefined,
     });
 
+    const limits = await server.settings.get();
     const cod = evaluateCod({
       subtotal,
       pincodeCodServiceable: service?.codAvailable ?? false,
       rtoRisk: risk.risk,
       successfulOrders: signals.successfulOrders,
+      // The caps are an operational dial (settings table, eng review 5A) — the
+      // weekly RTO review moves them without a deploy.
+      limits: {
+        minOrder: limits.codMinOrder,
+        maxOrder: limits.codMaxOrder,
+        fee: limits.codFee,
+      },
     });
 
     return {
@@ -164,6 +172,18 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
   });
 
   server.post("/checkout", async (request, reply) => {
+    // The kill-switch (settings table, eng review 5A). Server-side, before the
+    // idempotency wrapper: a paused checkout must refuse to create the order at
+    // all, not record one that nobody can pay for. The storefront renders the
+    // paused page from the same flag; this is the enforcement behind it.
+    const runtime = await server.settings.get();
+    if (!runtime.paymentsEnabled) {
+      return reply.code(503).send({
+        error: "payments_paused",
+        message: "Checkout is paused right now. Nothing was charged.",
+      });
+    }
+
     const body = checkoutSchema.parse(request.body);
     const key = request.headers["idempotency-key"];
 
@@ -211,6 +231,11 @@ export async function registerCheckoutRoutes(server: FastifyInstance) {
             pincodeCodServiceable: service?.codAvailable ?? false,
             rtoRisk: risk.risk,
             successfulOrders: signals.successfulOrders,
+            limits: {
+              minOrder: runtime.codMinOrder,
+              maxOrder: runtime.codMaxOrder,
+              fee: runtime.codFee,
+            },
           });
           if (!cod.available) {
             return {

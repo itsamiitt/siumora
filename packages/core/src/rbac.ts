@@ -34,7 +34,9 @@ export type Permission =
   /** See and complete data-principal requests, including erasure. */
   | "privacy:write"
   /** Read the audit log. */
-  | "audit:read";
+  | "audit:read"
+  /** Flip the payments kill-switch and move the COD caps. */
+  | "settings:write";
 
 /**
  * The grants, written out per role rather than as a hierarchy.
@@ -57,6 +59,9 @@ const GRANTS: Record<Role, readonly Permission[]> = {
     // being on a list somebody forgot to prune.
     "privacy:write",
     "audit:read",
+    // The kill-switch stops revenue and the COD caps move money exposure —
+    // owner-grade levers, not everyday ops.
+    "settings:write",
   ],
 };
 
@@ -136,7 +141,8 @@ export type AuditAction =
   | "privacy.erase"
   | "privacy.refuse"
   | "gst.export"
-  | "auth.admin_signin";
+  | "auth.admin_signin"
+  | "settings.update";
 
 export const AUDIT_ACTIONS: readonly AuditAction[] = [
   "order.status",
@@ -146,6 +152,7 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   "privacy.refuse",
   "gst.export",
   "auth.admin_signin",
+  "settings.update",
 ];
 
 export function isAuditAction(value: string): value is AuditAction {
@@ -160,5 +167,6 @@ export const ACTION_PERMISSION: Record<AuditAction, Permission> = {
   "privacy.erase": "privacy:write",
   "privacy.refuse": "privacy:write",
   "gst.export": "gst:read",
+  "settings.update": "settings:write",
   "auth.admin_signin": "metrics:read",
 };

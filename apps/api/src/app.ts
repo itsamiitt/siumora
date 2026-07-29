@@ -22,8 +22,10 @@ import { registerGstRoutes } from "./routes/gst.ts";
 import { registerRemittanceRoutes } from "./routes/remittance.ts";
 import { registerPrivacyRoutes } from "./routes/privacy.ts";
 import { registerTwoFactorRoutes } from "./routes/two-factor.ts";
+import { registerSettingsRoutes } from "./routes/settings.ts";
 import { registerWishlistRoutes } from "./routes/wishlist.ts";
 import { createRateLimiter, type RateLimiter } from "./lib/rate-limit.ts";
+import { createSettingsCache, type SettingsReader } from "./lib/settings.ts";
 
 export interface AppConfig {
   connectionString: string;
@@ -101,6 +103,12 @@ export interface AppConfig {
   trustProxy?: boolean;
   /** Injected in tests, where the real windows are too slow to exercise. */
   rateLimiter?: RateLimiter;
+  /**
+   * How long the settings cache serves a read before going back to the
+   * database. Tests pass 0 so a write in one test cannot leak a stale value
+   * into the next; production keeps the default 30 s.
+   */
+  settingsTtlMs?: number;
   logger?: boolean;
 }
 
@@ -123,6 +131,8 @@ declare module "fastify" {
     /** Derived once at boot. Undefined when no passphrase is configured. */
     totpKey: Buffer | undefined;
     rateLimiter: RateLimiter;
+    /** Cached runtime settings — the kill-switch and the COD caps. */
+    settings: SettingsReader;
   }
 }
 
@@ -172,6 +182,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
 
   server.decorate("db", db);
   server.decorate("config", config);
+  server.decorate("settings", createSettingsCache(db, config.settingsTtlMs));
   server.decorate("adminPhones", parseAdminPhones(config.adminPhones));
   server.decorate("adminRoles", parseAdminRoles(config.adminPhones));
   server.decorate("seller", { ...PLACEHOLDER_SELLER, ...config.seller });
@@ -288,6 +299,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
   });
 
   await registerAuthRoutes(server);
+  await registerSettingsRoutes(server);
   await registerCatalogRoutes(server);
   await registerCartRoutes(server);
   await registerCheckoutRoutes(server);

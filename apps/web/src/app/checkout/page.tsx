@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { calculateTotals, shippingFor } from "@siumora/core";
 import { Display, MicroLabel } from "@siumora/ui";
 
+import { api } from "@/lib/api";
 import { CheckoutForm } from "@/components/checkout-form";
 import { OrderSummary } from "@/components/order-summary";
 import { getCartLines } from "@/lib/cart-store";
@@ -17,7 +18,38 @@ export const metadata: Metadata = {
 };
 
 
+/**
+ * The paused state. The storefront keeps serving — browsing, bag and wishlist
+ * all stay open — only the payment step is switched off. The API refuses a
+ * paused checkout server-side too; this page is the honest explanation, not
+ * the enforcement.
+ */
+function CheckoutPaused() {
+  return (
+    <div className="mx-auto max-w-2xl px-5 py-24 text-center">
+      <Display as="h1" size="sm">
+        Checkout is paused
+      </Display>
+      <p className="mt-6 text-content-muted">
+        Payment is switched off right now — nothing can be charged. Your bag is
+        saved exactly as you left it, and browsing stays open. We will be back
+        shortly.
+      </p>
+      <p className="mt-10">
+        <Link href="/" className="transition-colors hover:text-accent-ink">
+          <MicroLabel>Back to the shop</MicroLabel>
+        </Link>
+      </p>
+    </div>
+  );
+}
+
 async function CheckoutPageContents() {
+  // Uncached read inside the Suspense boundary (the shell prerenders under
+  // Cache Components): the kill-switch must be visible without a rebuild.
+  const { paymentsEnabled } = await api().getStoreConfig();
+  if (!paymentsEnabled) return <CheckoutPaused />;
+
   const lines = await getCartLines();
   if (lines.length === 0) redirect("/cart");
 

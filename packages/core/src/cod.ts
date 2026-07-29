@@ -25,6 +25,20 @@ export interface CodDecision {
   readonly reason?: string;
 }
 
+/**
+ * Runtime overrides for the compiled defaults below.
+ *
+ * The caps are an operational dial — the weekly RTO review moves them without
+ * a deploy (eng review 5A) — so the API passes the settings-table values here.
+ * Absent fields fall back to the constants, which keeps this function pure and
+ * the defaults reviewable in one place.
+ */
+export interface CodLimits {
+  readonly minOrder?: number;
+  readonly maxOrder?: number;
+  readonly fee?: number;
+}
+
 export interface CodInput {
   /** Order value in paise, tax-inclusive. */
   readonly subtotal: number;
@@ -33,6 +47,7 @@ export interface CodInput {
   readonly rtoRisk: RtoRisk;
   /** Delivered orders this customer has already paid for. */
   readonly successfulOrders?: number;
+  readonly limits?: CodLimits;
 }
 
 /** COD is not offered below this value — the fee would exceed the margin. */
@@ -56,17 +71,25 @@ const UNAVAILABLE = {
   partialPayment: 0,
 } as const;
 
+/** Whole rupees for a reason string — "10,000", never paise. */
+function rupees(paise: number): string {
+  return Math.round(paise / 100).toLocaleString("en-IN");
+}
+
 export function evaluateCod(input: CodInput): CodDecision {
   const { subtotal, pincodeCodServiceable, rtoRisk, successfulOrders = 0 } = input;
+  const minOrder = input.limits?.minOrder ?? COD_MIN_ORDER;
+  const maxOrder = input.limits?.maxOrder ?? COD_MAX_ORDER;
+  const fee = input.limits?.fee ?? COD_FEE;
 
   if (!pincodeCodServiceable) {
     return { ...UNAVAILABLE, reason: "Not available for this pincode" };
   }
-  if (subtotal < COD_MIN_ORDER) {
-    return { ...UNAVAILABLE, reason: "Not available on orders under ₹499" };
+  if (subtotal < minOrder) {
+    return { ...UNAVAILABLE, reason: `Not available on orders under ₹${rupees(minOrder)}` };
   }
-  if (subtotal > COD_MAX_ORDER) {
-    return { ...UNAVAILABLE, reason: "Not available on orders over ₹10,000" };
+  if (subtotal > maxOrder) {
+    return { ...UNAVAILABLE, reason: `Not available on orders over ₹${rupees(maxOrder)}` };
   }
 
   // High risk is not refused outright — a deposit converts it into a
@@ -74,7 +97,7 @@ export function evaluateCod(input: CodInput): CodDecision {
   if (rtoRisk === "high") {
     return {
       available: true,
-      fee: COD_FEE,
+      fee,
       verification: "partial-payment",
       partialPayment: COD_PARTIAL_PAYMENT,
     };
@@ -84,7 +107,7 @@ export function evaluateCod(input: CodInput): CodDecision {
 
   return {
     available: true,
-    fee: trusted ? 0 : COD_FEE,
+    fee: trusted ? 0 : fee,
     // A trusted repeat buyer has already proven intent, so the OTP step is
     // friction with nothing to catch.
     verification: rtoRisk === "medium" && !trusted ? "otp" : "none",

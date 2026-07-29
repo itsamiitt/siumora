@@ -46,13 +46,16 @@ before(async () => {
     // would throttle the suite against itself after the second sign-in. The
     // limits are exercised deliberately below, on an app built for it.
     rateLimiter: createRateLimiter([]),
+    // No caching between tests: a settings write in one test must never serve
+    // stale into the next after beforeEach clears the table.
+    settingsTtlMs: 0,
   });
 });
 
 beforeEach(async () => {
   if (!url) return;
   await app.pool.query(
-    "TRUNCATE audit_log; DELETE FROM admin_totp; DELETE FROM notifications; DELETE FROM notification_preferences; DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM cod_remittances; DELETE FROM privacy_requests; DELETE FROM tracking_events; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
+    "TRUNCATE audit_log; DELETE FROM settings; DELETE FROM admin_totp; DELETE FROM notifications; DELETE FROM notification_preferences; DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM cod_remittances; DELETE FROM privacy_requests; DELETE FROM tracking_events; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
   );
   await seed(testDb!.url);
 });
@@ -2450,6 +2453,167 @@ apiTest("refuses a customer-driven transition when the courier simulation is off
     await noSim.server.close();
     await noSim.pool.end();
   }
+});
+
+// ── Runtime settings and the kill-switch (eng review 5A) ──────
+
+apiTest("serves the public config, uncacheable", async () => {
+  const response = await app.server.inject({ method: "GET", url: "/config" });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(json(response).paymentsEnabled, true);
+  // A kill-switch behind a cache TTL is not a kill-switch.
+  assert.equal(response.headers["cache-control"], "no-store");
+});
+
+apiTest("the kill-switch pauses checkout and flips back without a restart", async () => {
+  const owner = await signIn(OPERATOR_PHONE);
+
+  const off = await app.server.inject({
+    method: "PATCH",
+    url: "/admin/settings",
+    headers: owner.headers,
+    payload: { key: "payments_enabled", value: false },
+  });
+  assert.equal(off.statusCode, 200);
+
+  // Visible immediately on this instance — the write invalidates the cache.
+  const config = json(await app.server.inject({ method: "GET", url: "/config" }));
+  assert.equal(config.paymentsEnabled, false);
+
+  // The enforcement, not just the page: a paused checkout refuses to create
+  // the order at all.
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const refused = await app.server.inject({
+    method: "POST",
+    url: "/checkout",
+    payload: {
+      cartId,
+      address: ADDRESS,
+      paymentMethod: "upi",
+      eventId: crypto.randomUUID(),
+    },
+  });
+  assert.equal(refused.statusCode, 503);
+  assert.equal(json(refused).error, "payments_paused");
+
+  const on = await app.server.inject({
+    method: "PATCH",
+    url: "/admin/settings",
+    headers: owner.headers,
+    payload: { key: "payments_enabled", value: true },
+  });
+  assert.equal(on.statusCode, 200);
+
+  const accepted = await app.server.inject({
+    method: "POST",
+    url: "/checkout",
+    payload: {
+      cartId,
+      address: ADDRESS,
+      paymentMethod: "upi",
+      eventId: crypto.randomUUID(),
+    },
+  });
+  assert.equal(accepted.statusCode, 200);
+
+  // Both pulls of the lever are on the record, with who pulled it.
+  const entries = await app.pool.query(
+    "SELECT actor_phone, subject FROM audit_log WHERE action = 'settings.update'",
+  );
+  assert.equal(entries.rows.length, 2);
+  assert.equal(entries.rows[0].subject, "payments_enabled");
+  assert.equal(entries.rows[0].actor_phone, OPERATOR_PHONE);
+});
+
+apiTest("settings are owner levers, not public ones", async () => {
+  const anonymous = await app.server.inject({
+    method: "PATCH",
+    url: "/admin/settings",
+    payload: { key: "payments_enabled", value: false },
+  });
+  assert.equal(anonymous.statusCode, 401);
+
+  const shopper = await signIn("9812345678");
+  const refused = await app.server.inject({
+    method: "PATCH",
+    url: "/admin/settings",
+    headers: shopper.headers,
+    payload: { key: "payments_enabled", value: false },
+  });
+  assert.equal(refused.statusCode, 403);
+
+  // Neither refusal moved the switch.
+  const config = json(await app.server.inject({ method: "GET", url: "/config" }));
+  assert.equal(config.paymentsEnabled, true);
+});
+
+apiTest("refuses a nonsense setting at the boundary", async () => {
+  const owner = await signIn(OPERATOR_PHONE);
+
+  const unknown = await app.server.inject({
+    method: "PATCH",
+    url: "/admin/settings",
+    headers: owner.headers,
+    payload: { key: "free_money", value: true },
+  });
+  assert.equal(unknown.statusCode, 400);
+  assert.equal(json(unknown).error, "invalid_setting");
+
+  const floorAboveCap = await app.server.inject({
+    method: "PATCH",
+    url: "/admin/settings",
+    headers: owner.headers,
+    payload: { key: "cod_min_order", value: 600000 },
+  });
+  assert.equal(floorAboveCap.statusCode, 400);
+  assert.match(json(floorAboveCap).message, /must not exceed/);
+});
+
+apiTest("the COD cap is a runtime dial, not a compile-time constant", async () => {
+  const owner = await signIn(OPERATOR_PHONE);
+
+  // Default cap ₹5,000: a ₹1,990 order gets COD in a serviceable pincode.
+  const before = await newCartWith("SIU-PS-GLD");
+  const withCod = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout/quote",
+      payload: { cartId: before.cartId, pincode: "400001", phone: ADDRESS.phone },
+    }),
+  );
+  assert.equal(withCod.cod.available, true);
+
+  // Cap lowered to ₹1,000 — the same order loses COD, no deploy involved.
+  await app.server.inject({
+    method: "PATCH",
+    url: "/admin/settings",
+    headers: owner.headers,
+    payload: { key: "cod_max_order", value: 100000 },
+  });
+
+  const capped = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout/quote",
+      payload: { cartId: before.cartId, pincode: "400001", phone: ADDRESS.phone },
+    }),
+  );
+  assert.equal(capped.cod.available, false);
+  assert.match(capped.cod.reason, /over ₹1,000/);
+
+  // And the order path re-derives the same refusal server-side.
+  const codOrder = await app.server.inject({
+    method: "POST",
+    url: "/checkout",
+    payload: {
+      cartId: before.cartId,
+      address: ADDRESS,
+      paymentMethod: "cod",
+      eventId: crypto.randomUUID(),
+    },
+  });
+  assert.notEqual(codOrder.statusCode, 200);
 });
 
 apiTest("will not let the application rewrite its own log", async () => {

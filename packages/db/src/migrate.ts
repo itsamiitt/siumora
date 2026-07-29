@@ -650,6 +650,21 @@ CREATE TABLE admin_totp (
 ALTER TABLE sessions ADD COLUMN two_factor_at timestamptz;
 `,
   },
+  {
+    id: "0013_settings",
+    sql: `
+-- Runtime-changeable operational settings (eng review 5A). One mechanism for
+-- anything that must change without a deploy: the payments kill-switch and the
+-- COD caps. Deliberately a dumb key/value table — the typed registry, the
+-- defaults and the validation live in the application where they are testable,
+-- and an absent row means "use the compiled default".
+CREATE TABLE settings (
+  key text PRIMARY KEY,
+  value jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+`,
+  },
 ];
 
 /**

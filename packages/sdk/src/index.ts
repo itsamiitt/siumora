@@ -534,6 +534,20 @@ export class SiumoraClient {
       cache: "no-store",
     });
   }
+
+  /**
+   * Public runtime flags — today just the payments kill-switch.
+   *
+   * Never cached: the checkout page reads this per request, and a paused
+   * checkout served from a cache is a kill-switch that does not kill.
+   */
+  async getStoreConfig(): Promise<StoreConfig> {
+    return this.request("GET", "/config", undefined, { cache: "no-store" });
+  }
+}
+
+export interface StoreConfig {
+  readonly paymentsEnabled: boolean;
 }
 
 /**
