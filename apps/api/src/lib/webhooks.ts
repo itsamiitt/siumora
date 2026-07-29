@@ -62,6 +62,15 @@ export function verifyCourierSignature(
   return verifyRazorpaySignature(rawBody, signature, secret);
 }
 
+/** BSP delivery receipts, authenticated the same way the courier's are. */
+export function verifyMessagingSignature(
+  rawBody: string,
+  signature: string | undefined,
+  secret: string | undefined,
+): { ok: true } | { ok: false; reason: string } {
+  return verifyRazorpaySignature(rawBody, signature, secret);
+}
+
 /** Sign a payload — used by tests and by any outbound webhook we send. */
 export function sign(rawBody: string, secret: string): string {
   return createHmac("sha256", secret).update(rawBody).digest("hex");

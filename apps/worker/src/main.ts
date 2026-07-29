@@ -1,6 +1,6 @@
 import { connectionStringFromEnv, createDb, createPool } from "@siumora/db";
+import { createTransport } from "@siumora/messaging";
 
-import { unconfiguredTransport } from "./messages.ts";
 import { configuredDestinations, httpTransport } from "./transport.ts";
 import { runWorker } from "./worker.ts";
 
@@ -49,11 +49,17 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   });
 }
 
-// No WhatsApp or SMS provider is wired up yet — plan/06 needs a BSP account and
-// a DLT registration, neither of which exists. The queue still drains: every
-// message is marked skipped with the channel it wanted, so the gap between
-// orders and messages stays visible rather than looking like nothing happened.
-const messages = unconfiguredTransport();
+// Assembled from whatever credentials this environment holds — WhatsApp BSP,
+// MSG91 DLT SMS, Resend email (eng review 4A). With none configured the queue
+// still drains: every message is marked skipped with the channel it wanted, so
+// the gap between orders and messages stays visible rather than looking like
+// nothing happened.
+const messages = createTransport(process.env);
+console.log(
+  messages.channels.length > 0
+    ? `[worker] messaging via ${messages.channels.join(", ")}`
+    : "[worker] no messaging provider configured — queued messages will be marked skipped",
+);
 
 await runWorker(createDb(pool), httpTransport(transportConfig), {
   intervalMs: Number(process.env.WORKER_INTERVAL_MS ?? 15_000),

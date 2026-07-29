@@ -1,4 +1,5 @@
 import { connectionStringFromEnv } from "@siumora/db";
+import { createOtpSender } from "@siumora/messaging";
 
 import { buildApp } from "./app.ts";
 import { resolveAppEnv } from "./lib/env.ts";
@@ -10,6 +11,7 @@ import { startPaymentRecon } from "./lib/recon.ts";
  * set to "production" on staging deploys too.
  */
 const appEnv = resolveAppEnv();
+const otpSender = createOtpSender(process.env);
 
 /** Process entry point. Configuration comes from the environment only. */
 const { server, pool } = await buildApp({
@@ -29,9 +31,13 @@ const { server, pool } = await buildApp({
     : {}),
   courierWebhookSecret: process.env.COURIER_WEBHOOK_SECRET,
   adminPhones: process.env.ADMIN_PHONES,
-  // Flipped on once a WhatsApp/DLT template sender exists. Until then sign-in
-  // is either refused or, under OTP_ECHO, returns the code for development.
-  otpDeliveryConfigured: process.env.WHATSAPP_OTP_TEMPLATE !== undefined,
+  // Resolved per channel from whatever credentials exist: WhatsApp when its
+  // template is approved, else DLT SMS. Undefined until a clock clears —
+  // sign-in is then refused or, under OTP_ECHO, echoes the code in development.
+  ...(otpSender ? { otp: otpSender } : {}),
+  ...(process.env.MESSAGING_WEBHOOK_SECRET
+    ? { messagingWebhookSecret: process.env.MESSAGING_WEBHOOK_SECRET }
+    : {}),
   otpEcho: process.env.OTP_ECHO === "true",
   courierSimulation:
     process.env.COURIER_SIMULATION === "true" ||

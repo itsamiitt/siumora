@@ -15,7 +15,7 @@ import {
   type Channel,
 } from "@siumora/core";
 
-import type { SendOutcome } from "./transport.ts";
+import type { MessageTransport } from "@siumora/messaging";
 
 /**
  * Drain the notification outbox.
@@ -24,18 +24,13 @@ import type { SendOutcome } from "./transport.ts";
  * record, back off — but the failure modes differ enough to be worth their own
  * pass. A conversion that never arrives costs attribution; a delivery message
  * that never arrives costs a parcel.
+ *
+ * The transport contract and its provider clients live in
+ * `@siumora/messaging`, shared with the API's synchronous OTP send (eng
+ * review 4A) — re-exported here so existing imports keep working.
  */
 
-export interface MessageTransport {
-  /** Channels this environment actually has credentials for. */
-  readonly channels: readonly Channel[];
-  send(
-    channel: Channel,
-    recipient: string,
-    body: string,
-    context: { templateKey: string; dltTemplateId?: string },
-  ): Promise<SendOutcome & { providerMessageId?: string }>;
-}
+export { unconfiguredTransport, type MessageTransport } from "@siumora/messaging";
 
 export interface MessageDrainReport {
   readonly claimed: number;
@@ -177,18 +172,3 @@ async function sendOne(
   return { kind: "retry", error: lastError || "every channel refused" };
 }
 
-/**
- * The transport for an environment with no messaging credentials.
- *
- * Every send is skipped with a reason, which is what makes the outbox honest in
- * development: the rows are there, they say why nothing went, and the parity
- * between orders and messages is still visible.
- */
-export function unconfiguredTransport(): MessageTransport {
-  return {
-    channels: [],
-    async send(channel) {
-      return { kind: "permanent", error: `${channel} is not configured` };
-    },
-  };
-}

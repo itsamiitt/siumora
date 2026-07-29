@@ -200,6 +200,60 @@ export async function markNotificationSent(
     .where(eq(notifications.id, id));
 }
 
+export type DeliveryStatus = "delivered" | "read" | "failed";
+
+const DELIVERY_RANK: Record<string, number> = {
+  sent: 0,
+  delivered: 1,
+  read: 2,
+};
+
+/**
+ * Apply a provider delivery receipt (eng review 1A).
+ *
+ * Receipts retry and arrive out of order, so the update is a ranked
+ * transition, not an assignment: `read` never regresses to `delivered`, a
+ * replay is a no-op, and a receipt for a row that was never sent (or for an
+ * id nobody knows) changes nothing and says so. `failed` records the
+ * provider's post-acceptance failure — the paused-template case — with the
+ * reason, and only from a sent/delivered row.
+ */
+export async function applyDeliveryReceipt(
+  db: Database,
+  providerMessageId: string,
+  status: DeliveryStatus,
+  error?: string,
+): Promise<"updated" | "ignored" | "unknown"> {
+  const [row] = await db
+    .select({ id: notifications.id, status: notifications.status })
+    .from(notifications)
+    .where(eq(notifications.providerMessageId, providerMessageId));
+
+  if (!row) return "unknown";
+
+  const currentRank = DELIVERY_RANK[row.status];
+  if (currentRank === undefined) return "ignored"; // pending/skipped/failed rows never move on a receipt
+
+  if (status === "failed") {
+    await db
+      .update(notifications)
+      .set({
+        status: "failed",
+        ...(error ? { lastError: error.slice(0, 500) } : {}),
+      })
+      .where(eq(notifications.id, row.id));
+    return "updated";
+  }
+
+  if (DELIVERY_RANK[status]! <= currentRank) return "ignored";
+
+  await db
+    .update(notifications)
+    .set({ status })
+    .where(eq(notifications.id, row.id));
+  return "updated";
+}
+
 /** Nothing was configured to carry it. Not a failure to retry — a fact. */
 export async function markNotificationSkipped(
   db: Database,

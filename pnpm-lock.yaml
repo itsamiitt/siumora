@@ -26,6 +26,9 @@ importers:
       '@siumora/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@siumora/messaging':
+        specifier: workspace:*
+        version: link:../../packages/messaging
       fastify:
         specifier: ^5.10.0
         version: 5.10.0
@@ -109,6 +112,9 @@ importers:
       '@siumora/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@siumora/messaging':
+        specifier: workspace:*
+        version: link:../../packages/messaging
     devDependencies:
       '@siumora/config-ts':
         specifier: workspace:*
@@ -180,6 +186,22 @@ importers:
         version: 5.9.3
 
   packages/in-locale:
+    devDependencies:
+      '@siumora/config-ts':
+        specifier: workspace:*
+        version: link:../config-ts
+      '@types/node':
+        specifier: ^22.19.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/messaging:
+    dependencies:
+      '@siumora/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@siumora/config-ts':
         specifier: workspace:*

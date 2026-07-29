@@ -13,7 +13,8 @@
   "dependencies": {
     "@siumora/analytics": "workspace:*",
     "@siumora/core": "workspace:*",
-    "@siumora/db": "workspace:*"
+    "@siumora/db": "workspace:*",
+    "@siumora/messaging": "workspace:*"
   },
   "devDependencies": {
     "@siumora/config-ts": "workspace:*",

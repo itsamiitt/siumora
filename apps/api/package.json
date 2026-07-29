@@ -15,7 +15,8 @@
     "@siumora/core": "workspace:*",
     "@siumora/db": "workspace:*",
     "fastify": "^5.10.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@siumora/messaging": "workspace:*"
   },
   "devDependencies": {
     "@siumora/config-ts": "workspace:*",

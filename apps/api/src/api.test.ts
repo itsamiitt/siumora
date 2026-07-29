@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
 
-import { createTestDatabase, type TestDatabase } from "@siumora/db";
+import { createTestDatabase, enqueueNotification, type TestDatabase } from "@siumora/db";
 
 import { seed } from "../../../packages/db/src/seed.ts";
 
@@ -2732,6 +2732,222 @@ apiTest("a returned prepaid order is refunded once, never twice", async () => {
   } finally {
     await paid.server.close();
     await paid.pool.end();
+  }
+});
+
+// ── Messaging: the OTP channel and delivery receipts (4A, 1A) ─
+
+const MESSAGING_SECRET = "test_messaging_secret";
+
+apiTest("the sign-in code goes out synchronously on the resolved channel", async () => {
+  const sends: Array<{ phone: string; code: string }> = [];
+  const withOtp = await buildApp({
+    connectionString: testDb!.url,
+    rateLimiter: createRateLimiter([]),
+    settingsTtlMs: 0,
+    otp: {
+      channel: "whatsapp",
+      async send(phone, code) {
+        sends.push({ phone, code });
+        return { ok: true };
+      },
+    },
+  });
+  try {
+    const response = await withOtp.server.inject({
+      method: "POST",
+      url: "/auth/otp",
+      payload: { phone: "9812345001" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(json(response).delivery, "sent");
+    // No echo flag on this app — the code travels on the channel, never in
+    // the response.
+    assert.equal(json(response).code, undefined);
+    assert.equal(sends[0]?.phone, "9812345001");
+    assert.match(sends[0]?.code ?? "", /^\d{6}$/);
+  } finally {
+    await withOtp.server.close();
+    await withOtp.pool.end();
+  }
+});
+
+apiTest("a failing OTP channel is reported, not hidden", async () => {
+  const withOtp = await buildApp({
+    connectionString: testDb!.url,
+    rateLimiter: createRateLimiter([]),
+    settingsTtlMs: 0,
+    otp: {
+      channel: "sms",
+      async send() {
+        return { ok: false, error: "HTTP 500: provider down" };
+      },
+    },
+  });
+  try {
+    const response = await withOtp.server.inject({
+      method: "POST",
+      url: "/auth/otp",
+      payload: { phone: "9812345002" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(json(response).delivery, "send_failed");
+  } finally {
+    await withOtp.server.close();
+    await withOtp.pool.end();
+  }
+});
+
+apiTest("sign-in refuses honestly with no channel and no echo", async () => {
+  const bare = await buildApp({
+    connectionString: testDb!.url,
+    rateLimiter: createRateLimiter([]),
+    settingsTtlMs: 0,
+  });
+  try {
+    const response = await bare.server.inject({
+      method: "POST",
+      url: "/auth/otp",
+      payload: { phone: "9812345003" },
+    });
+
+    assert.equal(response.statusCode, 503);
+    assert.equal(json(response).error, "sign_in_unavailable");
+  } finally {
+    await bare.server.close();
+    await bare.pool.end();
+  }
+});
+
+apiTest("delivery receipts move a message to the truth, once, in order", async () => {
+  const msgApp = await buildApp({
+    connectionString: testDb!.url,
+    messagingWebhookSecret: MESSAGING_SECRET,
+    rateLimiter: createRateLimiter([]),
+    settingsTtlMs: 0,
+    otpEcho: true,
+  });
+  try {
+    // A message the worker already sent, with the provider's id on it.
+    const queued = await enqueueNotification(msgApp.db, {
+      eventKey: crypto.randomUUID(),
+      templateKey: "order_shipped",
+      recipient: "9876543210",
+      variables: {
+        name: "Asha",
+        orderNumber: "SIU-00042",
+        courier: "Bluedart",
+        trackingId: "BD42",
+      },
+    });
+    assert.equal(queued.queued, true);
+    await msgApp.pool.query(
+      "UPDATE notifications SET status = 'sent', provider_message_id = 'wamid.r1' WHERE id = $1",
+      [queued.id],
+    );
+
+    const receipt = (status: string, id = "wamid.r1") => {
+      const payload = JSON.stringify({ provider_message_id: id, status });
+      return msgApp.server.inject({
+        method: "POST",
+        url: "/webhooks/messaging",
+        headers: {
+          "x-messaging-signature": sign(payload, MESSAGING_SECRET),
+          "content-type": "application/json",
+        },
+        payload,
+      });
+    };
+
+    // sent → delivered → read, each step recorded.
+    assert.equal(json(await receipt("delivered")).result, "updated");
+    let { rows } = await msgApp.pool.query(
+      "SELECT status FROM notifications WHERE id = $1",
+      [queued.id],
+    );
+    assert.equal(rows[0].status, "delivered");
+
+    assert.equal(json(await receipt("read")).result, "updated");
+
+    // Replays and regressions are acknowledged and ignored — receipts arrive
+    // out of order and retry for days.
+    assert.equal(json(await receipt("delivered")).result, "ignored");
+    ({ rows } = await msgApp.pool.query(
+      "SELECT status FROM notifications WHERE id = $1",
+      [queued.id],
+    ));
+    assert.equal(rows[0].status, "read");
+
+    // An id nobody knows is acknowledged too, never a 4xx the BSP retries.
+    assert.equal(json(await receipt("delivered", "wamid.unknown")).result, "unknown");
+
+    // And a forged receipt is refused outright.
+    const forged = await msgApp.server.inject({
+      method: "POST",
+      url: "/webhooks/messaging",
+      headers: { "x-messaging-signature": "not-a-signature" },
+      payload: { provider_message_id: "wamid.r1", status: "read" },
+    });
+    assert.equal(forged.statusCode, 401);
+  } finally {
+    await msgApp.server.close();
+    await msgApp.pool.end();
+  }
+});
+
+apiTest("a post-acceptance failure receipt records the reason", async () => {
+  const msgApp = await buildApp({
+    connectionString: testDb!.url,
+    messagingWebhookSecret: MESSAGING_SECRET,
+    rateLimiter: createRateLimiter([]),
+    settingsTtlMs: 0,
+    otpEcho: true,
+  });
+  try {
+    const queued = await enqueueNotification(msgApp.db, {
+      eventKey: crypto.randomUUID(),
+      templateKey: "order_shipped",
+      recipient: "9876543211",
+      variables: {
+        name: "Riya",
+        orderNumber: "SIU-00043",
+        courier: "Bluedart",
+        trackingId: "BD43",
+      },
+    });
+    await msgApp.pool.query(
+      "UPDATE notifications SET status = 'sent', provider_message_id = 'wamid.f1' WHERE id = $1",
+      [queued.id],
+    );
+
+    const payload = JSON.stringify({
+      provider_message_id: "wamid.f1",
+      status: "failed",
+      error: "template paused by provider",
+    });
+    await msgApp.server.inject({
+      method: "POST",
+      url: "/webhooks/messaging",
+      headers: {
+        "x-messaging-signature": sign(payload, MESSAGING_SECRET),
+        "content-type": "application/json",
+      },
+      payload,
+    });
+
+    const { rows } = await msgApp.pool.query(
+      "SELECT status, last_error FROM notifications WHERE id = $1",
+      [queued.id],
+    );
+    // The paused-template case: visible as the outage it is, with the reason,
+    // instead of a wall of green "sent" rows.
+    assert.equal(rows[0].status, "failed");
+    assert.match(rows[0].last_error, /template paused/);
+  } finally {
+    await msgApp.server.close();
+    await msgApp.pool.end();
   }
 });
 

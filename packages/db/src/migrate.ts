@@ -682,6 +682,23 @@ CREATE INDEX orders_razorpay_order_idx ON orders(razorpay_order_id)
   WHERE razorpay_order_id IS NOT NULL;
 `,
   },
+  {
+    id: "0015_delivery_receipts",
+    sql: `
+-- Delivery truth (eng review 1A). "sent" only means the provider accepted the
+-- message; delivered/read are what the BSP's receipt webhook reports back, and
+-- they are what makes a paused template visible instead of a silent outage.
+ALTER TABLE notifications DROP CONSTRAINT notification_status_known;
+ALTER TABLE notifications ADD CONSTRAINT notification_status_known CHECK (
+  status IN ('pending', 'sending', 'sent', 'delivered', 'read', 'failed', 'skipped')
+);
+
+-- Receipts arrive keyed by the provider's message id.
+CREATE INDEX notification_provider_message_idx
+  ON notifications(provider_message_id)
+  WHERE provider_message_id IS NOT NULL;
+`,
+  },
 ];
 
 /**

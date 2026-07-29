@@ -64,10 +64,10 @@ export async function registerAuthRoutes(server: FastifyInstance) {
       });
     }
 
-    if (!server.config.otpDeliveryConfigured && server.config.otpEcho !== true) {
-      // No WhatsApp/DLT provider and no explicit development echo. Refusing is
-      // the honest answer: issuing a code nobody can receive would look like
-      // sign-in working and fail at the second step every time.
+    if (!server.otp && server.config.otpEcho !== true) {
+      // No approved messaging channel and no explicit development echo.
+      // Refusing is the honest answer: issuing a code nobody can receive would
+      // look like sign-in working and fail at the second step every time.
       return reply.code(503).send({
         error: "sign_in_unavailable",
         message: "Sign-in is not connected in this environment yet.",
@@ -113,14 +113,28 @@ export async function registerAuthRoutes(server: FastifyInstance) {
       now,
     });
 
-    // A provider send would go here. Until one is configured the code is
-    // surfaced in the response, and the response says so rather than letting a
-    // caller assume an SMS is on its way.
+    // Synchronous, in the request — the outbox polls every fifteen seconds
+    // and nobody waits fifteen seconds at a sign-in form. The channel was
+    // resolved at boot: WhatsApp when its template is approved, else DLT SMS.
+    let delivery: "sent" | "send_failed" | "not_configured" = "not_configured";
+    if (server.otp) {
+      const outcome = await server.otp.send(phone, issued.code);
+      delivery = outcome.ok ? "sent" : "send_failed";
+      if (!outcome.ok) {
+        // The caller can retry; the code stays valid. Loud in the log because
+        // a failing OTP channel is every sign-in on the site.
+        request.log?.error?.(
+          { channel: server.otp.channel, error: outcome.error },
+          "otp send failed",
+        );
+      }
+    }
+
     return {
       ok: true,
       maskedPhone: maskPhone(phone),
       expiresAt: issued.expiresAt.toISOString(),
-      delivery: server.config.otpDeliveryConfigured ? "sent" : "not_configured",
+      delivery,
       // Echoed only under the explicit development flag, never merely because
       // a provider happens to be missing.
       ...(server.config.otpEcho === true ? { code: issued.code } : {}),

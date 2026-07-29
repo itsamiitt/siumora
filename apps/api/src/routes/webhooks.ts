@@ -2,11 +2,15 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import { canTransition, type OrderStatus } from "@siumora/core";
-import { getOrderByNumber } from "@siumora/db";
+import { applyDeliveryReceipt, getOrderByNumber } from "@siumora/db";
 
 import { setOrderStatus } from "../lib/invoicing.ts";
 import { advance } from "./orders.ts";
-import { verifyCourierSignature, verifyRazorpaySignature } from "../lib/webhooks.ts";
+import {
+  verifyCourierSignature,
+  verifyMessagingSignature,
+  verifyRazorpaySignature,
+} from "../lib/webhooks.ts";
 
 /**
  * Inbound webhooks.
@@ -107,6 +111,45 @@ export async function registerWebhookRoutes(server: FastifyInstance) {
     });
 
     return { ok: true, orderNumber, status: updated.status };
+  });
+
+  /**
+   * BSP delivery receipts (eng review 1A).
+   *
+   * "sent" only means the provider accepted the message. This is where
+   * delivered/read/failed arrive, keyed by the provider's message id stored at
+   * send time — and it is what makes a paused template look like the outage it
+   * is instead of a wall of green "sent" rows.
+   */
+  server.post("/webhooks/messaging", async (request, reply) => {
+    const raw = (request as unknown as RawBodyRequest).rawBody ?? "";
+    const signature = request.headers["x-messaging-signature"];
+
+    const verified = verifyMessagingSignature(
+      raw,
+      typeof signature === "string" ? signature : undefined,
+      server.config.messagingWebhookSecret,
+    );
+    if (!verified.ok) return reply.code(401).send({ error: "invalid_signature" });
+
+    const body = z
+      .object({
+        provider_message_id: z.string(),
+        status: z.enum(["delivered", "read", "failed"]),
+        error: z.string().optional(),
+      })
+      .parse(request.body);
+
+    const result = await applyDeliveryReceipt(
+      server.db,
+      body.provider_message_id,
+      body.status,
+      body.error,
+    );
+
+    // Unknown ids and replays are acknowledged, not errored: receipts retry,
+    // and a 4xx would make the BSP hammer a receipt nobody can route.
+    return { ok: true, result };
   });
 
   server.post("/webhooks/courier", async (request, reply) => {

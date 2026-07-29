@@ -24,6 +24,7 @@ import { registerPrivacyRoutes } from "./routes/privacy.ts";
 import { registerTwoFactorRoutes } from "./routes/two-factor.ts";
 import { registerSettingsRoutes } from "./routes/settings.ts";
 import { registerWishlistRoutes } from "./routes/wishlist.ts";
+import type { OtpSender } from "@siumora/messaging";
 import { createRateLimiter, type RateLimiter } from "./lib/rate-limit.ts";
 import { createRazorpayClient, type RazorpayClient } from "./lib/razorpay.ts";
 import { createSettingsCache, type SettingsReader } from "./lib/settings.ts";
@@ -58,8 +59,15 @@ export interface AppConfig {
    * point always passes the resolved value.
    */
   appEnv?: AppEnv;
-  /** Set once a WhatsApp/DLT sender is wired up. */
-  otpDeliveryConfigured?: boolean;
+  /**
+   * The synchronous sign-in OTP sender, resolved per channel (WhatsApp when
+   * the template is approved, else DLT SMS — eng review). Undefined until a
+   * messaging clock clears; sign-in then refuses unless `otpEcho` covers
+   * development.
+   */
+  otp?: OtpSender;
+  /** Authenticates BSP delivery-receipt webhooks. */
+  messagingWebhookSecret?: string;
   /** Return the code in the response. Development only; refused in production. */
   otpEcho?: boolean;
   /**
@@ -144,6 +152,8 @@ declare module "fastify" {
     settings: SettingsReader;
     /** Undefined until the provider is configured — the pre-KYC state. */
     payments: RazorpayClient | undefined;
+    /** Undefined until a messaging channel's regulatory clock clears. */
+    otp: OtpSender | undefined;
   }
 }
 
@@ -194,6 +204,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
   server.decorate("db", db);
   server.decorate("config", config);
   server.decorate("settings", createSettingsCache(db, config.settingsTtlMs));
+  server.decorate("otp", config.otp);
   server.decorate(
     "payments",
     config.payments ??
