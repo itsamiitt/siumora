@@ -4,10 +4,19 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./schema": "./src/schema.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "require": "./dist/index.cjs"
+    },
+    "./schema": {
+      "types": "./src/schema.ts",
+      "import": "./src/schema.ts",
+      "require": "./dist/schema.cjs"
+    }
   },
   "scripts": {
+    "build": "tsup src/index.ts src/schema.ts --format cjs --sourcemap --clean --target node22",
     "typecheck": "tsc --noEmit",
     "migrate": "node --experimental-strip-types src/cli-migrate.ts",
     "seed": "node --experimental-strip-types src/seed.ts",

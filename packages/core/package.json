@@ -4,12 +4,29 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./auth": "./src/auth.ts",
-    "./facets": "./src/facets.ts",
-    "./gstin": "./src/gstin.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "require": "./dist/index.cjs"
+    },
+    "./auth": {
+      "types": "./src/auth.ts",
+      "import": "./src/auth.ts",
+      "require": "./dist/auth.cjs"
+    },
+    "./facets": {
+      "types": "./src/facets.ts",
+      "import": "./src/facets.ts",
+      "require": "./dist/facets.cjs"
+    },
+    "./gstin": {
+      "types": "./src/gstin.ts",
+      "import": "./src/gstin.ts",
+      "require": "./dist/gstin.cjs"
+    }
   },
   "scripts": {
+    "build": "tsup src/index.ts src/auth.ts src/facets.ts src/gstin.ts --format cjs --sourcemap --clean --target node22",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types src/*.test.ts"
   },

@@ -199,9 +199,18 @@ export async function seed(databaseUrl?: string) {
   }
 }
 
+// Promise chain, not top-level await: the barrel re-exports this file, so it
+// lands in the CJS dist bundle, where TLA cannot exist. The guard means the
+// chain only ever runs when invoked directly (`pnpm --filter=@siumora/db seed`).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const result = await seed();
-  console.log(
-    `seeded ${result.products} products, ${result.collections} collections, ${result.pincodes} pincodes`,
-  );
+  seed()
+    .then((result) => {
+      console.log(
+        `seeded ${result.products} products, ${result.collections} collections, ${result.pincodes} pincodes`,
+      );
+    })
+    .catch((error: unknown) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
 }

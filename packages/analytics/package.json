@@ -4,11 +4,23 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./client": "./src/client.ts",
-    "./server": "./src/server.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "require": "./dist/index.cjs"
+    },
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts"
+    },
+    "./server": {
+      "types": "./src/server.ts",
+      "import": "./src/server.ts",
+      "require": "./dist/server.cjs"
+    }
   },
   "scripts": {
+    "build": "tsup src/index.ts src/server.ts --format cjs --sourcemap --clean --target node22",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types src/*.test.ts"
   },
