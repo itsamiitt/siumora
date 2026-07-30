@@ -41,3 +41,4 @@ test-results/
 .claude/skills/gstack/make-pdf/dist/
 .claude/skills/gstack/bin/gstack-global-discover
 .claude/skills/gstack/.gbrain/
+.next-e2e/

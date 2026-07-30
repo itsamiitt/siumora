@@ -49,6 +49,17 @@ test("an explicit courier simulation refuses to boot in production", () => {
   );
 });
 
+// Same class as the OTP echo: an unlimited production API is an open one.
+test("disabled rate limits refuse to boot in production", () => {
+  assert.throws(
+    () => assertBootSafety({ appEnv: "production", disableRateLimits: true }),
+    /DISABLE_RATE_LIMITS/,
+  );
+  assert.doesNotThrow(() =>
+    assertBootSafety({ appEnv: "development", disableRateLimits: true }),
+  );
+});
+
 test("a clean production config boots", () => {
   assert.doesNotThrow(() => assertBootSafety({ appEnv: "production" }));
 });

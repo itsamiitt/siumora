@@ -1,4 +1,5 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import { ZodError } from "zod";
 
 import {
   PLACEHOLDER_SELLER,
@@ -129,6 +130,12 @@ export interface AppConfig {
   /** Injected in tests, where the real windows are too slow to exercise. */
   rateLimiter?: RateLimiter;
   /**
+   * E2E only: the whole suite arrives from 127.0.0.1 in seconds, which is
+   * exactly what the shipped limits exist to refuse. Refused at boot in
+   * production.
+   */
+  disableRateLimits?: boolean;
+  /**
    * How long the settings cache serves a read before going back to the
    * database. Tests pass 0 so a write in one test cannot leak a stale value
    * into the next; production keeps the default 30 s.
@@ -172,7 +179,10 @@ declare module "fastify" {
  * be tested without a database — they must run before any pool is created.
  */
 export function assertBootSafety(
-  config: Pick<AppConfig, "appEnv" | "otpEcho" | "courierSimulation">,
+  config: Pick<
+    AppConfig,
+    "appEnv" | "otpEcho" | "courierSimulation" | "disableRateLimits"
+  >,
 ): void {
   const appEnv = config.appEnv ?? "development";
   if (config.otpEcho && appEnv === "production") {
@@ -189,6 +199,14 @@ export function assertBootSafety(
     // the explicit override too.
     throw new Error(
       "COURIER_SIMULATION must not be enabled in production — it lets anyone drive courier transitions on their own order.",
+    );
+  }
+  if (config.disableRateLimits && appEnv === "production") {
+    // The limiter is what stands between the OTP endpoint and a phone-number
+    // enumeration; an unlimited production API is not a faster API, it is an
+    // open one.
+    throw new Error(
+      "DISABLE_RATE_LIMITS must not be set in production.",
     );
   }
 }
@@ -311,7 +329,9 @@ export async function buildApp(config: AppConfig): Promise<App> {
   // Per-origin limits on the endpoints that cost money to serve. Registered
   // after CORS so a pre-flight is answered rather than throttled, and before
   // the routes so a refusal never reaches the database.
-  const limiter = config.rateLimiter ?? createRateLimiter();
+  const limiter =
+    config.rateLimiter ??
+    (config.disableRateLimits ? createRateLimiter([]) : createRateLimiter());
   server.decorate("rateLimiter", limiter);
 
   server.addHook("onRequest", async (request, reply) => {
@@ -333,6 +353,18 @@ export async function buildApp(config: AppConfig): Promise<App> {
   });
 
   server.setErrorHandler((error: FastifyError, request, reply) => {
+    // A payload that failed validation is the caller's mistake, not an
+    // internal error — a 500 here pages somebody for a typo'd state code.
+    if (error instanceof ZodError) {
+      return reply.code(400).send({
+        error: "invalid_request",
+        message: error.issues
+          .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+          .join("; ")
+          .slice(0, 500),
+      });
+    }
+
     request.log?.error?.(error);
     // Never return the raw message: it can carry SQL, table names and
     // connection details straight to the caller.

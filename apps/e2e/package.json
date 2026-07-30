@@ -1,0 +1,19 @@
+{
+  "name": "@siumora/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "node --experimental-strip-types setup/prepare-db.ts && playwright test"
+  },
+  "dependencies": {
+    "@siumora/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@siumora/config-ts": "workspace:*",
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3"
+  }
+}

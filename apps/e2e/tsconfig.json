@@ -1,0 +1,9 @@
+{
+  "extends": "@siumora/config-ts/base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["setup/**/*.ts", "tests/**/*.ts", "playwright.config.ts"]
+}

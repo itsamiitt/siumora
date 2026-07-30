@@ -154,7 +154,8 @@ apiTest("rejects a malformed pincode rather than querying with it", async () => 
     method: "GET",
     url: "/pincodes/12",
   });
-  assert.equal(response.statusCode, 500);
+  assert.equal(response.statusCode, 400);
+  assert.equal(json(response).error, "invalid_request");
 });
 
 apiTest("reports an unknown pincode as not serviceable", async () => {
@@ -1461,7 +1462,8 @@ apiTest("refuses a GSTIN whose check digit is wrong", async () => {
     },
   });
 
-  assert.equal(response.statusCode, 500);
+  assert.equal(response.statusCode, 400);
+  assert.equal(json(response).error, "invalid_request");
   const stored = await app.pool.query("SELECT count(*)::int AS n FROM orders");
   assert.equal(stored.rows[0].n, 0);
 });
@@ -1563,7 +1565,8 @@ apiTest("refuses a malformed period rather than guessing one", async () => {
     url: "/admin/gstr1?period=2026-13",
     headers: operator.headers,
   });
-  assert.equal(response.statusCode, 500);
+  assert.equal(response.statusCode, 400);
+  assert.equal(json(response).error, "invalid_request");
 });
 
 apiTest("keeps the return away from a customer", async () => {
@@ -1872,7 +1875,8 @@ apiTest("refuses a batch with no rows rather than recording an empty one", async
     headers: operator.headers,
     payload: batch([]),
   });
-  assert.equal(response.statusCode, 500);
+  assert.equal(response.statusCode, 400);
+  assert.equal(json(response).error, "invalid_request");
 });
 
 apiTest("keeps the remittance desk away from a customer", async () => {

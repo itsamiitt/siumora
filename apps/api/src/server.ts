@@ -67,6 +67,8 @@ const { server, pool } = await buildApp({
     ...(process.env.SELLER_EMAIL ? { email: process.env.SELLER_EMAIL } : {}),
     ...(process.env.SELLER_PHONE ? { phone: process.env.SELLER_PHONE } : {}),
   },
+  // E2E only; the boot guard refuses it in production.
+  disableRateLimits: process.env.DISABLE_RATE_LIMITS === "true",
   // Cloudflare and the load balancer in plan/11 §1 both sit in front of this,
   // and behind either one the socket address is the proxy's — which would put
   // the whole internet in a single rate-limit bucket.

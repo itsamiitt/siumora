@@ -22,3 +22,4 @@ eng-reviewed 2026-07-29). Context for every row lives there.
 | hi-IN locale | ≥20% Hindi-locale traffic |
 | ONDC via TSP, marketplaces | Post-PMF |
 | GTM depth — run `/plan-ceo-review` on the launch plan | Before first paid-ad rupee (flagged by eng-review outside voice: success criteria had no acquisition mechanism; a one-paragraph launch channel now exists, the full strategy does not) |
+| Server-action flight stream drops "Connection closed." (~1-in-4 E2E runs on Windows `next start`, Next 16.2 canary; E2E recovers like a user — see `apps/e2e/tests/storefront.spec.ts` `addToBag`) | Reproduces on linux CI, or a Next upgrade lands, or it bites a real user |

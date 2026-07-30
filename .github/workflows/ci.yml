@@ -100,6 +100,23 @@ jobs:
       - name: Typecheck and test
         run: pnpm turbo run typecheck test
 
+      # The browser truth (plan 6A): a person can buy, the kill-switch reaches
+      # the page without a rebuild, the purchase rides the dataLayer once. The
+      # suite brings its own database, API and web server on its own ports.
+      - name: Install Playwright
+        run: pnpm --filter @siumora/e2e exec playwright install --with-deps chromium
+
+      - name: E2E
+        run: pnpm --filter @siumora/e2e test:e2e
+
+      - name: E2E traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces
+          path: apps/e2e/test-results/
+          if-no-files-found: ignore
+
       - name: API log
         if: failure()
         run: cat /tmp/api.log || true

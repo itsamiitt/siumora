@@ -78,7 +78,9 @@ export function CheckoutForm({
         pincode,
         address: addressLine,
         city,
-        stateCode,
+        // Only once chosen — an empty string is not a state code, and the
+        // API says so with a 400.
+        ...(stateCode ? { stateCode } : {}),
         // Sent so the API can tell whether this is the number the shopper
         // proved at sign-in — a verified number changes the COD terms.
         phone,

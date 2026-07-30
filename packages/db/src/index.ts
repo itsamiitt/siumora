@@ -18,6 +18,7 @@ export {
 
 export * from "./schema.ts";
 export { migrate, MIGRATIONS } from "./migrate.ts";
+export { seed, CATALOG } from "./seed.ts";
 export * from "./repositories.ts";
 export * from "./auth-repository.ts";
 export * from "./tracking-repository.ts";

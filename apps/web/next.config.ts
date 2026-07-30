@@ -65,6 +65,13 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   /**
+   * Overridable so the E2E suite's dev server gets its own build directory —
+   * two dev servers sharing one .next corrupt each other's caches, and the
+   * developer's own `next dev` must keep running while the suite does.
+   */
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
+
+  /**
    * Applied to every route.
    *
    * In `headers()` rather than middleware so they survive on statically
