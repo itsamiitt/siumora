@@ -142,7 +142,8 @@ export type AuditAction =
   | "privacy.refuse"
   | "gst.export"
   | "auth.admin_signin"
-  | "settings.update";
+  | "settings.update"
+  | "return.payout";
 
 export const AUDIT_ACTIONS: readonly AuditAction[] = [
   "order.status",
@@ -153,6 +154,7 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   "gst.export",
   "auth.admin_signin",
   "settings.update",
+  "return.payout",
 ];
 
 export function isAuditAction(value: string): value is AuditAction {
@@ -168,5 +170,7 @@ export const ACTION_PERMISSION: Record<AuditAction, Permission> = {
   "privacy.refuse": "privacy:write",
   "gst.export": "gst:read",
   "settings.update": "settings:write",
+  // Money out by hand rides the money desk, same as remittance in.
+  "return.payout": "remittance:write",
   "auth.admin_signin": "metrics:read",
 };

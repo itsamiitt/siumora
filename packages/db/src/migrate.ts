@@ -717,6 +717,17 @@ ALTER TABLE return_requests ADD COLUMN shiprocket_shipment_id text;
 ALTER TABLE return_requests ADD COLUMN reverse_awb_code text;
 `,
   },
+  {
+    id: "0017_cod_payout",
+    sql: `
+-- The COD manual payout rail (design doc, OV-2). A COD return has no capture
+-- to reverse, so the founder pays the customer's VPA by hand and records the
+-- payout reference here — money owed always has a record, and the reference's
+-- presence is the guard that stops the same return being paid twice.
+ALTER TABLE return_requests ADD COLUMN payout_reference text;
+ALTER TABLE return_requests ADD COLUMN payout_recorded_at timestamptz;
+`,
+  },
 ];
 
 /**

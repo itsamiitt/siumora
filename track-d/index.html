@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Siumora · Something given, something kept</title>
+<meta name="description" content="Demi-fine jewellery, made to be worn every day and given like it matters. Opening soon — ask to be told first." />
+<meta property="og:title" content="Siumora" />
+<meta property="og:description" content="Something given, something kept. Opening soon." />
+<meta name="robots" content="index,follow" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Jost:wght@300;500&display=swap" rel="stylesheet" />
+<style>
+  /* Tokens from brand-kit/03-colour-type/siumora-tokens.json — change the kit first. */
+  :root {
+    --ink: #1C1917;
+    --plate: #14110F;
+    --mulberry: #6B2942;
+    --blush: #EBDDD8;
+    --ivory: #F7F3EA;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--ivory);
+    color: var(--ink);
+    font-family: "Jost", system-ui, sans-serif;
+    font-weight: 300;
+    line-height: 1.7;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 3rem 1.5rem;
+  }
+  .mark {
+    width: 56px;
+    height: 56px;
+    margin-bottom: 2.5rem;
+  }
+  h1 {
+    font-family: "Cormorant Garamond", serif;
+    font-weight: 300;
+    font-size: clamp(2rem, 6vw, 3.4rem);
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+    text-indent: 0.34em; /* balances the tracked caps optically */
+  }
+  .line {
+    margin-top: 1.25rem;
+    font-family: "Cormorant Garamond", serif;
+    font-style: italic;
+    font-size: clamp(1.1rem, 3vw, 1.4rem);
+    color: var(--mulberry);
+  }
+  .body {
+    margin-top: 2rem;
+    max-width: 26rem;
+    font-size: 0.95rem;
+    color: color-mix(in srgb, var(--ink) 78%, var(--ivory));
+  }
+  .cta {
+    margin-top: 2.75rem;
+    display: inline-block;
+    background: var(--mulberry);
+    color: var(--ivory);
+    text-decoration: none;
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 1rem 2.25rem;
+  }
+  .cta:hover { background: color-mix(in srgb, var(--mulberry) 90%, black); }
+  .quiet {
+    margin-top: 1rem;
+    font-size: 0.75rem;
+    color: color-mix(in srgb, var(--ink) 55%, var(--ivory));
+  }
+  .quiet a { color: inherit; }
+  footer {
+    margin-top: 4rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--ink) 45%, var(--ivory));
+  }
+</style>
+</head>
+<body>
+  <!-- Petal & Kernel mark, drawn from the construction grid: circle at 0.5x,
+       kernel at 0.167x, stroke 0.0075x — mulberry kernel is the one accent. -->
+  <svg class="mark" viewBox="0 0 100 100" role="img" aria-label="Siumora mark">
+    <circle cx="50" cy="50" r="25" fill="none" stroke="var(--ink)" stroke-width="1.5" />
+    <circle cx="50" cy="25" r="16" fill="none" stroke="var(--ink)" stroke-width="1.5" />
+    <circle cx="75" cy="50" r="16" fill="none" stroke="var(--ink)" stroke-width="1.5" />
+    <circle cx="50" cy="75" r="16" fill="none" stroke="var(--ink)" stroke-width="1.5" />
+    <circle cx="25" cy="50" r="16" fill="none" stroke="var(--ink)" stroke-width="1.5" />
+    <circle cx="50" cy="50" r="8.35" fill="var(--mulberry)" />
+  </svg>
+
+  <h1>Siumora</h1>
+  <p class="line">Something given, something kept.</p>
+
+  <p class="body">
+    Demi-fine jewellery, made to be worn every day and given like it matters.
+    We are opening soon. Ask on WhatsApp and you will be told first — before
+    anyone else, and before anything sells out.
+  </p>
+
+  <!--
+    OPT-IN NUMBER (fill before publishing — the page must not ship a fake one):
+    · Replace 91XXXXXXXXXX below with a real number.
+    · Track D rule (design doc): this number must NEVER become the WhatsApp
+      Cloud API / WABA sender — registering it there deletes the consumer
+      account and every chat thread that is the demand evidence.
+    · Export every opt-in (name, number, timestamp, source) weekly into the
+      Postgres consent log, so DPDP export/erasure apply from day one.
+  -->
+  <a class="cta" href="https://wa.me/91XXXXXXXXXX?text=Tell%20me%20first%20when%20Siumora%20opens">
+    Tell me first — WhatsApp
+  </a>
+
+  <p class="quiet">
+    No WhatsApp? Write to <a href="mailto:hello@siumora.com">hello@siumora.com</a>
+    with “tell me first”.
+  </p>
+
+  <footer>Every piece leaves here wrapped as a gift</footer>
+</body>
+</html>

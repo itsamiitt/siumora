@@ -345,6 +345,9 @@ export const returnRequests = pgTable(
     shiprocketReturnId: text("shiprocket_return_id"),
     shiprocketShipmentId: text("shiprocket_shipment_id"),
     reverseAwbCode: text("reverse_awb_code"),
+    /** The manual COD payout's UPI/UTR reference — present means paid, once. */
+    payoutReference: text("payout_reference"),
+    payoutRecordedAt: timestamp("payout_recorded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("returns_order_idx").on(table.orderId)],

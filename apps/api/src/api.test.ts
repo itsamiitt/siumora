@@ -2923,6 +2923,84 @@ apiTest("an approved return books its reverse pickup", async () => {
   }
 });
 
+// ── The COD manual payout rail (design doc, OV-2) ─────────────
+
+apiTest("a COD return's payout is recorded once, with who recorded it", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const placed = await placeAndMove("cod", "SIU-PS-GLD", [
+    "processing",
+    "shipped",
+    "out_for_delivery",
+    "delivered",
+  ]);
+  await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/returns?key=${placed.accessKey}`,
+    payload: {
+      variantIds: [
+        (
+          await app.pool.query(
+            "SELECT variant_id FROM order_lines WHERE order_id = (SELECT id FROM orders WHERE number = $1)",
+            [placed.orderNumber],
+          )
+        ).rows[0].variant_id,
+      ],
+      reason: "size_or_fit",
+      resolution: "refund",
+      sealIntact: true,
+    },
+  });
+
+  // Nobody without the money desk records a payout.
+  const anonymous = await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/returns/payout`,
+    payload: { reference: "UTR123456789" },
+  });
+  assert.equal(anonymous.statusCode, 401);
+
+  const recorded = await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/returns/payout`,
+    headers: operator.headers,
+    payload: { reference: "UTR123456789" },
+  });
+  assert.equal(recorded.statusCode, 200);
+  assert.equal(json(recorded).return.payoutReference, "UTR123456789");
+
+  // Once. A second recording is refused, not overwritten — one parcel, one
+  // payout, and the first reference stands as the receipt.
+  const again = await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/returns/payout`,
+    headers: operator.headers,
+    payload: { reference: "UTR999999999" },
+  });
+  assert.equal(again.statusCode, 409);
+  assert.equal(json(again).error, "already_paid");
+
+  const entries = await app.pool.query(
+    "SELECT actor_phone, detail FROM audit_log WHERE action = 'return.payout'",
+  );
+  assert.equal(entries.rows.length, 1);
+  assert.equal(entries.rows[0].actor_phone, OPERATOR_PHONE);
+  assert.equal(entries.rows[0].detail.reference, "UTR123456789");
+});
+
+apiTest("a prepaid return has nothing to pay out by hand", async () => {
+  const operator = await signIn(OPERATOR_PHONE);
+  const placed = await placeAndMove("upi", "SIU-PS-GLD", []);
+
+  const refused = await app.server.inject({
+    method: "POST",
+    url: `/orders/${placed.orderNumber}/returns/payout`,
+    headers: operator.headers,
+    payload: { reference: "UTR123456789" },
+  });
+  assert.equal(refused.statusCode, 409);
+  assert.equal(json(refused).error, "not_cod");
+});
+
 // ── Messaging: the OTP channel and delivery receipts (4A, 1A) ─
 
 const MESSAGING_SECRET = "test_messaging_secret";

@@ -19,6 +19,7 @@ import {
   type ShippingAddress,
 } from "@siumora/core";
 import {
+  and,
   eq,
   getOrderByNumber,
   inArray,
@@ -26,6 +27,7 @@ import {
   listOrdersForCustomer,
   restockOrder,
   schema,
+  sql,
 } from "@siumora/db";
 
 import {
@@ -429,6 +431,70 @@ export async function registerOrderRoutes(server: FastifyInstance) {
     }
 
     return { ok: true, units: result.units };
+  });
+
+  /**
+   * Record the manual COD payout (design doc, OV-2).
+   *
+   * A COD return has no capture to reverse, so the founder pays the
+   * customer's VPA by hand and records the UPI/UTR reference here. Once: the
+   * reference's presence is the idempotency guard — one parcel, one payout —
+   * and every recording lands in the audit log with who recorded it.
+   */
+  server.post("/orders/:number/returns/payout", async (request, reply) => {
+    const viewer = await requirePermission(request, reply, "remittance:write");
+    if (!viewer) return;
+
+    const { number } = numberParam.parse(request.params);
+    const body = z
+      .object({ reference: z.string().trim().min(4).max(120) })
+      .parse(request.body);
+
+    const order = await getOrderByNumber(server.db, number);
+    if (!order) return reply.code(404).send({ error: "not_found" });
+
+    if (order.paymentMethod !== "cod") {
+      return reply.code(409).send({
+        error: "not_cod",
+        message:
+          "Prepaid returns refund automatically against the captured payment; there is nothing to pay out by hand.",
+      });
+    }
+
+    const [openReturn] = await server.db
+      .select()
+      .from(schema.returnRequests)
+      .where(
+        and(
+          eq(schema.returnRequests.orderId, order.id),
+          sql`${schema.returnRequests.status} <> 'rejected'`,
+        ),
+      );
+    if (!openReturn) {
+      return reply.code(404).send({
+        error: "no_return",
+        message: "No open return on this order to pay out.",
+      });
+    }
+    if (openReturn.payoutReference) {
+      return reply.code(409).send({
+        error: "already_paid",
+        message: `Already paid out as ${openReturn.payoutReference}.`,
+      });
+    }
+
+    const [updated] = await server.db
+      .update(schema.returnRequests)
+      .set({ payoutReference: body.reference, payoutRecordedAt: new Date() })
+      .where(eq(schema.returnRequests.id, openReturn.id))
+      .returning();
+
+    await audit(request, viewer, "return.payout", {
+      subject: number,
+      detail: { reference: body.reference, amountPaise: order.total },
+    });
+
+    return { ok: true, return: updated };
   });
 
   server.post("/orders/:number/returns", async (request, reply) => {
