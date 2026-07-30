@@ -1,30 +1,13 @@
 import { defineConfig, loadEnv } from "@medusajs/framework/utils";
 
+import { assertMedusaBootSafety } from "./src/boot-guards";
+
 loadEnv(process.env.NODE_ENV || "development", process.cwd());
 
-/**
- * APP_ENV, not NODE_ENV, gates behavior (same rule as the Fastify stack:
- * managed staging runs NODE_ENV=production, so NODE_ENV cannot tell staging
- * from production). The boot guards below are the Medusa port of
- * assertBootSafety — the config loader is this stack's one choke point.
- */
-const appEnv = process.env.APP_ENV ?? "development";
-if (!["development", "staging", "production"].includes(appEnv)) {
-  throw new Error(`APP_ENV must be development|staging|production, got "${appEnv}"`);
-}
-
-const DEV_SECRET = "supersecret-dev-only";
-const jwtSecret = process.env.JWT_SECRET ?? DEV_SECRET;
-const cookieSecret = process.env.COOKIE_SECRET ?? DEV_SECRET;
-
-if (appEnv === "production") {
-  if (jwtSecret === DEV_SECRET || cookieSecret === DEV_SECRET) {
-    throw new Error("production boot refused: JWT_SECRET/COOKIE_SECRET are dev defaults");
-  }
-  if (!process.env.MEDUSA_DATABASE_URL) {
-    throw new Error("production boot refused: MEDUSA_DATABASE_URL is not set");
-  }
-}
+// The config loader is this stack's one choke point — the Medusa port of
+// assertBootSafety. The guards themselves are pure and tested in
+// src/boot-guards.test.ts.
+const { jwtSecret, cookieSecret } = assertMedusaBootSafety(process.env);
 
 export default defineConfig({
   projectConfig: {

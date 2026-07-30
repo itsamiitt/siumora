@@ -15,6 +15,25 @@ export const API_PORT = 4123;
 export const WEB_PORT = 3123;
 export const API_URL = `http://localhost:${API_PORT}`;
 
+/**
+ * Track M (design doc M0): the suite is parameterized by backend. `fastify`
+ * is today's path. `medusa` becomes runnable at M1, when the adapter gives
+ * the storefront a Medusa transport — until then the flag refuses loudly
+ * rather than pretending an untestable path passed. Refusing here, not
+ * skipping tests, means CI can never report a vacuous medusa-green.
+ */
+const backend = process.env.E2E_BACKEND ?? "fastify";
+if (backend === "medusa") {
+  throw new Error(
+    "E2E_BACKEND=medusa is not runnable until M1: the storefront needs the " +
+      "Medusa transport (adapter) before these flows can exist. The `medusa` " +
+      "CI job proves cold boot in the meantime.",
+  );
+}
+if (backend !== "fastify") {
+  throw new Error(`E2E_BACKEND must be fastify|medusa, got "${backend}"`);
+}
+
 const databaseUrl = e2eDatabaseUrl();
 
 export default defineConfig({

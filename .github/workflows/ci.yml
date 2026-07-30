@@ -120,3 +120,68 @@ jobs:
       - name: API log
         if: failure()
         run: cat /tmp/api.log || true
+
+  # Track M (design doc M0): the Medusa app must cold-boot on linux against a
+  # fresh database — migrations, config guards, in-memory bus. Runs parallel
+  # to `check` because that job already lives at its 20-minute cap with one
+  # build inside it. Grows into the full E2E_BACKEND=medusa suite at M1; the
+  # two jobs merge at M5.8 (archive), not at cutover — a rollback target
+  # without CI is not a rollback target.
+  medusa:
+    name: Medusa boots
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: siumora
+          POSTGRES_PASSWORD: siumora
+          POSTGRES_DB: siumora_medusa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U siumora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MEDUSA_DATABASE_URL: postgresql://siumora:siumora@localhost:5432/siumora_medusa
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Medusa migrations
+        run: pnpm --filter @siumora/medusa db:migrate
+
+      - name: Boot to /health
+        working-directory: apps/medusa
+        run: |
+          npx medusa develop > /tmp/medusa.log 2>&1 &
+          for attempt in $(seq 1 120); do
+            if curl -sf http://localhost:9000/health > /dev/null; then
+              echo "medusa up after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "medusa did not come up"
+          cat /tmp/medusa.log
+          exit 1
+
+      - name: Medusa log
+        if: failure()
+        run: cat /tmp/medusa.log || true
