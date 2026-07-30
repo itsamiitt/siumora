@@ -1,0 +1,36 @@
+{
+  "name": "@siumora/medusa",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "medusa build",
+    "dev": "medusa develop",
+    "start": "medusa start",
+    "db:create": "medusa db:create",
+    "db:migrate": "medusa db:migrate",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@medusajs/admin-sdk": "2.18.0",
+    "@medusajs/cli": "2.18.0",
+    "@medusajs/framework": "2.18.0",
+    "@medusajs/medusa": "2.18.0",
+    "@mikro-orm/core": "6.6.14",
+    "@mikro-orm/knex": "6.6.14",
+    "@mikro-orm/migrations": "6.6.14",
+    "@mikro-orm/postgresql": "6.6.14",
+    "@siumora/core": "workspace:*",
+    "@siumora/messaging": "workspace:*",
+    "awilix": "^8.0.1",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@medusajs/test-utils": "2.18.0",
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "vite": "^6.1.0"
+  }
+}
