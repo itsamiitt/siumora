@@ -31,6 +31,7 @@
 import type { ExecArgs } from "@medusajs/framework/types";
 import {
   ContainerRegistrationKeys,
+  Modules,
   ProductStatus,
 } from "@medusajs/framework/utils";
 import {
@@ -40,6 +41,7 @@ import {
   createProductsWorkflow,
   createRegionsWorkflow,
   createSalesChannelsWorkflow,
+  createShippingOptionsWorkflow,
   createShippingProfilesWorkflow,
   createStockLocationsWorkflow,
   createTaxRegionsWorkflow,
@@ -48,7 +50,13 @@ import {
   updateStoresWorkflow,
 } from "@medusajs/medusa/core-flows";
 
-import { CATALOG, COLLECTIONS, paiseToInrMajor } from "./seed-data";
+import {
+  CATALOG,
+  COLLECTIONS,
+  FREE_SHIPPING_THRESHOLD_PAISE,
+  STANDARD_SHIPPING_PAISE,
+  paiseToInrMajor,
+} from "./seed-data";
 
 const SALES_CHANNEL_NAME = "Default Sales Channel";
 const REGION_NAME = "India";
@@ -56,6 +64,10 @@ const CURRENCY = "inr";
 const COUNTRY = "in";
 const STOCK_LOCATION_NAME = "Siumora Warehouse";
 const PUBLISHABLE_KEY_TITLE = "Siumora Storefront";
+const FULFILLMENT_SET_NAME = "Siumora Delivery";
+const SHIPPING_OPTION_NAME = "Standard Delivery";
+/** Medusa's built-in manual provider (module id "manual" → "manual_manual"). */
+const MANUAL_PROVIDER = "manual_manual";
 
 export default async function seed({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
@@ -167,6 +179,118 @@ export default async function seed({ container }: ExecArgs) {
     ({ data: shippingProfiles } = await findShippingProfile());
   }
   const shippingProfile = shippingProfiles[0]!;
+
+  // ── Delivery: fulfillment set, provider links, one shipping option ────
+  // Cart completion refuses a cart whose items require shipping but carry
+  // no shipping method (validateShippingStep), so checkout needs exactly
+  // one honest option. Its price mirrors core's shippingFor by
+  // construction: STANDARD_SHIPPING below the FREE_SHIPPING_THRESHOLD,
+  // free at and above it, expressed as Medusa price rules on item_total.
+  const fulfillmentModule = container.resolve(Modules.FULFILLMENT);
+  const link = container.resolve(ContainerRegistrationKeys.LINK);
+
+  const findFulfillmentSet = () =>
+    query.graph({
+      entity: "fulfillment_set",
+      fields: ["id", "name", "service_zones.id"],
+      filters: { name: FULFILLMENT_SET_NAME },
+    });
+  let { data: fulfillmentSets } = await findFulfillmentSet();
+  if (fulfillmentSets.length === 0) {
+    await fulfillmentModule.createFulfillmentSets({
+      name: FULFILLMENT_SET_NAME,
+      type: "shipping",
+      service_zones: [
+        {
+          name: "India",
+          geo_zones: [{ country_code: COUNTRY, type: "country" }],
+        },
+      ],
+    });
+    logger.info(`seed: created fulfillment set "${FULFILLMENT_SET_NAME}"`);
+    ({ data: fulfillmentSets } = await findFulfillmentSet());
+  }
+  const fulfillmentSet = fulfillmentSets[0]!;
+
+  const { data: locationGraph } = await query.graph({
+    entity: "stock_location",
+    fields: ["id", "fulfillment_sets.id", "fulfillment_providers.id"],
+    filters: { id: stockLocation.id },
+  });
+  const locationLinks = locationGraph[0]!;
+  const linkedSetIds = (locationLinks.fulfillment_sets ?? []).map(
+    (set: { id: string } | null) => set?.id,
+  );
+  if (!linkedSetIds.includes(fulfillmentSet.id)) {
+    await link.create({
+      [Modules.STOCK_LOCATION]: { stock_location_id: stockLocation.id },
+      [Modules.FULFILLMENT]: { fulfillment_set_id: fulfillmentSet.id },
+    });
+    logger.info("seed: linked stock location to fulfillment set");
+  }
+  const linkedProviderIds = (locationLinks.fulfillment_providers ?? []).map(
+    (provider: { id: string } | null) => provider?.id,
+  );
+  if (!linkedProviderIds.includes(MANUAL_PROVIDER)) {
+    await link.create({
+      [Modules.STOCK_LOCATION]: { stock_location_id: stockLocation.id },
+      [Modules.FULFILLMENT]: { fulfillment_provider_id: MANUAL_PROVIDER },
+    });
+    logger.info("seed: linked stock location to manual fulfillment provider");
+  }
+
+  const { data: shippingOptions } = await query.graph({
+    entity: "shipping_option",
+    fields: ["id", "name"],
+    filters: { name: SHIPPING_OPTION_NAME },
+  });
+  if (shippingOptions.length === 0) {
+    await createShippingOptionsWorkflow(container).run({
+      input: [
+        {
+          name: SHIPPING_OPTION_NAME,
+          price_type: "flat" as const,
+          provider_id: MANUAL_PROVIDER,
+          service_zone_id: fulfillmentSet.service_zones[0]!.id,
+          shipping_profile_id: shippingProfile.id,
+          type: {
+            label: "Standard",
+            description: "Tracked delivery across India",
+            code: "standard",
+          },
+          prices: [
+            {
+              currency_code: CURRENCY,
+              amount: paiseToInrMajor(STANDARD_SHIPPING_PAISE),
+              rules: [
+                {
+                  attribute: "item_total",
+                  operator: "lt" as const,
+                  value: paiseToInrMajor(FREE_SHIPPING_THRESHOLD_PAISE),
+                },
+              ],
+            },
+            {
+              currency_code: CURRENCY,
+              amount: 0,
+              rules: [
+                {
+                  attribute: "item_total",
+                  operator: "gte" as const,
+                  value: paiseToInrMajor(FREE_SHIPPING_THRESHOLD_PAISE),
+                },
+              ],
+            },
+          ],
+          rules: [
+            { attribute: "enabled_in_store", value: "true", operator: "eq" as const },
+            { attribute: "is_return", value: "false", operator: "eq" as const },
+          ],
+        },
+      ],
+    });
+    logger.info(`seed: created shipping option "${SHIPPING_OPTION_NAME}"`);
+  }
 
   // ── Store: INR-only, Siumora, sane defaults ───────────────────────────
   const { data: stores } = await query.graph({

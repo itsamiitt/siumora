@@ -45,6 +45,17 @@ export function paiseToInrMajor(paise: number): number {
   return paise / 100;
 }
 
+/**
+ * Shipping tiers, copied from @siumora/core's cart constants
+ * (FREE_SHIPPING_THRESHOLD / STANDARD_SHIPPING) under this file's standing
+ * rule: the source stays canonical, and if these numbers ever drift from
+ * core's, that is a bug in this file. identity.test.ts pins them against
+ * core itself. Copied rather than imported because this app typechecks as
+ * CJS and core's static surface is ESM.
+ */
+export const FREE_SHIPPING_THRESHOLD_PAISE = 99900;
+export const STANDARD_SHIPPING_PAISE = 7900;
+
 export interface SeedVariant {
   sku: string;
   title: string;
