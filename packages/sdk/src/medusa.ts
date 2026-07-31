@@ -1,14 +1,22 @@
 import {
   calculateTotals,
   collectionSchema,
+  hsnSummary,
   isGstSlab,
+  isInterState,
+  maskPhone,
+  normalisePhone,
   productSchema,
   searchProducts,
   shippingFor,
+  summariseInvoice,
   summariseRatings,
   type CartLine,
   type CartTotals,
   type Collection,
+  type HsnSummaryRow,
+  type InvoiceTotals,
+  type Order,
   type Product,
   type RatingSummary,
   type Review,
@@ -115,6 +123,47 @@ interface MedusaCart {
   items?: MedusaCartItem[] | null;
 }
 
+interface MedusaCustomer {
+  id: string;
+  email?: string | null;
+  phone?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+}
+
+/** The wire shape of GET /store/siumora/orders/:number. */
+interface SiumoraOrderWire {
+  order: {
+    id: string;
+    number: string;
+    status: string;
+    paymentMethod: string;
+    placedAt: string;
+    address: { province?: string | null } | null;
+    subtotal: number;
+    shipping: number;
+    codFee: number;
+    total: number;
+    invoiceNumber: string | null;
+    lines: Array<{
+      variantId: string;
+      sku: string;
+      productHandle: string;
+      title: string;
+      variantTitle: string;
+      imageUrl: string;
+      mrp: number;
+      unitPrice: number;
+      quantity: number;
+      gstSlab: number | null;
+      hsn: string;
+      piercedJewellery: boolean;
+    }>;
+  };
+  invoice: null;
+  return: Record<string, unknown> | null;
+}
+
 // ── Money ─────────────────────────────────────────────────────────────────
 
 /**
@@ -136,6 +185,39 @@ function metadataPaise(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value >= 0
     ? value
     : undefined;
+}
+
+/** The payload of a Medusa JWT, without verifying — the server verified it. */
+function decodeJwtPayload(token: string): Record<string, unknown> {
+  const part = token.split(".")[1] ?? "";
+  const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+  return JSON.parse(Buffer.from(b64, "base64").toString("utf8")) as Record<
+    string,
+    unknown
+  >;
+}
+
+/** Guest checkout needs a cart email; this one is derived and recognizable. */
+const GUEST_EMAIL_DOMAIN = "guest.siumora.in";
+
+function guestEmail(phone: string): string {
+  return `${phone}@${GUEST_EMAIL_DOMAIN}`;
+}
+
+/** A placeholder email is not the customer's email — the card says null. */
+function realEmail(email: string | null | undefined): string | null {
+  if (!email || email.endsWith(`@${GUEST_EMAIL_DOMAIN}`)) return null;
+  return email;
+}
+
+function customerCard(customer: MedusaCustomer, phone: string) {
+  return {
+    id: customer.id,
+    phone,
+    maskedPhone: maskPhone(phone),
+    name: [customer.first_name ?? "", customer.last_name ?? ""].join(" ").trim(),
+    email: realEmail(customer.email),
+  };
 }
 
 function variantPrice(variant: MedusaVariant): { mrp: number; selling: number } {
@@ -303,14 +385,21 @@ export class MedusaClient implements PublicSurface {
     method: string,
     path: string,
     body?: unknown,
+    options: {
+      headers?: Record<string, string>;
+      /** Per-call bearer, for the sign-in dance before a token is held. */
+      bearer?: string;
+    } = {},
   ): Promise<T> {
+    const bearer = options.bearer ?? this.token;
     const response = await this.doFetch(`${this.baseUrl}${path}`, {
       method,
       signal: AbortSignal.timeout(this.timeoutMs),
       headers: {
         "x-publishable-api-key": this.publishableKey,
         ...(body !== undefined ? { "content-type": "application/json" } : {}),
-        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+        ...options.headers,
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
@@ -543,52 +632,277 @@ export class MedusaClient implements PublicSurface {
     }
   }
 
+  // ── Sign-in ─────────────────────────────────────────────────
+
+  /**
+   * Ask for a code — the custom request route, because Medusa's built-in
+   * auth endpoint can only answer {location} for a non-token outcome and the
+   * storefront needs maskedPhone/expiresAt/delivery (and the echo code in
+   * development). Same envelope as the Fastify /auth/otp.
+   */
+  async requestOtp(phone: string): Promise<{
+    ok: boolean;
+    maskedPhone: string;
+    expiresAt: string;
+    delivery: "sent" | "not_configured";
+    code?: string;
+  }> {
+    return this.request("POST", "/store/siumora-auth/otp", { phone });
+  }
+
+  /**
+   * Verify the code and build the Fastify-shaped session envelope.
+   *
+   * Medusa's route mints a bare {token}; first sign-in gets an actorless
+   * token, so the transport runs the standard dance — create the customer
+   * under that bearer, refresh to an actor token — then reads the customer
+   * card. Returning customers skip straight to the card. claimedOrders is
+   * honestly 0: guest-order claiming belongs to the M2 order-ownership port.
+   */
+  async verifyOtp(
+    phone: string,
+    code: string,
+  ): Promise<{
+    ok: true;
+    token: string;
+    expiresAt: string;
+    isAdmin: boolean;
+    claimedOrders: number;
+    customer: {
+      id: string;
+      phone: string;
+      maskedPhone: string;
+      name: string;
+      email: string | null;
+    };
+  }> {
+    const normalized = normalisePhone(phone) ?? phone;
+    const { token } = await this.request<{ token: string }>(
+      "POST",
+      "/auth/customer/phone-otp",
+      { phone, code },
+    );
+
+    let finalToken = token;
+    if (!decodeJwtPayload(token).actor_id) {
+      // Medusa requires an email to create a customer; phone sign-in has
+      // none, so a derived placeholder goes in and the card maps it to null.
+      await this.request(
+        "POST",
+        "/store/customers",
+        { phone: normalized, email: guestEmail(normalized) },
+        { bearer: token },
+      );
+      const refreshed = await this.request<{ token: string }>(
+        "POST",
+        "/auth/token/refresh",
+        undefined,
+        { bearer: token },
+      );
+      finalToken = refreshed.token;
+    }
+
+    const me = await this.request<{ customer: MedusaCustomer }>(
+      "GET",
+      "/store/customers/me",
+      undefined,
+      { bearer: finalToken },
+    );
+    const exp = decodeJwtPayload(finalToken).exp;
+    return {
+      ok: true,
+      token: finalToken,
+      expiresAt: new Date(
+        typeof exp === "number" ? exp * 1000 : Date.now(),
+      ).toISOString(),
+      isAdmin: false,
+      claimedOrders: 0,
+      customer: customerCard(me.customer, normalized),
+    };
+  }
+
+  async getSession(): Promise<
+    | { signedIn: false }
+    | {
+        signedIn: true;
+        isAdmin: boolean;
+        customer: {
+          id: string;
+          phone: string;
+          maskedPhone: string;
+          name: string;
+          email: string | null;
+        };
+      }
+  > {
+    if (!this.token) return { signedIn: false };
+    try {
+      const me = await this.request<{ customer: MedusaCustomer }>(
+        "GET",
+        "/store/customers/me",
+      );
+      const phone =
+        normalisePhone(me.customer.phone ?? "") ?? me.customer.phone ?? "";
+      return { signedIn: true, isAdmin: false, customer: customerCard(me.customer, phone) };
+    } catch (error) {
+      // A dead or expired token is an anonymous session, not a fault.
+      if (error instanceof ApiError && error.status === 401) {
+        return { signedIn: false };
+      }
+      throw error;
+    }
+  }
+
+  // ── Checkout and orders ─────────────────────────────────────
+
+  /**
+   * COD checkout through the Siumora completion route.
+   *
+   * The address rides Medusa's cart (stateCode as province — the GST
+   * place-of-supply signal the order read turns back into interState), the
+   * cart gets a derived guest email (completion requires one; the card maps
+   * it back to null), and /store/siumora/carts/:id/complete allocates the
+   * SIU number + access key. Prepaid refuses until the M3 Razorpay port.
+   */
+  async checkout(
+    input: {
+      cartId: string;
+      address: Order["address"];
+      paymentMethod: Order["paymentMethod"];
+      eventId: string;
+      gaClientId?: string;
+      buyerGstin?: string;
+    },
+    idempotencyKey?: string,
+  ): Promise<{
+    ok: true;
+    orderNumber: string;
+    status: string;
+    invoiceNumber: string | null;
+    accessKey: string;
+    razorpay?: { orderId: string; keyId: string; amountPaise: number };
+  }> {
+    if (input.paymentMethod !== "cod") {
+      throw new NotPortedError("checkout (prepaid)", "the M3 Razorpay provider port");
+    }
+    const { address } = input;
+    const normalized = normalisePhone(address.phone) ?? address.phone;
+    const [firstName, ...restName] = address.name.split(/\s+/);
+    try {
+      await this.request("POST", `/store/carts/${encodeURIComponent(input.cartId)}`, {
+        email: guestEmail(normalized),
+        shipping_address: {
+          first_name: firstName ?? "",
+          last_name: restName.join(" "),
+          address_1: address.line1,
+          ...("line2" in address && address.line2 ? { address_2: address.line2 } : {}),
+          city: address.city,
+          province: address.stateCode,
+          postal_code: address.pincode,
+          country_code: "in",
+          phone: normalized,
+        },
+      });
+    } catch (error) {
+      // A retried checkout finds the cart already completed — the address is
+      // baked in and the complete route below replays the original order.
+      // Any other update failure is real.
+      if (
+        !(error instanceof ApiError) ||
+        error.status !== 400 ||
+        !/already completed/i.test(error.message)
+      ) {
+        throw error;
+      }
+    }
+    return this.request(
+      "POST",
+      `/store/siumora/carts/${encodeURIComponent(input.cartId)}/complete`,
+      {},
+      idempotencyKey ? { headers: { "idempotency-key": idempotencyKey } } : {},
+    );
+  }
+
+  /**
+   * The guest order read. 404 (no key, wrong key, unknown number) is
+   * undefined exactly like the Fastify transport; a malformed key stays the
+   * thrown 400.
+   *
+   * The invoice card is computed here from the order's own lines through
+   * core's hsnSummary/summariseInvoice — the same engine the Fastify API
+   * uses, over the same paise. The M2 gst module replaces this with the
+   * stored statutory invoice; until then computed-from-lines is the honest
+   * equivalent (and invoiceNumber stays null).
+   */
+  async getOrder(
+    number: string,
+    accessKey?: string,
+  ): Promise<
+    | {
+        order: Record<string, unknown>;
+        invoice: { rows: HsnSummaryRow[]; totals: InvoiceTotals };
+        return: Record<string, unknown> | null;
+      }
+    | undefined
+  > {
+    const query = accessKey ? `?key=${encodeURIComponent(accessKey)}` : "";
+    let wire: SiumoraOrderWire;
+    try {
+      wire = await this.request<SiumoraOrderWire>(
+        "GET",
+        `/store/siumora/orders/${encodeURIComponent(number)}${query}`,
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return undefined;
+      throw error;
+    }
+
+    const lines: CartLine[] = wire.order.lines.map((line) => {
+      if (!isGstSlab(line.gstSlab ?? -1)) {
+        throw new Error(`order ${number} line ${line.sku} has no valid gstSlab`);
+      }
+      return { ...line, gstSlab: line.gstSlab as CartLine["gstSlab"] };
+    });
+    const interState = isInterState(wire.order.address?.province ?? "");
+    const rows = hsnSummary(lines, { interState });
+    return {
+      order: wire.order as unknown as Record<string, unknown>,
+      invoice: { rows, totals: summariseInvoice(rows) },
+      return: wire.return,
+    };
+  }
+
   // ── Not yet ported — each names the phase that delivers it ──
 
-  async requestOtp(): Promise<never> {
-    throw new NotPortedError("requestOtp", "the M1 phone-OTP auth provider");
-  }
-  async verifyOtp(): Promise<never> {
-    throw new NotPortedError("verifyOtp", "the M1 phone-OTP auth provider");
-  }
-  async getSession(): Promise<never> {
-    throw new NotPortedError("getSession", "the M1 phone-OTP auth provider");
-  }
   async signOut(): Promise<never> {
-    throw new NotPortedError("signOut", "the M1 phone-OTP auth provider");
+    throw new NotPortedError("signOut", "the M2 session port");
   }
   async signOutEverywhere(): Promise<never> {
-    throw new NotPortedError("signOutEverywhere", "the M1 phone-OTP auth provider");
+    throw new NotPortedError("signOutEverywhere", "the M2 session port");
   }
   async updateProfile(): Promise<never> {
-    throw new NotPortedError("updateProfile", "the M1 phone-OTP auth provider");
+    throw new NotPortedError("updateProfile", "the M2 customer port");
   }
   async getPincode(): Promise<never> {
-    throw new NotPortedError("getPincode", "the M1 order/checkout port");
+    throw new NotPortedError("getPincode", "the M2 serviceability port");
   }
   async quoteCheckout(): Promise<never> {
-    throw new NotPortedError("quoteCheckout", "the M1 order/checkout port");
-  }
-  async checkout(): Promise<never> {
-    throw new NotPortedError("checkout", "the M1 order/checkout port");
+    throw new NotPortedError("quoteCheckout", "the M2 serviceability port");
   }
   async listOrders(): Promise<never> {
-    throw new NotPortedError("listOrders", "the M1 order/checkout port");
-  }
-  async getOrder(): Promise<never> {
-    throw new NotPortedError("getOrder", "the M1 order/checkout port");
+    throw new NotPortedError("listOrders", "the M2 order-ownership port");
   }
   async confirmOrder(): Promise<never> {
-    throw new NotPortedError("confirmOrder", "the M1 order/checkout port");
+    throw new NotPortedError("confirmOrder", "the M2 order-lifecycle port");
   }
   async advanceOrder(): Promise<never> {
-    throw new NotPortedError("advanceOrder", "the M1 order/checkout port");
+    throw new NotPortedError("advanceOrder", "the M2 order-lifecycle port");
   }
   async answerNdr(): Promise<never> {
-    throw new NotPortedError("answerNdr", "the M1 order/checkout port");
+    throw new NotPortedError("answerNdr", "the M2 order-lifecycle port");
   }
   async requestReturn(): Promise<never> {
-    throw new NotPortedError("requestReturn", "the M1 order/checkout port");
+    throw new NotPortedError("requestReturn", "the M2 returns port");
   }
   async invoicePdf(): Promise<never> {
     throw new NotPortedError("invoicePdf", "the M2 gst module");

@@ -2,7 +2,9 @@ import "server-only";
 
 import { cookies } from "next/headers";
 
-import type { AccountCustomer, SiumoraClient } from "@siumora/sdk";
+import type { AccountCustomer } from "@siumora/sdk";
+
+import type { CommerceClient } from "./commerce-backend";
 
 import { api } from "./api";
 
@@ -28,7 +30,7 @@ export async function sessionToken(): Promise<string | undefined> {
 }
 
 /** The API client, carrying the session token when there is one. */
-export async function apiAs(): Promise<SiumoraClient> {
+export async function apiAs(): Promise<CommerceClient> {
   const token = await sessionToken();
   return token ? api().withToken(token) : api();
 }

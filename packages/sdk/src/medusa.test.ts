@@ -180,16 +180,33 @@ test("createMedusaClient: refuses missing configuration by name", () => {
 
 test("not-yet-ported surface refuses with 501 not_ported, never a wrong answer", async () => {
   const client = new MedusaClient({ baseUrl: "http://x", publishableKey: "pk" });
-  await assert.rejects(client.checkout(), (error: unknown) => {
+  await assert.rejects(client.quoteCheckout(), (error: unknown) => {
     assert.ok(error instanceof NotPortedError);
     assert.ok(error instanceof ApiError);
     assert.equal(error.status, 501);
     assert.equal(error.code, "not_ported");
-    assert.match(error.message, /checkout .* M1/);
+    assert.match(error.message, /quoteCheckout .* M2/);
     return true;
   });
-  await assert.rejects(client.getSession(), (error: unknown) =>
+  await assert.rejects(client.getMetrics(), (error: unknown) =>
     error instanceof NotPortedError,
+  );
+  // Prepaid checkout refuses too — only the COD path is ported.
+  await assert.rejects(
+    client.checkout({
+      cartId: "cart_x",
+      address: {
+        name: "A",
+        phone: "9812345678",
+        line1: "x",
+        city: "Mumbai",
+        stateCode: "27",
+        pincode: "400001",
+      },
+      paymentMethod: "upi",
+      eventId: "e",
+    }),
+    (error: unknown) => error instanceof NotPortedError,
   );
 });
 

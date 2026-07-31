@@ -55,6 +55,15 @@ const MEDUSA_PORTED = new Set<string>([
   // Transport construction: the body branches — createClient on fastify,
   // its mirror createMedusaClient on medusa. Both arms are real assertions.
   "createClient: refuses a missing base URL, honors API_URL",
+  // Wave 2: phone-OTP auth (provider + JWT dance) and the COD checkout /
+  // guest order read over the siumora routes.
+  "requestOtp: envelope, and the echo-mode code",
+  "verifyOtp: token, admin flag, and the customer card",
+  "getSession: both arms of the union",
+  "withToken returns a new client; the original stays anonymous",
+  "checkout: COD envelope, order number format, access key",
+  "checkout: the same idempotency key returns the same order",
+  "getOrder: guest key gets the card, no key gets undefined",
 ]);
 
 /**
@@ -133,12 +142,22 @@ function contract(name: string, fn: () => void | Promise<void>) {
         await fn();
       })(),
       (error: unknown) => {
+        // A body whose own assert.rejects expected a different ApiError (e.g.
+        // the 409 illegal_transition arm) surfaces the refusal wrapped in an
+        // AssertionError with the original on .actual — still the refusal.
+        const refusal =
+          error instanceof NotPortedError
+            ? error
+            : error instanceof assert.AssertionError &&
+                (error as { actual?: unknown }).actual instanceof NotPortedError
+              ? ((error as { actual?: unknown }).actual as NotPortedError)
+              : undefined;
         assert.ok(
-          error instanceof NotPortedError,
+          refusal,
           `${name}: expected NotPortedError from the medusa transport, got: ${String(error)}`,
         );
-        assert.equal(error.status, 501, `${name}: not_ported must be a 501`);
-        assert.equal(error.code, "not_ported", `${name}: wrong refusal code`);
+        assert.equal(refusal.status, 501, `${name}: not_ported must be a 501`);
+        assert.equal(refusal.code, "not_ported", `${name}: wrong refusal code`);
         return true;
       },
       `${name}: the medusa transport served this without a refusal — ` +
@@ -204,14 +223,27 @@ const ADDRESS = {
 };
 
 /**
- * Sign in via OTP. Fastify-only mechanics today: on medusa the first
- * requestOtp throws NotPortedError, which is exactly what an unported
- * auth-dependent test is asserting.
+ * Sign in via OTP — real on both transports since the phone-OTP provider
+ * ported. Tests whose deeper methods are still unported refuse AFTER the
+ * sign-in, at the exact boundary the port will replace.
  */
 async function signedInClient(phone: string) {
-  const issued = await client.requestOtp(phone);
-  const verified = await client.verifyOtp(phone, issued.code!);
+  const actual = testPhone(phone);
+  const issued = await client.requestOtp(actual);
+  const verified = await client.verifyOtp(actual, issued.code!);
   return { client: client.withToken(verified.token), verified };
+}
+
+/**
+ * The phone a sign-in flow uses. Fastify keeps the fixed numbers — its DB
+ * truncates between tests and adminPhones pins the operator. Medusa shares
+ * one live instance across the whole run, where the provider's own 45-second
+ * resend cooldown is per number — a fresh number per sign-in keeps the
+ * anti-abuse contract from failing the suite that ports it.
+ */
+function testPhone(base: string): string {
+  if (usingFastify) return base;
+  return `9${String(Math.floor(Math.random() * 1e9)).padStart(9, "0")}`;
 }
 
 /** Anonymous cart setup — works on both transports. */
@@ -237,7 +269,7 @@ async function placeCodOrder() {
 // ── Auth ──────────────────────────────────────────────────────
 
 contract("requestOtp: envelope, and the echo-mode code", async () => {
-  const issued = await client.requestOtp(CUSTOMER_PHONE);
+  const issued = await client.requestOtp(testPhone(CUSTOMER_PHONE));
   assertExactKeys(issued, ["ok", "maskedPhone", "expiresAt", "delivery", "code"], "requestOtp");
   assert.equal(issued.ok, true);
   assert.match(issued.code!, /^\d{6}$/);
@@ -245,8 +277,9 @@ contract("requestOtp: envelope, and the echo-mode code", async () => {
 });
 
 contract("verifyOtp: token, admin flag, and the customer card", async () => {
-  const issued = await client.requestOtp(CUSTOMER_PHONE);
-  const verified = await client.verifyOtp(CUSTOMER_PHONE, issued.code!);
+  const phone = testPhone(CUSTOMER_PHONE);
+  const issued = await client.requestOtp(phone);
+  const verified = await client.verifyOtp(phone, issued.code!);
   assertExactKeys(
     verified,
     ["ok", "token", "expiresAt", "isAdmin", "claimedOrders", "customer"],

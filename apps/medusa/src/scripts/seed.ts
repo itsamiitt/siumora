@@ -38,6 +38,7 @@ import {
   createApiKeysWorkflow,
   createCollectionsWorkflow,
   createInventoryLevelsWorkflow,
+  updateInventoryLevelsWorkflow,
   createProductsWorkflow,
   createRegionsWorkflow,
   createSalesChannelsWorkflow,
@@ -455,7 +456,13 @@ export default async function seed({ container }: ExecArgs) {
   }
   const { data: inventoryItems } = await query.graph({
     entity: "inventory_item",
-    fields: ["id", "sku", "location_levels.location_id"],
+    fields: [
+      "id",
+      "sku",
+      "location_levels.location_id",
+      "location_levels.stocked_quantity",
+      "location_levels.reserved_quantity",
+    ],
     filters: { sku: [...inventoryBySku.keys()] },
   });
   const levelsToCreate = inventoryItems
@@ -476,6 +483,45 @@ export default async function seed({ container }: ExecArgs) {
       input: { inventory_levels: levelsToCreate },
     });
     logger.info(`seed: created ${levelsToCreate.length} inventory levels`);
+  }
+
+  // Converge, don't just create: orders RESERVE inventory (available =
+  // stocked − reserved), so on a live database the canonical catalogue
+  // quantity must hold for AVAILABLE stock — stocked converges to
+  // want + reserved, leaving real orders' reservations honest. The seed is
+  // the state restorer, and "idempotent" here means convergent — a second
+  // run right after changes nothing.
+  const levelsToRestock = inventoryItems.flatMap((item) => {
+    const want = inventoryBySku.get(item.sku ?? "") ?? 0;
+    return (item.location_levels ?? [])
+      .flatMap(
+        (
+          level: {
+            location_id: string;
+            stocked_quantity?: unknown;
+            reserved_quantity?: unknown;
+          } | null,
+        ) => {
+        if (!level || level.location_id !== stockLocation.id) return [];
+        const stocked = Number(JSON.parse(JSON.stringify(level.stocked_quantity ?? 0)));
+        const reserved = Number(JSON.parse(JSON.stringify(level.reserved_quantity ?? 0)));
+        const target = want + reserved;
+        return stocked === target
+          ? []
+          : [
+              {
+                inventory_item_id: item.id,
+                location_id: stockLocation.id,
+                stocked_quantity: target,
+              },
+            ];
+      });
+  });
+  if (levelsToRestock.length > 0) {
+    await updateInventoryLevelsWorkflow(container).run({
+      input: { updates: levelsToRestock },
+    });
+    logger.info(`seed: restocked ${levelsToRestock.length} inventory levels`);
   }
 
   // ── What the storefront needs ─────────────────────────────────────────

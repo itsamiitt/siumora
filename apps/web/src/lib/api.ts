@@ -1,8 +1,6 @@
 import "server-only";
 
-import { SiumoraClient } from "@siumora/sdk";
-
-import { createCommerceClient } from "./commerce-backend";
+import { createCommerceClient, type CommerceClient } from "./commerce-backend";
 
 /**
  * The commerce API client, shared across a server process.
@@ -15,9 +13,9 @@ import { createCommerceClient } from "./commerce-backend";
  * premature value throws here, at construction, on the first api() call.
  */
 const globalForApi = globalThis as typeof globalThis & {
-  __siumoraApi?: SiumoraClient;
+  __siumoraApi?: CommerceClient;
 };
 
-export function api(): SiumoraClient {
+export function api(): CommerceClient {
   return (globalForApi.__siumoraApi ??= createCommerceClient());
 }
