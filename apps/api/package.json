@@ -14,10 +14,11 @@
     "@siumora/analytics": "workspace:*",
     "@siumora/core": "workspace:*",
     "@siumora/db": "workspace:*",
-    "fastify": "^5.10.0",
-    "zod": "^4.4.3",
+    "@siumora/in-locale": "workspace:*",
     "@siumora/messaging": "workspace:*",
-    "@siumora/in-locale": "workspace:*"
+    "@siumora/sdk": "workspace:*",
+    "fastify": "^5.10.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@siumora/config-ts": "workspace:*",

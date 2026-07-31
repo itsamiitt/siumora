@@ -21,13 +21,17 @@ import type {
  */
 
 export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-  ) {
+  readonly status: number;
+  readonly code: string;
+
+  // Explicit fields, not constructor parameter properties: the API's test
+  // runner executes source under --experimental-strip-types, which accepts
+  // only erasable TypeScript syntax.
+  constructor(status: number, code: string, message: string) {
     super(message);
     this.name = "ApiError";
+    this.status = status;
+    this.code = code;
   }
 }
 
@@ -52,8 +56,12 @@ export interface AccountCustomer {
 export interface RequestOptions {
   /** Sent as Idempotency-Key so a retry cannot place a second order. */
   idempotencyKey?: string;
-  /** Next.js caching hints, ignored by a plain fetch. */
-  cache?: RequestCache;
+  /**
+   * Next.js caching hints, ignored by a plain fetch. The literal union, not
+   * DOM's RequestCache: consumers without the DOM lib (the API's test run)
+   * must still typecheck this file.
+   */
+  cache?: "default" | "force-cache" | "no-cache" | "no-store" | "only-if-cached" | "reload";
   revalidate?: number;
   signal?: AbortSignal;
 }
@@ -272,6 +280,8 @@ export class SiumoraClient {
   ): Promise<{
     pincode: string;
     city?: string;
+    /** Present so checkout can preselect the GST place-of-supply state. */
+    stateCode?: string;
     serviceable: boolean;
     codAvailable: boolean;
     estimatedDays: string;
@@ -420,7 +430,7 @@ export class SiumoraClient {
     status: string,
     ndrReason?: string,
     accessKey?: string,
-  ): Promise<{ ok: boolean }> {
+  ): Promise<{ ok: boolean; order: Record<string, unknown> }> {
     return this.request(
       "POST",
       `/orders/${number}/status${this.keySuffix(accessKey)}`,
@@ -448,7 +458,12 @@ export class SiumoraClient {
       note?: string;
     },
     accessKey?: string,
-  ): Promise<{ ok: boolean }> {
+  ): Promise<{
+    ok: boolean;
+    return: Record<string, unknown>;
+    /** Booked when the return is auto-approved and a courier is configured. */
+    reversePickup: Record<string, unknown> | null;
+  }> {
     return this.request(
       "POST",
       `/orders/${number}/returns${this.keySuffix(accessKey)}`,
