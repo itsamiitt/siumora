@@ -227,20 +227,20 @@ Total: 207 behaviors · P0: 97 · tail: 110
 | [ ] | tail | an AWB nobody assigned is an error the operator can act on | apps/api/src/lib/shiprocket.test.ts |
 | [ ] | tail | an assigned AWB carries the courier's name | apps/api/src/lib/shiprocket.test.ts |
 | [ ] | tail | a return is created with the customer's address as the pickup | apps/api/src/lib/shiprocket.test.ts |
-| [ ] | tail | allows up to the limit and refuses the next | apps/api/src/lib/rate-limit.test.ts |
-| [ ] | tail | keeps origins apart | apps/api/src/lib/rate-limit.test.ts |
-| [ ] | tail | shares one budget across the paths that name a bucket | apps/api/src/lib/rate-limit.test.ts |
-| [ ] | tail | counts methods separately when a rule names one | apps/api/src/lib/rate-limit.test.ts |
-| [ ] | tail | forgets the window once it rolls over | apps/api/src/lib/rate-limit.test.ts |
-| [ ] | tail | says how long to wait, never zero | apps/api/src/lib/rate-limit.test.ts |
-| [ ] | tail | does not limit a path no rule names | apps/api/src/lib/rate-limit.test.ts |
-| [ ] | tail | drops windows that have rolled over instead of growing forever | apps/api/src/lib/rate-limit.test.ts |
-| [ ] | tail | the shipped rules cover what plan/11 §4 names | apps/api/src/lib/rate-limit.test.ts |
+| [x] | tail | allows up to the limit and refuses the next | apps/api/src/lib/rate-limit.test.ts |
+| [x] | tail | keeps origins apart | apps/api/src/lib/rate-limit.test.ts |
+| [x] | tail | shares one budget across the paths that name a bucket | apps/api/src/lib/rate-limit.test.ts |
+| [x] | tail | counts methods separately when a rule names one | apps/api/src/lib/rate-limit.test.ts |
+| [x] | tail | forgets the window once it rolls over | apps/api/src/lib/rate-limit.test.ts |
+| [x] | tail | says how long to wait, never zero | apps/api/src/lib/rate-limit.test.ts |
+| [x] | tail | does not limit a path no rule names | apps/api/src/lib/rate-limit.test.ts |
+| [x] | tail | drops windows that have rolled over instead of growing forever | apps/api/src/lib/rate-limit.test.ts |
+| [x] | tail | the shipped rules cover what plan/11 §4 names | apps/api/src/lib/rate-limit.test.ts |
 | [ ] | tail | APP_ENV wins over NODE_ENV for every tier | apps/api/src/lib/env.test.ts |
 | [ ] | tail | without APP_ENV the tier derives from NODE_ENV | apps/api/src/lib/env.test.ts |
 | [ ] | tail | a typo'd APP_ENV refuses to boot rather than becoming development | apps/api/src/lib/env.test.ts |
 | [ ] | P0 | OTP_ECHO refuses to boot in production | apps/api/src/lib/env.test.ts |
 | [ ] | P0 | staging permits the OTP echo and the courier simulation | apps/api/src/lib/env.test.ts |
 | [ ] | tail | an explicit courier simulation refuses to boot in production | apps/api/src/lib/env.test.ts |
-| [ ] | tail | disabled rate limits refuse to boot in production | apps/api/src/lib/env.test.ts |
+| [x] | tail | disabled rate limits refuse to boot in production | apps/api/src/lib/env.test.ts |
 | [ ] | tail | a clean production config boots | apps/api/src/lib/env.test.ts |

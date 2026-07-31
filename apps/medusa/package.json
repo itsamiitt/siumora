@@ -8,6 +8,7 @@
     "start": "medusa start",
     "db:create": "medusa db:create",
     "db:migrate": "medusa db:migrate",
+    "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
