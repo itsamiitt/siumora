@@ -3,6 +3,7 @@ import { after, before, beforeEach, test } from "node:test";
 
 import { createTestDatabase, type TestDatabase } from "@siumora/db";
 import { ApiError, SiumoraClient, createClient } from "@siumora/sdk";
+import { MedusaClient, NotPortedError, createMedusaClient } from "@siumora/sdk/medusa";
 import { collectionSchema, productSchema } from "@siumora/core";
 
 import { seed } from "../../../packages/db/src/seed.ts";
@@ -11,22 +12,73 @@ import { buildApp, type App } from "./app.ts";
 import { createRateLimiter } from "./lib/rate-limit.ts";
 
 /**
- * SDK contract suite (design doc M1): the adapter is a project, and this is
- * its bar. Every SiumoraClient method is driven against the real Fastify app
- * and its return shape pinned — when the Medusa transport lands, the same
- * suite runs against it and a shape diff is a failure, not a surprise in the
- * storefront. The client's injected fetch rides server.inject, so this is
- * the same code path a live request takes, without a port.
+ * SDK contract suite (design doc M1/M5): the adapter is a project, and this
+ * is its bar. Every client method is driven against a real transport and its
+ * return shape pinned — a shape diff is a failure, not a surprise in the
+ * storefront. The suite is parametrized over the transport:
+ *
+ * - Default (no env): the Fastify app via a server.inject fetch bridge —
+ *   the same code path a live request takes, without a port. Gated on
+ *   DATABASE_URL exactly as before.
+ * - SDK_CONTRACT_BACKEND=medusa (plus MEDUSA_URL and MEDUSA_PUBLISHABLE_KEY):
+ *   the same tests drive a live MedusaClient. Tests named in MEDUSA_PORTED
+ *   assert the real shapes; every other test asserts the method refuses with
+ *   NotPortedError (501 not_ported) — the refusal IS the recorded contract
+ *   for an unported method, never a skip. As wave-2 ports land, a name moves
+ *   into MEDUSA_PORTED and starts asserting real shapes; a listed test that
+ *   still throws not_ported FAILS. Same philosophy as the E2E_BACKEND
+ *   refusal: CI must never report "medusa contract green" for a suite that
+ *   tested nothing.
  */
-const url = process.env.DATABASE_URL;
-const contractTest = url ? test : test.skip;
+const BACKEND = process.env.SDK_CONTRACT_BACKEND ?? "fastify";
+if (BACKEND !== "fastify" && BACKEND !== "medusa") {
+  throw new Error(`SDK_CONTRACT_BACKEND must be fastify|medusa, got "${BACKEND}"`);
+}
+const usingFastify = BACKEND === "fastify";
+
+const url = usingFastify ? process.env.DATABASE_URL : undefined;
+
+/**
+ * The contract tests the Medusa transport is expected to pass TODAY, verified
+ * by running them against a live instance — reality, not intention. Everything
+ * else must throw NotPortedError until its port lands. Auth-dependent flows
+ * (signedInClient) are deliberately absent: medusa mode is anonymous-only
+ * until the M1 phone-OTP auth provider ports, so those tests refuse at the
+ * first auth call.
+ */
+const MEDUSA_PORTED = new Set<string>([
+  "listProducts: every product validates against core's schema",
+  "getProduct: full card, and undefined on a stale link",
+  "listCollections validates against core's schema",
+  "cart lifecycle: create, add, read, requantify, clear",
+  "errors arrive as ApiError with a structured code",
+  // Transport construction: the body branches — createClient on fastify,
+  // its mirror createMedusaClient on medusa. Both arms are real assertions.
+  "createClient: refuses a missing base URL, honors API_URL",
+]);
+
+/**
+ * The public client surface both transports serve. Structural rather than the
+ * nominal classes (whose private fields block cross-assignment); withToken is
+ * re-typed so a signed-in client is still a ContractClient.
+ */
+type ContractClient = Omit<
+  { [K in keyof SiumoraClient]: SiumoraClient[K] },
+  "withToken"
+> & { withToken(token: string | undefined): ContractClient };
 
 const OPERATOR_PHONE = "9000000001";
 const CUSTOMER_PHONE = "9812345678";
 
 let testDb: TestDatabase | undefined;
 let app: App;
-let client: SiumoraClient;
+let client: ContractClient;
+
+if (!usingFastify) {
+  // Loud refusal, not a skip: missing MEDUSA_URL / MEDUSA_PUBLISHABLE_KEY
+  // throws here, before a single test can report a vacuous green.
+  client = createMedusaClient(process.env);
+}
 
 /** Bridge WHATWG fetch onto server.inject — the transport under test stays real. */
 function injectFetch(target: () => App): typeof globalThis.fetch {
@@ -52,8 +104,51 @@ function injectFetch(target: () => App): typeof globalThis.fetch {
   };
 }
 
+/**
+ * Register one contract test against the selected transport.
+ *
+ * fastify: exactly the pre-parametrization behavior — DATABASE_URL-gated,
+ * server.inject, every test runs the real body.
+ *
+ * medusa + name in MEDUSA_PORTED: the real body runs against live Medusa.
+ * A not_ported refusal inside it is a plain test FAILURE — no silent skip.
+ *
+ * medusa + name not in MEDUSA_PORTED: the body must die with NotPortedError
+ * (501 not_ported) at its first unported call. Ported prefix work (catalogue
+ * reads, cart setup) runs for real first, which proves the refusal sits at
+ * the exact method boundary the port will replace.
+ */
+function contract(name: string, fn: () => void | Promise<void>) {
+  if (usingFastify) {
+    (url ? test : test.skip)(name, fn);
+    return;
+  }
+  if (MEDUSA_PORTED.has(name)) {
+    test(name, fn);
+    return;
+  }
+  test(name, async () => {
+    await assert.rejects(
+      (async () => {
+        await fn();
+      })(),
+      (error: unknown) => {
+        assert.ok(
+          error instanceof NotPortedError,
+          `${name}: expected NotPortedError from the medusa transport, got: ${String(error)}`,
+        );
+        assert.equal(error.status, 501, `${name}: not_ported must be a 501`);
+        assert.equal(error.code, "not_ported", `${name}: wrong refusal code`);
+        return true;
+      },
+      `${name}: the medusa transport served this without a refusal — ` +
+        "if the port landed, move the test into MEDUSA_PORTED so it asserts real shapes",
+    );
+  });
+}
+
 before(async () => {
-  if (!url) return;
+  if (!usingFastify || !url) return;
   testDb = await createTestDatabase("sdk-contract");
   app = await buildApp({
     connectionString: testDb!.url,
@@ -80,7 +175,7 @@ before(async () => {
 });
 
 beforeEach(async () => {
-  if (!url) return;
+  if (!usingFastify || !url) return;
   await app.pool.query(
     "TRUNCATE audit_log; DELETE FROM settings; DELETE FROM admin_totp; DELETE FROM notifications; DELETE FROM notification_preferences; DELETE FROM ndr_events; DELETE FROM return_requests; DELETE FROM cod_remittances; DELETE FROM privacy_requests; DELETE FROM tracking_events; DELETE FROM order_lines; DELETE FROM orders; DELETE FROM cart_lines; DELETE FROM carts; DELETE FROM idempotency_keys; DELETE FROM sessions; DELETE FROM otp_challenges; DELETE FROM customers;",
   );
@@ -108,12 +203,18 @@ const ADDRESS = {
   pincode: "400001",
 };
 
+/**
+ * Sign in via OTP. Fastify-only mechanics today: on medusa the first
+ * requestOtp throws NotPortedError, which is exactly what an unported
+ * auth-dependent test is asserting.
+ */
 async function signedInClient(phone: string) {
   const issued = await client.requestOtp(phone);
   const verified = await client.verifyOtp(phone, issued.code!);
   return { client: client.withToken(verified.token), verified };
 }
 
+/** Anonymous cart setup — works on both transports. */
 async function cartWithItem(quantity = 1) {
   const cartId = await client.createCart();
   const products = await client.listProducts();
@@ -135,7 +236,7 @@ async function placeCodOrder() {
 
 // ── Auth ──────────────────────────────────────────────────────
 
-contractTest("requestOtp: envelope, and the echo-mode code", async () => {
+contract("requestOtp: envelope, and the echo-mode code", async () => {
   const issued = await client.requestOtp(CUSTOMER_PHONE);
   assertExactKeys(issued, ["ok", "maskedPhone", "expiresAt", "delivery", "code"], "requestOtp");
   assert.equal(issued.ok, true);
@@ -143,7 +244,7 @@ contractTest("requestOtp: envelope, and the echo-mode code", async () => {
   assert.ok(["sent", "not_configured"].includes(issued.delivery));
 });
 
-contractTest("verifyOtp: token, admin flag, and the customer card", async () => {
+contract("verifyOtp: token, admin flag, and the customer card", async () => {
   const issued = await client.requestOtp(CUSTOMER_PHONE);
   const verified = await client.verifyOtp(CUSTOMER_PHONE, issued.code!);
   assertExactKeys(
@@ -160,7 +261,7 @@ contractTest("verifyOtp: token, admin flag, and the customer card", async () => 
   assert.equal(typeof verified.claimedOrders, "number");
 });
 
-contractTest("getSession: both arms of the union", async () => {
+contract("getSession: both arms of the union", async () => {
   const anonymous = await client.getSession();
   assert.deepEqual(anonymous, { signedIn: false });
 
@@ -169,7 +270,7 @@ contractTest("getSession: both arms of the union", async () => {
   assertExactKeys(session, ["signedIn", "isAdmin", "customer"], "getSession");
 });
 
-contractTest("signOut, signOutEverywhere, updateProfile", async () => {
+contract("signOut, signOutEverywhere, updateProfile", async () => {
   const { client: signed } = await signedInClient(CUSTOMER_PHONE);
 
   const profile = await signed.updateProfile({ name: "Asha M", email: "asha@example.com" });
@@ -185,7 +286,7 @@ contractTest("signOut, signOutEverywhere, updateProfile", async () => {
 
 // ── Catalogue ─────────────────────────────────────────────────
 
-contractTest("listProducts: every product validates against core's schema", async () => {
+contract("listProducts: every product validates against core's schema", async () => {
   const products = await client.listProducts();
   assert.ok(products.length > 0);
   for (const product of products) {
@@ -196,7 +297,7 @@ contractTest("listProducts: every product validates against core's schema", asyn
   assert.ok(Array.isArray(searched));
 });
 
-contractTest("getProduct: full card, and undefined on a stale link", async () => {
+contract("getProduct: full card, and undefined on a stale link", async () => {
   const products = await client.listProducts();
   const card = await client.getProduct(products[0]!.handle);
   assertExactKeys(card, ["product", "reviews", "rating"], "getProduct");
@@ -206,7 +307,7 @@ contractTest("getProduct: full card, and undefined on a stale link", async () =>
   assert.equal(await client.getProduct("does-not-exist"), undefined);
 });
 
-contractTest("listCollections validates against core's schema", async () => {
+contract("listCollections validates against core's schema", async () => {
   const collections = await client.listCollections();
   assert.ok(collections.length > 0);
   for (const collection of collections) {
@@ -214,7 +315,7 @@ contractTest("listCollections validates against core's schema", async () => {
   }
 });
 
-contractTest("getPincode: the serviceability card", async () => {
+contract("getPincode: the serviceability card", async () => {
   const pin = await client.getPincode("400001");
   assertExactKeys(
     pin,
@@ -226,7 +327,7 @@ contractTest("getPincode: the serviceability card", async () => {
 
 // ── Cart ──────────────────────────────────────────────────────
 
-contractTest("cart lifecycle: create, add, read, requantify, clear", async () => {
+contract("cart lifecycle: create, add, read, requantify, clear", async () => {
   const { cartId, variantId } = await cartWithItem();
 
   const added = await client.addToCart(cartId, variantId, 1);
@@ -251,7 +352,7 @@ contractTest("cart lifecycle: create, add, read, requantify, clear", async () =>
 
 // ── Checkout ──────────────────────────────────────────────────
 
-contractTest("quoteCheckout: the risk card", async () => {
+contract("quoteCheckout: the risk card", async () => {
   const { cartId } = await cartWithItem();
   const quote = await client.quoteCheckout({
     cartId,
@@ -270,7 +371,7 @@ contractTest("quoteCheckout: the risk card", async () => {
   assertExactKeys(quote.rto, ["risk", "score"], "rto");
 });
 
-contractTest("checkout: COD envelope, order number format, access key", async () => {
+contract("checkout: COD envelope, order number format, access key", async () => {
   const { placed } = await placeCodOrder();
   assertExactKeys(
     placed,
@@ -281,7 +382,7 @@ contractTest("checkout: COD envelope, order number format, access key", async ()
   assert.ok(placed.accessKey.length >= 16);
 });
 
-contractTest("checkout: the same idempotency key returns the same order", async () => {
+contract("checkout: the same idempotency key returns the same order", async () => {
   const { cartId } = await cartWithItem();
   const key = crypto.randomUUID();
   const input = {
@@ -297,7 +398,7 @@ contractTest("checkout: the same idempotency key returns the same order", async 
 
 // ── Orders ────────────────────────────────────────────────────
 
-contractTest("getOrder: guest key gets the card, no key gets undefined", async () => {
+contract("getOrder: guest key gets the card, no key gets undefined", async () => {
   const { placed } = await placeCodOrder();
 
   const order = await client.getOrder(placed.orderNumber, placed.accessKey);
@@ -315,7 +416,7 @@ contractTest("getOrder: guest key gets the card, no key gets undefined", async (
   );
 });
 
-contractTest("listOrders: the signed-in customer's own orders", async () => {
+contract("listOrders: the signed-in customer's own orders", async () => {
   const { client: signed } = await signedInClient(CUSTOMER_PHONE);
   const cartId = await signed.createCart();
   const products = await signed.listProducts();
@@ -331,7 +432,7 @@ contractTest("listOrders: the signed-in customer's own orders", async () => {
   assert.equal(orders.length, 1);
 });
 
-contractTest("confirmOrder and advanceOrder ride the simulation", async () => {
+contract("confirmOrder and advanceOrder ride the simulation", async () => {
   const { placed } = await placeCodOrder();
 
   // COD confirms at placement — confirming again is a 409 illegal_transition.
@@ -352,7 +453,7 @@ contractTest("confirmOrder and advanceOrder ride the simulation", async () => {
   assertExactKeys(advanced, ["ok", "order"], "advanceOrder");
 });
 
-contractTest("requestReturn on a delivered order", async () => {
+contract("requestReturn on a delivered order", async () => {
   const { placed, variantId } = await placeCodOrder();
   for (const status of ["processing", "shipped", "out_for_delivery", "delivered"]) {
     await client.advanceOrder(placed.orderNumber, status, undefined, placed.accessKey);
@@ -368,7 +469,7 @@ contractTest("requestReturn on a delivered order", async () => {
 
 // ── Wishlist ──────────────────────────────────────────────────
 
-contractTest("wishlist toggle and read", async () => {
+contract("wishlist toggle and read", async () => {
   const products = await client.listProducts();
   const wishlistId = crypto.randomUUID();
 
@@ -382,7 +483,7 @@ contractTest("wishlist toggle and read", async () => {
 
 // ── Data-principal rights ─────────────────────────────────────
 
-contractTest("exportMyData and requestErasure", async () => {
+contract("exportMyData and requestErasure", async () => {
   const { client: signed } = await signedInClient(CUSTOMER_PHONE);
 
   const data = await signed.exportMyData();
@@ -395,7 +496,7 @@ contractTest("exportMyData and requestErasure", async () => {
 
 // ── Admin ─────────────────────────────────────────────────────
 
-contractTest("admin reads: metrics, audit, remittances, gstr1", async () => {
+contract("admin reads: metrics, audit, remittances, gstr1", async () => {
   const { client: operator } = await signedInClient(OPERATOR_PHONE);
 
   const metrics = await operator.getMetrics();
@@ -413,7 +514,7 @@ contractTest("admin reads: metrics, audit, remittances, gstr1", async () => {
   assert.ok(gstr1 && typeof gstr1 === "object");
 });
 
-contractTest("getStoreConfig: the kill-switch card", async () => {
+contract("getStoreConfig: the kill-switch card", async () => {
   const config = await client.getStoreConfig();
   assertExactKeys(config, ["paymentsEnabled", "razorpayConfigured"], "getStoreConfig");
   assert.equal(typeof config.paymentsEnabled, "boolean");
@@ -421,7 +522,7 @@ contractTest("getStoreConfig: the kill-switch card", async () => {
 
 // ── Invoice PDF ───────────────────────────────────────────────
 
-contractTest("invoicePdf: bytes for the key-holder, 404 for anyone else", async () => {
+contract("invoicePdf: bytes for the key-holder, 404 for anyone else", async () => {
   const { placed } = await placeCodOrder();
 
   const pdf = await client.invoicePdf(placed.orderNumber, placed.accessKey);
@@ -435,7 +536,7 @@ contractTest("invoicePdf: bytes for the key-holder, 404 for anyone else", async 
 
 // ── Error contract and construction ───────────────────────────
 
-contractTest("errors arrive as ApiError with a structured code", async () => {
+contract("errors arrive as ApiError with a structured code", async () => {
   const cartId = await client.createCart();
   await assert.rejects(
     client.addToCart(cartId, crypto.randomUUID()),
@@ -449,7 +550,7 @@ contractTest("errors arrive as ApiError with a structured code", async () => {
   );
 });
 
-contractTest("withToken returns a new client; the original stays anonymous", async () => {
+contract("withToken returns a new client; the original stays anonymous", async () => {
   const { verified } = await signedInClient(CUSTOMER_PHONE);
   const signed = client.withToken(verified.token);
   const before = await client.getSession();
@@ -458,7 +559,19 @@ contractTest("withToken returns a new client; the original stays anonymous", asy
   assert.equal(after.signedIn, true);
 });
 
-contractTest("createClient: refuses a missing base URL, honors API_URL", () => {
+contract("createClient: refuses a missing base URL, honors API_URL", () => {
+  if (!usingFastify) {
+    // The medusa mirror of the same construction contract: refuse a missing
+    // configuration rather than defaulting to a machine that is not there.
+    assert.throws(() => createMedusaClient({}), /MEDUSA_URL/);
+    assert.ok(
+      createMedusaClient({
+        MEDUSA_URL: "http://example.test",
+        MEDUSA_PUBLISHABLE_KEY: "pk_test",
+      }) instanceof MedusaClient,
+    );
+    return;
+  }
   assert.throws(() => createClient({}), /API_URL/);
   assert.ok(createClient({ API_URL: "http://example.test" }) instanceof SiumoraClient);
 });
