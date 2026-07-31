@@ -24,6 +24,7 @@ const surfaces = [
   ["@siumora/analytics", []],
   ["@siumora/analytics/server", ["buildGa4Payload", "buildMetaPayload"]],
   ["@siumora/sdk", ["SiumoraClient", "ApiError"]],
+  ["@siumora/sdk/medusa", ["MedusaClient", "createMedusaClient", "mapProduct"]],
   ["@siumora/seo", ["SITE", "AI_CRAWLERS"]],
   ["@siumora/in-locale", ["isValidPincode"]],
 ];
