@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
 
-import { createTestDatabase, enqueueNotification, type TestDatabase } from "@siumora/db";
+import {
+  createTestDatabase,
+  enqueueNotification,
+  setNotificationPreference,
+  type TestDatabase,
+} from "@siumora/db";
 
 import { seed } from "../../../packages/db/src/seed.ts";
 
@@ -2199,6 +2204,99 @@ apiTest("does not leave a queued conversion carrying an erased identity", async 
   // A hashed phone number in a queued payload is still an identifier, and a
   // worker draining after the erasure would send it.
   assert.equal(rows.length, 0);
+});
+
+apiTest("does not leave a notification carrying an erased identity", async () => {
+  const buyer = await signIn("9812340012");
+  const { cartId } = await newCartWith("SIU-PS-GLD");
+  const placed = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/checkout",
+      headers: buyer.headers,
+      payload: { cartId, address: ADDRESS, paymentMethod: "upi", eventId: crypto.randomUUID() },
+    }),
+  );
+  // The walk to delivered queues the order's whole message trail — recipient
+  // is the address phone, variables carry the first name and order number.
+  for (const status of ["confirmed", "processing", "shipped", "out_for_delivery", "delivered"]) {
+    await app.server.inject({
+      method: "POST",
+      url: `/orders/${placed.orderNumber}/status?key=${placed.accessKey}`,
+      payload: { status },
+    });
+  }
+  // And one queued against the sign-in number itself, linked to no order —
+  // the erasure has to find it by recipient alone.
+  await enqueueNotification(app.db, {
+    eventKey: crypto.randomUUID(),
+    templateKey: "order_shipped",
+    recipient: "9812340012",
+    variables: {
+      name: "Asha",
+      orderNumber: placed.orderNumber,
+      courier: "Bluedart",
+      trackingId: "BD44",
+    },
+  });
+  // One message already went out, so the scrub meets real delivery history.
+  await app.pool.query(
+    "UPDATE notifications SET status = 'sent' WHERE template_key = 'order_confirmed'",
+  );
+
+  const result = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/account/erasure",
+      headers: buyer.headers,
+    }),
+  );
+  assert.equal(result.erased, true);
+
+  const { rows } = await app.pool.query(
+    "SELECT recipient, variables::text AS variables, status FROM notifications",
+  );
+  // The delivery record survives — which template went against which order,
+  // and whether it arrived, is audit history worth keeping...
+  assert.ok(rows.length >= 5);
+  // ...but no row is a person any more: not the address phone, not the
+  // sign-in number, not the first name in the rendered variables.
+  for (const row of rows) {
+    assert.equal(row.recipient, "[erased]");
+    assert.equal(row.variables, "{}");
+  }
+  // What was sent stays sent; what was still queued is skipped, because a
+  // worker draining after the erasure would otherwise message "[erased]".
+  assert.equal(rows.filter((row) => row.status === "sent").length, 1);
+  assert.equal(
+    rows.filter((row) => row.status === "pending" || row.status === "sending").length,
+    0,
+  );
+});
+
+apiTest("forgets an erased person's messaging preferences", async () => {
+  const buyer = await signIn("9812340013");
+  // The person once said marketing was fine. The consent dies with the
+  // account — a preference keyed to a number that is nobody's protects no one.
+  await setNotificationPreference(app.db, "9812340013", { marketingConsent: true });
+  // A different number's opt-out is that person's wish, not this one's.
+  await setNotificationPreference(app.db, "9876543210", { optedOut: true });
+
+  const result = json(
+    await app.server.inject({
+      method: "POST",
+      url: "/account/erasure",
+      headers: buyer.headers,
+    }),
+  );
+  assert.equal(result.erased, true);
+
+  const { rows } = await app.pool.query(
+    "SELECT recipient, opted_out FROM notification_preferences",
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].recipient, "9876543210");
+  assert.equal(rows[0].opted_out, true);
 });
 
 apiTest("puts the queue and its deadline in front of an operator", async () => {

@@ -1,4 +1,4 @@
-# Medusa parity checklist — the 205-behavior bar
+# Medusa parity checklist — the 207-behavior bar
 
 Generated from the live suites on 2026-07-30 (design doc
 `...design-20260730-123957.md`, M0). This is the **reviewed enumeration**;
@@ -16,9 +16,9 @@ Every schema-constraint row needs a **written disposition** (survives as
 constraint / app-assertion + recon) with a feasibility check — price≤MRP is
 already reclassified to assertion+recon (eng review D13).
 
-Total: 205 behaviors · P0: 95 · tail: 110
+Total: 207 behaviors · P0: 97 · tail: 110
 
-## API integration (123)
+## API integration (125)
 
 | done | tier | behavior | source |
 |------|------|----------|--------|
@@ -104,6 +104,8 @@ Total: 205 behaviors · P0: 95 · tail: 110
 | [ ] | tail | does not restart the clock when somebody asks twice | apps/api/src/api.test.ts |
 | [ ] | P0 | signs an erased person out everywhere | apps/api/src/api.test.ts |
 | [ ] | P0 | does not leave a queued conversion carrying an erased identity | apps/api/src/api.test.ts |
+| [ ] | P0 | does not leave a notification carrying an erased identity | apps/api/src/api.test.ts |
+| [ ] | P0 | forgets an erased person's messaging preferences | apps/api/src/api.test.ts |
 | [ ] | tail | puts the queue and its deadline in front of an operator | apps/api/src/api.test.ts |
 | [ ] | P0 | keeps the privacy queue away from a customer | apps/api/src/api.test.ts |
 | [ ] | tail | keeps a packer away from the things that cannot be undone | apps/api/src/api.test.ts |

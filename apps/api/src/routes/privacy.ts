@@ -141,7 +141,11 @@ export async function registerPrivacyRoutes(server: FastifyInstance) {
     // difference between an erasure and a disappearance.
     await audit(request, viewer, "privacy.erase", {
       subject: record.id,
-      detail: { ordersRedacted: result.ordersRedacted },
+      detail: {
+        ordersRedacted: result.ordersRedacted,
+        notificationsRedacted: result.notificationsRedacted,
+        preferencesDeleted: result.preferencesDeleted,
+      },
     });
 
     reply.header("Cache-Control", "no-store");

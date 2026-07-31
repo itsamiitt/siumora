@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import {
+  REDACTED,
   RETENTION_NOTICE,
   blockedReason,
   erasedPhone,
@@ -18,6 +19,8 @@ import {
   consentLog,
   customers,
   ndrEvents,
+  notificationPreferences,
+  notifications,
   orderLines,
   orders,
   privacyRequests,
@@ -255,6 +258,10 @@ export interface ErasureResult {
   readonly reason?: string;
   readonly ordersRedacted: number;
   readonly sessionsRevoked: number;
+  /** Outbox rows kept as delivery history, with the person scrubbed out. */
+  readonly notificationsRedacted: number;
+  /** Preference rows keyed on the erased number, deleted outright. */
+  readonly preferencesDeleted: number;
 }
 
 /**
@@ -285,6 +292,8 @@ export async function eraseCustomer(
         reason: "No such customer.",
         ordersRedacted: 0,
         sessionsRevoked: 0,
+        notificationsRedacted: 0,
+        preferencesDeleted: 0,
       };
     }
 
@@ -300,6 +309,8 @@ export async function eraseCustomer(
         reason: blocked,
         ordersRedacted: 0,
         sessionsRevoked: 0,
+        notificationsRedacted: 0,
+        preferencesDeleted: 0,
       };
     }
 
@@ -332,6 +343,45 @@ export async function eraseCustomer(
         );
     }
 
+    // A notification is two things at once: a delivery record — which template
+    // went out against which order, and whether it arrived — and the person it
+    // went to. The record stays, the way the redacted orders stay; the person
+    // goes. Recipient takes the same marker the address fields take, and the
+    // rendered variables (a first name, an order number, a tracking id) are
+    // emptied — a retry that can no longer render is exactly right, because
+    // there is nobody left to message. Rows still waiting their turn are
+    // skipped outright: a worker draining the queue after the erasure would
+    // otherwise ring "[erased]".
+    const orderIds = ownOrders.map((order) => order.id);
+    const scrubbedNotifications = await tx
+      .update(notifications)
+      .set({
+        recipient: REDACTED,
+        variables: {},
+        status: sql`CASE WHEN ${notifications.status} IN ('pending', 'sending') THEN 'skipped' ELSE ${notifications.status} END`,
+      })
+      .where(
+        or(
+          eq(notifications.customerId, customerId),
+          eq(notifications.recipient, customer.phone),
+          ...(orderIds.length > 0
+            ? [inArray(notifications.orderId, orderIds)]
+            : []),
+        ),
+      )
+      .returning({ id: notifications.id });
+
+    // The preference row is keyed on the number itself, and after this
+    // transaction that number is nobody. Deleted rather than redacted: a
+    // consent flag attached to a redacted key protects no one, and preferences
+    // carry no statutory retention. Rows keyed to other numbers — a delivery
+    // contact's own opt-out, say — are that person's wish, not this one's, and
+    // stay.
+    const droppedPreferences = await tx
+      .delete(notificationPreferences)
+      .where(eq(notificationPreferences.recipient, customer.phone))
+      .returning({ recipient: notificationPreferences.recipient });
+
     const revoked = await tx
       .delete(sessions)
       .where(eq(sessions.customerId, customerId))
@@ -351,6 +401,8 @@ export async function eraseCustomer(
       erased: true,
       ordersRedacted: ownOrders.length,
       sessionsRevoked: revoked.length,
+      notificationsRedacted: scrubbedNotifications.length,
+      preferencesDeleted: droppedPreferences.length,
     };
   });
 }
