@@ -2,6 +2,11 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
 import {
+  findInvoiceByOrderId,
+  type GstSqlClient,
+} from "../../../../../modules/gst/allocate";
+import { invoiceCard } from "../../../../../modules/gst/invoice";
+import {
   findIdentityByNumber,
   type SqlClient,
 } from "../../../../../modules/siumora-order/allocate";
@@ -26,11 +31,17 @@ import {
  *   (order numbers are a readable sequence; the key is the credential);
  * - the correct key gets the card { order, invoice, return }.
  *
- * invoice is null (invoice numbering is the M2 gst module; the Fastify card
- * carries an HSN summary the gst port will own) and return is null (returns
- * are the M2 returns-ndr module). The order carries the same field names the
- * Fastify order row uses, with all money in integer paise read the way the
- * transport reads it (variant metadata price_paise/mrp_paise first).
+ * invoice is the STORED statutory card — { rows, totals } off the gst
+ * module's gst_invoice row, the same core hsnSummary/summariseInvoice
+ * shapes the Fastify card carries — and order.invoiceNumber is that row's
+ * number. Served from the row rather than recomputed so the customer sees
+ * the invoice that was actually issued. Orders that predate the gst module
+ * (SIU-00001) have no row: invoice stays null and invoiceNumber stays null,
+ * which the recorded contract allows — the read must not 500 on them.
+ * return is null (returns are the M2 returns-ndr module). The order carries
+ * the same field names the Fastify order row uses, with all money in
+ * integer paise read the way the transport reads it (variant metadata
+ * price_paise/mrp_paise first).
  *
  * A signed-in owner needs no key on the Fastify side; here the same grant
  * activates when Medusa's customer auth populates req.auth_context (the
@@ -81,9 +92,8 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
     return;
   }
 
-  const pg = req.scope.resolve(
-    ContainerRegistrationKeys.PG_CONNECTION,
-  ) as unknown as SqlClient;
+  const pgConnection = req.scope.resolve(ContainerRegistrationKeys.PG_CONNECTION);
+  const pg = pgConnection as unknown as SqlClient;
   const identity = await findIdentityByNumber(pg, number);
   if (!identity) {
     res.status(404).json({ error: "not_found" });
@@ -154,6 +164,13 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
   const shipping = majorToPaise(wireNumber(order.shipping_total, "shipping_total"));
   const codFee = 0;
 
+  // The stored statutory invoice (M2 gst module). Absent for orders that
+  // predate the module — invoice and invoiceNumber honestly null, no 500.
+  const invoiceRow = await findInvoiceByOrderId(
+    pgConnection as unknown as GstSqlClient,
+    identity.order_id,
+  );
+
   res.setHeader("Cache-Control", "no-store");
   res.json({
     order: {
@@ -167,10 +184,10 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
       shipping,
       codFee,
       total: subtotal + shipping + codFee,
-      invoiceNumber: null,
+      invoiceNumber: invoiceRow?.invoice_number ?? null,
       lines,
     },
-    invoice: null,
+    invoice: invoiceRow ? invoiceCard(invoiceRow) : null,
     return: null,
   });
 }

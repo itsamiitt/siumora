@@ -7,6 +7,8 @@ import {
   createPaymentSessionsWorkflow,
 } from "@medusajs/medusa/core-flows";
 
+import { type GstTxClient } from "../../../../../../modules/gst/allocate";
+import { ensureInvoiceForOrder, type GraphQuery } from "../../../../../../modules/gst/issue";
 import {
   allocateIdentity,
   findIdentityByIdempotencyKey,
@@ -48,6 +50,43 @@ import {
 /** Seeded by src/scripts/seed.ts; priced to core's shippingFor tiers. */
 const SHIPPING_OPTION_NAME = "Standard Delivery";
 
+/**
+ * The statutory invoice for a completed order (M2 gst module).
+ *
+ * Fastify parity: a COD order that needs no verification confirms at
+ * placement, and confirmation is what raises the invoice (packages/db
+ * placeOrder; api.test.ts "places an order and issues an invoice"). Here
+ * placement IS completion, so the invoice is issued right after identity
+ * allocation and the envelope's invoiceNumber flips from null to the real
+ * series number.
+ *
+ * A refusal (a line without HSN/slab, totals that fail the reconciliation
+ * assertion) must not fail a checkout whose order already stands — same
+ * philosophy as the Fastify razorpay-create failure: the order stands, the
+ * envelope says invoiceNumber null (a shape the contract allows), and the
+ * log shouts so the series gap is chased, not discovered at filing.
+ */
+async function invoiceNumberForOrder(
+  req: MedusaRequest,
+  pg: GstTxClient,
+  query: GraphQuery,
+  orderId: string,
+): Promise<string | null> {
+  try {
+    const invoice = await ensureInvoiceForOrder(pg, query, orderId);
+    return invoice.invoice_number;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER) as {
+      error(msg: string): void;
+    };
+    logger.error(
+      `gst invoice was not issued for order ${orderId} — chase this, the books depend on it: ${message}`,
+    );
+    return null;
+  }
+}
+
 /** Medusa's built-in system provider — the "no provider yet" COD stand-in. */
 const SYSTEM_PAYMENT_PROVIDER = "pp_system_default";
 
@@ -65,9 +104,9 @@ interface CartSnapshot {
 export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<void> {
   const cartId = req.params.cartId!;
   const container = req.scope;
-  const pg = container.resolve(
-    ContainerRegistrationKeys.PG_CONNECTION,
-  ) as unknown as SqlClient;
+  const pgConnection = container.resolve(ContainerRegistrationKeys.PG_CONNECTION);
+  const pg = pgConnection as unknown as SqlClient;
+  const gstPg = pgConnection as unknown as GstTxClient;
   const query = container.resolve(ContainerRegistrationKeys.QUERY);
 
   const rawKey = req.headers["idempotency-key"];
@@ -88,7 +127,17 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
         return;
       }
       res.setHeader("Idempotent-Replay", "true");
-      res.json(completionEnvelope(replayed, PLACED_STATUS));
+      // A replay serves the stored invoice too (idempotent issue: an order
+      // that somehow missed its invoice gets it now, never a second one).
+      res.json({
+        ...completionEnvelope(replayed, PLACED_STATUS),
+        invoiceNumber: await invoiceNumberForOrder(
+          req,
+          gstPg,
+          query as unknown as GraphQuery,
+          replayed.order_id,
+        ),
+      });
       return;
     }
   }
@@ -222,5 +271,15 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     return;
   }
 
-  res.json(completionEnvelope(allocation.identity, PLACED_STATUS));
+  // Identity first, then the statutory invoice — the M2 gst module. COD
+  // confirmed at placement, so completion is what raises the invoice.
+  res.json({
+    ...completionEnvelope(allocation.identity, PLACED_STATUS),
+    invoiceNumber: await invoiceNumberForOrder(
+      req,
+      gstPg,
+      query as unknown as GraphQuery,
+      orderId,
+    ),
+  });
 }
