@@ -39,6 +39,14 @@ export default defineConfig({
     // modules (incl. the manual fulfillment and system payment providers
     // the COD complete route leans on) stay registered.
     { resolve: "./src/modules/siumora-order" },
+    // M2 India modules (design doc): the statutory invoice series, the
+    // Siumora status machine + returns policy, pincode serviceability, the
+    // kill-switch settings, and the wishlist.
+    { resolve: "./src/modules/gst" },
+    { resolve: "./src/modules/returns-ndr" },
+    { resolve: "./src/modules/serviceability" },
+    { resolve: "./src/modules/settings" },
+    { resolve: "./src/modules/wishlist" },
     {
       // Phone-OTP sign-in (design doc M1): the Fastify OTP contract as a
       // Medusa auth provider, reusing packages/messaging's ordered channel

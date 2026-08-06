@@ -180,12 +180,12 @@ test("createMedusaClient: refuses missing configuration by name", () => {
 
 test("not-yet-ported surface refuses with 501 not_ported, never a wrong answer", async () => {
   const client = new MedusaClient({ baseUrl: "http://x", publishableKey: "pk" });
-  await assert.rejects(client.quoteCheckout(), (error: unknown) => {
+  await assert.rejects(client.listOrders(), (error: unknown) => {
     assert.ok(error instanceof NotPortedError);
     assert.ok(error instanceof ApiError);
     assert.equal(error.status, 501);
     assert.equal(error.code, "not_ported");
-    assert.match(error.message, /quoteCheckout .* M2/);
+    assert.match(error.message, /listOrders .* M2/);
     return true;
   });
   await assert.rejects(client.getMetrics(), (error: unknown) =>

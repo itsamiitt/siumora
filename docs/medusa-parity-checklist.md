@@ -25,10 +25,10 @@ Total: 207 behaviors · P0: 97 · tail: 110
 | [ ] | tail | health check proves the database is reachable | apps/api/src/api.test.ts |
 | [ ] | tail | serves the catalogue review-free until customers write them | apps/api/src/api.test.ts |
 | [ ] | tail | search matches Hinglish through the API | apps/api/src/api.test.ts |
-| [ ] | P0 | rejects a malformed pincode rather than querying with it | apps/api/src/api.test.ts |
-| [ ] | P0 | reports an unknown pincode as not serviceable | apps/api/src/api.test.ts |
+| [x] | P0 | rejects a malformed pincode rather than querying with it | apps/api/src/api.test.ts |
+| [x] | P0 | reports an unknown pincode as not serviceable | apps/api/src/api.test.ts |
 | [ ] | P0 | refuses to add more than the stock on hand | apps/api/src/api.test.ts |
-| [ ] | P0 | places an order and issues an invoice | apps/api/src/api.test.ts |
+| [x] | P0 | places an order and issues an invoice | apps/api/src/api.test.ts |
 | [ ] | P0 | does not create a second order when a checkout is retried | apps/api/src/api.test.ts |
 | [ ] | P0 | refuses an idempotency key reused for a different request | apps/api/src/api.test.ts |
 | [ ] | P0 | derives the COD fee server-side rather than trusting the client | apps/api/src/api.test.ts |
@@ -37,10 +37,10 @@ Total: 207 behaviors · P0: 97 · tail: 110
 | [ ] | P0 | rejects a payment webhook signed with the wrong secret | apps/api/src/api.test.ts |
 | [ ] | P0 | confirms an order on a correctly signed payment webhook | apps/api/src/api.test.ts |
 | [ ] | P0 | a replayed payment webhook does not issue a second invoice | apps/api/src/api.test.ts |
-| [ ] | P0 | refuses an illegal order transition | apps/api/src/api.test.ts |
-| [ ] | tail | returns the parcel to origin once attempts are exhausted | apps/api/src/api.test.ts |
-| [ ] | tail | refuses a return on pierced jewellery with a broken seal | apps/api/src/api.test.ts |
-| [ ] | P0 | refuses a second open return on one order | apps/api/src/api.test.ts |
+| [x] | P0 | refuses an illegal order transition | apps/api/src/api.test.ts |
+| [x] | tail | returns the parcel to origin once attempts are exhausted | apps/api/src/api.test.ts |
+| [x] | tail | refuses a return on pierced jewellery with a broken seal | apps/api/src/api.test.ts |
+| [x] | P0 | refuses a second open return on one order | apps/api/src/api.test.ts |
 | [ ] | tail | admin metrics keep transit value out of recognised revenue | apps/api/src/api.test.ts |
 | [ ] | tail | does not echo an origin that is not allow-listed | apps/api/src/api.test.ts |
 | [ ] | P0 | signs in with a code and returns a usable session | apps/api/src/api.test.ts |

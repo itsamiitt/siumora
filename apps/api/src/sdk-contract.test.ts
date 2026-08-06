@@ -64,6 +64,15 @@ const MEDUSA_PORTED = new Set<string>([
   "checkout: COD envelope, order number format, access key",
   "checkout: the same idempotency key returns the same order",
   "getOrder: guest key gets the card, no key gets undefined",
+  // M2 wave A: serviceability + quote, order lifecycle + returns, the gst
+  // module's stored invoice + PDF, settings kill-switch, wishlist.
+  "getPincode: the serviceability card",
+  "quoteCheckout: the risk card",
+  "confirmOrder and advanceOrder ride the simulation",
+  "requestReturn on a delivered order",
+  "wishlist toggle and read",
+  "getStoreConfig: the kill-switch card",
+  "invoicePdf: bytes for the key-holder, 404 for anyone else",
 ]);
 
 /**

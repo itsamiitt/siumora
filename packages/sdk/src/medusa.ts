@@ -13,12 +13,15 @@ import {
   summariseRatings,
   type CartLine,
   type CartTotals,
+  type CodDecision,
   type Collection,
   type HsnSummaryRow,
   type InvoiceTotals,
   type Order,
   type Product,
   type RatingSummary,
+  type ReturnReason,
+  type ReturnResolution,
   type Review,
 } from "@siumora/core";
 
@@ -160,7 +163,8 @@ interface SiumoraOrderWire {
       piercedJewellery: boolean;
     }>;
   };
-  invoice: null;
+  /** The stored statutory card once the gst module issued one; null before. */
+  invoice: { rows: HsnSummaryRow[]; totals: InvoiceTotals } | null;
   return: Record<string, unknown> | null;
 }
 
@@ -405,17 +409,20 @@ export class MedusaClient implements PublicSurface {
     });
 
     if (!response.ok) {
-      // Medusa errors carry { type, code?, message } — keep the structured
-      // code so callers can still tell "sold out" from "server is down".
+      // Two error dialects share this transport: the siumora custom routes
+      // speak the Fastify envelope ({ error, message }), Medusa's native
+      // routes speak { type, code?, message }. Read all three so callers can
+      // still tell "sold out" from "server is down" on either.
       let code = "request_failed";
       let message = `Request failed with ${response.status}.`;
       try {
         const payload = (await response.json()) as {
+          error?: string;
           type?: string;
           code?: string;
           message?: string;
         };
-        code = payload.code ?? payload.type ?? code;
+        code = payload.error ?? payload.code ?? payload.type ?? code;
         message = payload.message ?? message;
       } catch {
         // Non-JSON error body; the status is all we have.
@@ -828,11 +835,10 @@ export class MedusaClient implements PublicSurface {
    * undefined exactly like the Fastify transport; a malformed key stays the
    * thrown 400.
    *
-   * The invoice card is computed here from the order's own lines through
-   * core's hsnSummary/summariseInvoice — the same engine the Fastify API
-   * uses, over the same paise. The M2 gst module replaces this with the
-   * stored statutory invoice; until then computed-from-lines is the honest
-   * equivalent (and invoiceNumber stays null).
+   * The stored statutory card is authoritative when the gst module issued
+   * one — it is the invoice that actually exists. The computed-from-lines
+   * card (same core engine, same paise) remains only as the fallback for
+   * orders that predate the module or whose issue was refused.
    */
   async getOrder(
     number: string,
@@ -857,19 +863,154 @@ export class MedusaClient implements PublicSurface {
       throw error;
     }
 
-    const lines: CartLine[] = wire.order.lines.map((line) => {
-      if (!isGstSlab(line.gstSlab ?? -1)) {
-        throw new Error(`order ${number} line ${line.sku} has no valid gstSlab`);
-      }
-      return { ...line, gstSlab: line.gstSlab as CartLine["gstSlab"] };
-    });
-    const interState = isInterState(wire.order.address?.province ?? "");
-    const rows = hsnSummary(lines, { interState });
+    let invoice = wire.invoice;
+    if (!invoice) {
+      const lines: CartLine[] = wire.order.lines.map((line) => {
+        if (!isGstSlab(line.gstSlab ?? -1)) {
+          throw new Error(`order ${number} line ${line.sku} has no valid gstSlab`);
+        }
+        return { ...line, gstSlab: line.gstSlab as CartLine["gstSlab"] };
+      });
+      const interState = isInterState(wire.order.address?.province ?? "");
+      const rows = hsnSummary(lines, { interState });
+      invoice = { rows, totals: summariseInvoice(rows) };
+    }
     return {
       order: wire.order as unknown as Record<string, unknown>,
-      invoice: { rows, totals: summariseInvoice(rows) },
+      invoice,
       return: wire.return,
     };
+  }
+
+  /** Same contract as the Fastify transport's invoicePdf: bytes or a status. */
+  async invoicePdf(
+    orderNumber: string,
+    accessKey?: string,
+  ): Promise<{ ok: boolean; status: number; body?: ArrayBuffer }> {
+    const query = accessKey ? `?key=${encodeURIComponent(accessKey)}` : "";
+    const response = await this.doFetch(
+      `${this.baseUrl}/store/siumora/orders/${encodeURIComponent(orderNumber)}/invoice.pdf${query}`,
+      {
+        signal: AbortSignal.timeout(this.timeoutMs),
+        headers: {
+          "x-publishable-api-key": this.publishableKey,
+          ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+        },
+        cache: "no-store",
+      } as RequestInit,
+    );
+    if (!response.ok) return { ok: false, status: response.status };
+    return { ok: true, status: response.status, body: await response.arrayBuffer() };
+  }
+
+  async getPincode(
+    pincode: string,
+  ): Promise<{
+    pincode: string;
+    city?: string;
+    stateCode?: string;
+    serviceable: boolean;
+    codAvailable: boolean;
+    estimatedDays: string;
+    rtoRateBps: number;
+  }> {
+    return this.request("GET", `/store/siumora/pincodes/${encodeURIComponent(pincode)}`);
+  }
+
+  async quoteCheckout(input: {
+    cartId: string;
+    pincode: string;
+    address?: string;
+    city?: string;
+    stateCode?: string;
+    phone?: string;
+  }): Promise<{
+    serviceable: boolean;
+    estimatedDays: string;
+    addressQuality: { score: number; issues: string[]; needsReview: boolean };
+    rto: { risk: "low" | "medium" | "high"; score: number };
+    cod: CodDecision;
+    phoneVerified: boolean;
+  }> {
+    return this.request("POST", "/store/siumora/checkout/quote", input);
+  }
+
+  private orderAction<T>(
+    number: string,
+    action: string,
+    body: unknown,
+    accessKey?: string,
+  ): Promise<T> {
+    const query = accessKey ? `?key=${encodeURIComponent(accessKey)}` : "";
+    return this.request<T>(
+      "POST",
+      `/store/siumora/orders/${encodeURIComponent(number)}/${action}${query}`,
+      body,
+    );
+  }
+
+  async confirmOrder(number: string, accessKey?: string): Promise<{ ok: boolean }> {
+    return this.orderAction(number, "confirm", {}, accessKey);
+  }
+
+  async advanceOrder(
+    number: string,
+    status: string,
+    ndrReason?: string,
+    accessKey?: string,
+  ): Promise<{ ok: boolean; order: Record<string, unknown> }> {
+    return this.orderAction(number, "status", { status, ndrReason }, accessKey);
+  }
+
+  async answerNdr(
+    number: string,
+    action: "reattempt" | "update_address" | "cancel",
+    accessKey?: string,
+  ): Promise<{ ok: boolean }> {
+    return this.orderAction(number, "ndr", { action }, accessKey);
+  }
+
+  async requestReturn(
+    number: string,
+    input: {
+      variantIds: string[];
+      reason: ReturnReason;
+      resolution: ReturnResolution;
+      sealIntact?: boolean;
+      note?: string;
+    },
+    accessKey?: string,
+  ): Promise<{
+    ok: boolean;
+    return: Record<string, unknown>;
+    reversePickup: Record<string, unknown> | null;
+  }> {
+    return this.orderAction(number, "returns", input, accessKey);
+  }
+
+  // ── Wishlist and config ─────────────────────────────────────
+
+  async getWishlist(wishlistId: string): Promise<string[]> {
+    const data = await this.request<{ handles: string[] }>(
+      "GET",
+      `/store/siumora/wishlists/${encodeURIComponent(wishlistId)}`,
+    );
+    return data.handles;
+  }
+
+  async toggleWishlist(
+    wishlistId: string,
+    handle: string,
+  ): Promise<{ wishlisted: boolean; count: number }> {
+    return this.request(
+      "POST",
+      `/store/siumora/wishlists/${encodeURIComponent(wishlistId)}/toggle`,
+      { handle },
+    );
+  }
+
+  async getStoreConfig(): Promise<{ paymentsEnabled: boolean; razorpayConfigured: boolean }> {
+    return this.request("GET", "/store/siumora/config");
   }
 
   // ── Not yet ported — each names the phase that delivers it ──
@@ -883,35 +1024,8 @@ export class MedusaClient implements PublicSurface {
   async updateProfile(): Promise<never> {
     throw new NotPortedError("updateProfile", "the M2 customer port");
   }
-  async getPincode(): Promise<never> {
-    throw new NotPortedError("getPincode", "the M2 serviceability port");
-  }
-  async quoteCheckout(): Promise<never> {
-    throw new NotPortedError("quoteCheckout", "the M2 serviceability port");
-  }
   async listOrders(): Promise<never> {
     throw new NotPortedError("listOrders", "the M2 order-ownership port");
-  }
-  async confirmOrder(): Promise<never> {
-    throw new NotPortedError("confirmOrder", "the M2 order-lifecycle port");
-  }
-  async advanceOrder(): Promise<never> {
-    throw new NotPortedError("advanceOrder", "the M2 order-lifecycle port");
-  }
-  async answerNdr(): Promise<never> {
-    throw new NotPortedError("answerNdr", "the M2 order-lifecycle port");
-  }
-  async requestReturn(): Promise<never> {
-    throw new NotPortedError("requestReturn", "the M2 returns port");
-  }
-  async invoicePdf(): Promise<never> {
-    throw new NotPortedError("invoicePdf", "the M2 gst module");
-  }
-  async getWishlist(): Promise<never> {
-    throw new NotPortedError("getWishlist", "the M2 storefront modules");
-  }
-  async toggleWishlist(): Promise<never> {
-    throw new NotPortedError("toggleWishlist", "the M2 storefront modules");
   }
   async exportMyData(): Promise<never> {
     throw new NotPortedError("exportMyData", "the M2 data-principal port");
@@ -930,9 +1044,6 @@ export class MedusaClient implements PublicSurface {
   }
   async getRemittanceReport(): Promise<never> {
     throw new NotPortedError("getRemittanceReport", "the M2 ops routes");
-  }
-  async getStoreConfig(): Promise<never> {
-    throw new NotPortedError("getStoreConfig", "the M2 settings port");
   }
 }
 
