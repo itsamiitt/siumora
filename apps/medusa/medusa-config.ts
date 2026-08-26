@@ -45,29 +45,37 @@ export default defineConfig({
     // adapter in this repo the credentials are an env-shaped hole, and the
     // block only exists once S3_FILE_URL is set so a half-configured provider
     // can never shadow the working local default.
-    ...(process.env.S3_FILE_URL
-      ? [
-          {
-            resolve: "@medusajs/medusa/file",
-            options: {
-              providers: [
-                {
-                  resolve: "@medusajs/medusa/file-s3",
-                  id: "s3",
-                  options: {
-                    file_url: process.env.S3_FILE_URL,
-                    access_key_id: process.env.S3_ACCESS_KEY_ID,
-                    secret_access_key: process.env.S3_SECRET_ACCESS_KEY,
-                    region: process.env.S3_REGION ?? "auto",
-                    bucket: process.env.S3_BUCKET,
-                    endpoint: process.env.S3_ENDPOINT,
-                  },
+    {
+      resolve: "@medusajs/medusa/file",
+      options: {
+        providers: [
+          process.env.S3_FILE_URL
+            ? {
+                resolve: "@medusajs/medusa/file-s3",
+                id: "s3",
+                options: {
+                  file_url: process.env.S3_FILE_URL,
+                  access_key_id: process.env.S3_ACCESS_KEY_ID,
+                  secret_access_key: process.env.S3_SECRET_ACCESS_KEY,
+                  region: process.env.S3_REGION ?? "auto",
+                  bucket: process.env.S3_BUCKET,
+                  endpoint: process.env.S3_ENDPOINT,
                 },
-              ],
-            },
-          },
-        ]
-      : []),
+              }
+            : {
+                resolve: "@medusajs/medusa/file-local",
+                id: "local",
+                options: {
+                  // The provider bakes an ABSOLUTE url into every upload
+                  // row at write time, defaulting to localhost:9000 — the
+                  // local no-watcher convention runs on 9101, so left
+                  // alone every dashboard upload 404s from the storefront.
+                  backend_url: `http://localhost:${process.env.PORT ?? "9000"}/static`,
+                },
+              },
+        ],
+      },
+    },
     // Siumora order identity (design doc M1): SIU-XXXXX order numbers and
     // guest access keys as a module-owned table + sequence. defineConfig
     // merges this list with the default modules, so the stock commerce

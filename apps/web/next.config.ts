@@ -93,6 +93,16 @@ const nextConfig: NextConfig = {
     // AVIF first, WebP fallback — the PDP image budget in plan/02-frontend
     // depends on this ordering.
     formats: ["image/avif", "image/webp"],
+    // Product images uploaded through the Medusa Admin serve from the
+    // backend (file-local at <backend>/static locally; the R2 public host
+    // in production). Seed images stay relative (/catalog/*.svg) and need
+    // no entry. MEDUSA_IMAGE_HOST names the production host when it exists.
+    remotePatterns: [
+      { protocol: "http" as const, hostname: "localhost" },
+      ...(process.env.MEDUSA_IMAGE_HOST
+        ? [{ protocol: "https" as const, hostname: process.env.MEDUSA_IMAGE_HOST }]
+        : []),
+    ],
   },
 
   // React Compiler is on per plan/02-frontend §1. Top-level in Next 16 —

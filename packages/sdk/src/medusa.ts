@@ -241,12 +241,28 @@ function variantPrice(variant: MedusaVariant): { mrp: number; selling: number } 
 
 // ── Mapping to core domain shapes ─────────────────────────────────────────
 
+/**
+ * Fallback dimensions for an image whose metadata carries none. The seed
+ * stamps real width/height, but an image uploaded through the Medusa Admin
+ * arrives with no metadata at all — and core's schema (positive ints, used
+ * by next/image for aspect ratio) must not fail the whole catalogue over
+ * it. Square is the storefront's product-card crop, so a square default
+ * renders correctly-cropped rather than stretched.
+ */
+const FALLBACK_IMAGE_DIM = 1200;
+
+function imageDim(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : FALLBACK_IMAGE_DIM;
+}
+
 function mapImage(image: MedusaImage, productTitle: string) {
   return {
     url: image.url,
     alt: typeof image.metadata?.alt === "string" ? image.metadata.alt : productTitle,
-    width: image.metadata?.width,
-    height: image.metadata?.height,
+    width: imageDim(image.metadata?.width),
+    height: imageDim(image.metadata?.height),
   };
 }
 
@@ -393,10 +409,17 @@ export class MedusaClient implements PublicSurface {
       headers?: Record<string, string>;
       /** Per-call bearer, for the sign-in dance before a token is held. */
       bearer?: string;
+      /** Next data-cache revalidation window, like the Fastify client's. */
+      revalidate?: number;
     } = {},
   ): Promise<T> {
     const bearer = options.bearer ?? this.token;
-    const response = await this.doFetch(`${this.baseUrl}${path}`, {
+    // revalidate opts the read into Next's data cache — without it a Cache
+    // Components prerender aborts the fetch as uncached IO, which is
+    // exactly how the storefront's static shell 500s (AbortError,
+    // env: Prerender). Same shape as the Fastify client's request(): the
+    // timeout signal and the next hint ride together.
+    const init: RequestInit & { next?: { revalidate: number } } = {
       method,
       signal: AbortSignal.timeout(this.timeoutMs),
       headers: {
@@ -406,7 +429,11 @@ export class MedusaClient implements PublicSurface {
         ...options.headers,
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    });
+      ...(options.revalidate !== undefined
+        ? { next: { revalidate: options.revalidate } }
+        : {}),
+    };
+    const response = await this.doFetch(`${this.baseUrl}${path}`, init);
 
     if (!response.ok) {
       // Two error dialects share this transport: the siumora custom routes
@@ -433,11 +460,14 @@ export class MedusaClient implements PublicSurface {
     return (await response.json()) as T;
   }
 
-  /** The INR region the seed created; resolved once per client. */
+  /** The INR region the seed created; resolved once per client. Revalidated
+   * rather than signal-bounded so the first resolution can happen inside a
+   * Cache Components prerender (which aborts uncached IO) — a region id
+   * changes on reseed at most, and the instance caches it anyway. */
   private region(): Promise<string> {
     this.regionId ??= this.request<{
       regions: Array<{ id: string; currency_code: string }>;
-    }>("GET", "/store/regions").then((data) => {
+    }>("GET", "/store/regions", undefined, { revalidate: 3600 }).then((data) => {
       const inr = data.regions.find((region) => region.currency_code === "inr");
       if (!inr) {
         throw new ApiError(500, "no_inr_region", "Medusa has no INR region — run the seed.");
@@ -447,12 +477,14 @@ export class MedusaClient implements PublicSurface {
     return this.regionId;
   }
 
-  private async fetchCatalog(): Promise<Product[]> {
+  private async fetchCatalog(options?: { revalidate?: number }): Promise<Product[]> {
     const regionId = await this.region();
     const data = await this.request<{ products: MedusaProduct[] }>(
       "GET",
       `/store/products?fields=${encodeURIComponent(PRODUCT_FIELDS)}` +
         `&region_id=${encodeURIComponent(regionId)}&limit=${CATALOG_PAGE}`,
+      undefined,
+      options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
     );
     return data.products.map(mapProduct);
   }
@@ -461,8 +493,9 @@ export class MedusaClient implements PublicSurface {
 
   async listProducts(
     query: { collection?: string; q?: string } = {},
+    options?: { revalidate?: number },
   ): Promise<Product[]> {
-    let products = await this.fetchCatalog();
+    let products = await this.fetchCatalog(options);
     if (query.collection) {
       // Full membership lives on metadata; Medusa's collection_id only knows
       // the primary. Filtering here keeps multi-collection products visible.
@@ -480,6 +513,7 @@ export class MedusaClient implements PublicSurface {
 
   async getProduct(
     handle: string,
+    options?: { revalidate?: number },
   ): Promise<
     { product: Product; reviews: Review[]; rating: RatingSummary } | undefined
   > {
@@ -489,6 +523,8 @@ export class MedusaClient implements PublicSurface {
       `/store/products?handle=${encodeURIComponent(handle)}` +
         `&fields=${encodeURIComponent(PRODUCT_FIELDS)}` +
         `&region_id=${encodeURIComponent(regionId)}`,
+      undefined,
+      options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
     );
     const product = data.products[0];
     if (!product) return undefined;
@@ -498,10 +534,12 @@ export class MedusaClient implements PublicSurface {
     return { product: mapProduct(product), reviews: [], rating: summariseRatings([]) };
   }
 
-  async listCollections(): Promise<Collection[]> {
+  async listCollections(options?: { revalidate?: number }): Promise<Collection[]> {
     const data = await this.request<{ collections: MedusaCollection[] }>(
       "GET",
       "/store/collections",
+      undefined,
+      options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
     );
     return data.collections.map(mapCollection);
   }
