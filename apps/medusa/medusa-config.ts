@@ -70,7 +70,14 @@ export default defineConfig({
                   // row at write time, defaulting to localhost:9000 — the
                   // local no-watcher convention runs on 9101, so left
                   // alone every dashboard upload 404s from the storefront.
-                  backend_url: `http://localhost:${process.env.PORT ?? "9000"}/static`,
+                  // FILE_LOCAL_BACKEND_URL names the public origin when the
+                  // backend sits behind a reverse proxy (nginx serving
+                  // /static) and R2 is not configured yet: without it, a
+                  // production process stamps its own localhost into every
+                  // row. The same env-shaped hole as every other adapter.
+                  backend_url:
+                    process.env.FILE_LOCAL_BACKEND_URL ??
+                    `http://localhost:${process.env.PORT ?? "9000"}/static`,
                 },
               },
         ],
