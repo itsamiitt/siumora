@@ -1,10 +1,14 @@
 # Track M — pending work
 
-State as of 2026-08-06. The Medusa re-platform (design doc
-`...design-20260730-123957.md`) through M2 wave A. Companion to
-[`medusa-parity-checklist.md`](medusa-parity-checklist.md) (the 207-behavior
-bar, 17 ticked) and the repo-root `TODOS.md` (trigger-pulled items, none of
-which belong here).
+State as of 2026-08-26. The Medusa re-platform (design doc
+`...design-20260730-123957.md`) through M2 wave A plus the **admin wave**
+(M4 pulled forward, 2026-08-26): stock Medusa Admin live at `/app` with
+email+password sign-in, India-fields + order-ops widgets, four Siumora ops
+pages, the scoped ops API surface (rows 3 and 8 below), and the SDK admin
+reads flipped — contract **21 of 24** ported, 24/24 green both modes.
+Companion to [`medusa-parity-checklist.md`](medusa-parity-checklist.md) (the
+207-behavior bar, 24 ticked) and the repo-root `TODOS.md` (trigger-pulled
+items, none of which belong here).
 
 ## Done, for orientation
 
@@ -24,13 +28,13 @@ which belong here).
 | # | Work | Detail |
 |---|---|---|
 | 1 | **privacy module** | Anonymize-then-soft-delete (`erased:<uuid>` via Medusa's own update APIs, never raw writes), own tombstone table in the `siumora` schema, and the reconciliation test proving **no row in either schema** keeps PII for a tombstoned id — including outbox recipients/variables. Flips `exportMyData and requestErasure`. |
-| 2 | **operator identity** | Phone-OTP admin auth + core RBAC + TOTP 2FA + audited actor identity, ported whole — the rebuild's admin must not launch weaker than the stack it replaces. Prerequisite for #3. |
-| 3 | **ops API surface** | `/admin/metrics`, `/admin/audit`, `/admin/remittances`, `/admin/gstr1` (statutory, in the harness), `/admin/cash-position`, `/admin/restock-queue`, `/admin/privacy-requests`, `/admin/settings` — Medusa custom routes over the modules, each with a harness entry. Flips `admin reads` contract test. |
+| 2 | **operator identity — REMAINDER (waiver active)** | Landed 2026-08-26: dual-actor gate (`src/lib/operator.ts` + `operator-gate.ts`) — emailpass dashboard user OR phone-OTP customer on `ADMIN_PHONES`, core RBAC (roles/permissions per request), audited actor identity (audit module). **WAIVED to this row, read aloud at M5:** TOTP 2FA (parity P0 rows "never stores the TOTP secret in the clear", "requires a live code to remove the factor", "refuses to store a second factor it cannot seal", step-up on permission-gated writes) and role granularity for dashboard users (Medusa OSS users are all owners — stated in the gate, not pretended). Founder decision 2026-08-26: email+password now, TOTP next wave. |
+| 3 | ~~ops API surface~~ **done 2026-08-26** (scoped) | Landed as `/admin/siumora/{metrics,audit,remittances,cash-position,gstr1,restock-queue,settings,orders/:number/status,orders/:number/ndr,orders/lookup}` behind the dual-actor gate; audit + remittance modules own their tables; `admin reads` contract flipped (21/24). Still open here: `/admin/privacy-requests` (needs row 1), the dedicated restock ACTION (queue exists; putting goods back is a stock adjustment in the dashboard until the outbox wave lands the audited once-only action). |
 | 4 | **outbox port** | Notification/conversion outbox in the shared `siumora` schema, `(event_key, template_key)` unique dedup, the atomic status+invoice+conversion+message transaction as a Medusa workflow with compensation steps. |
 | 5 | **session + profile port** | `signOut`/`signOutEverywhere` (needs token revocation strategy — Medusa JWTs are stateless), `updateProfile` over `/store/customers/me`. Flips the session trio test. |
 | 6 | **order ownership** | `listOrders` for the signed-in customer; claim guest orders at sign-in (`claimedOrders` is honestly 0 today). Flips `listOrders`. |
 | 7 | **gst-recon-daily** | The reconciliation job both gst hooks name (`TODO(gst-recon-daily)`): proves books daily, alarms on drift — the accepted price of losing cross-table CHECKs. |
-| 8 | **read-route status wiring** | The order read still maps confirmed-unless-cancelled; wire it to `siumora_order_status` (returns-ndr exports `getStatusRow`/`findOpenReturn` for exactly this) so walked statuses and open returns show on the card. |
+| 8 | ~~read-route status wiring~~ **done 2026-08-26** | The order read serves the status row's truth (read-only — a guest read creates no rows) and the open return in the card's `return` slot; verified live (operator walk → guest card shows `shipped`). |
 | 9 | **middlewares authenticate entry** | The `authenticate(..., allowUnauthenticated)` route entry that lets the quote route see a signed-in customer — `phoneVerified` is hard-false until then (serviceability REGISTER.md §3). |
 | 10 | **boot-guard parity** | Production refusals for `COURIER_SIMULATION=true` and OTP echo on the Medusa side boot guards (both currently fail closed at the route/provider layer). |
 
@@ -43,11 +47,18 @@ which belong here).
 - Prepaid checkout (transport refuses non-COD today), payment webhooks,
   reverse-pickup booking on return approval (reversePickup envelope).
 
-## M4 — admin
+## M4 — admin (pulled forward, largely done 2026-08-26)
 
-- Stock Medusa admin + two named custom pieces: India-fields Admin SDK
-  widget (HSN, MRP, GST rate — NOT NULL, feed invoicing/GSTR-1) and the
-  second piece per design doc M4.
+- **Done:** stock Medusa admin serving at `/app` (built bundle copied to
+  `apps/medusa/public/admin` by the build script — `medusa start` reads
+  `<cwd>/public/admin`); email+password admin user (`npx medusa user`);
+  file-local image uploads (R2 via `S3_*` env when credentials exist);
+  India-fields widget (product hsn/gst_slab + variant mrp_paise/price_paise,
+  validated, incomplete-banner = the NOT-NULL bar); order-ops widget
+  (SIU number, legal transitions only, NDR answers, open return); Siumora
+  pages: Overview, GST desk, Ops settings, Audit log.
+- **Open:** re-home the web `/admin` readout post-cutover (TODOS row), and
+  whatever the design doc's second named M4 piece adds beyond the above.
 
 ## M5 — cutover gate
 

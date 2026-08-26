@@ -20,8 +20,13 @@ export default defineConfig({
     ...(process.env.MEDUSA_REDIS_URL ? { redisUrl: process.env.MEDUSA_REDIS_URL } : {}),
     http: {
       storeCors: process.env.STORE_CORS ?? "http://localhost:3000",
-      adminCors: process.env.ADMIN_CORS ?? "http://localhost:9000",
-      authCors: process.env.AUTH_CORS ?? "http://localhost:3000,http://localhost:9000",
+      // 9000 is Medusa's default port (CI boots there); 9101 is the local
+      // no-watcher convention (`PORT=9101 npx medusa start`). The dashboard
+      // is served same-origin at /app, so both ports must be admissible.
+      adminCors: process.env.ADMIN_CORS ?? "http://localhost:9000,http://localhost:9101",
+      authCors:
+        process.env.AUTH_CORS ??
+        "http://localhost:3000,http://localhost:9000,http://localhost:9101",
       jwtSecret,
       cookieSecret,
       // Operators sign in with emailpass; customers only ever with the
@@ -33,6 +38,36 @@ export default defineConfig({
     },
   },
   modules: [
+    // Product images (M4). The file module accepts exactly one provider and
+    // registers file-local by default, so dev needs no block at all — uploads
+    // land under ./static and serve from the backend. Production points at
+    // Cloudflare R2 through the S3-compatible provider; like every other
+    // adapter in this repo the credentials are an env-shaped hole, and the
+    // block only exists once S3_FILE_URL is set so a half-configured provider
+    // can never shadow the working local default.
+    ...(process.env.S3_FILE_URL
+      ? [
+          {
+            resolve: "@medusajs/medusa/file",
+            options: {
+              providers: [
+                {
+                  resolve: "@medusajs/medusa/file-s3",
+                  id: "s3",
+                  options: {
+                    file_url: process.env.S3_FILE_URL,
+                    access_key_id: process.env.S3_ACCESS_KEY_ID,
+                    secret_access_key: process.env.S3_SECRET_ACCESS_KEY,
+                    region: process.env.S3_REGION ?? "auto",
+                    bucket: process.env.S3_BUCKET,
+                    endpoint: process.env.S3_ENDPOINT,
+                  },
+                },
+              ],
+            },
+          },
+        ]
+      : []),
     // Siumora order identity (design doc M1): SIU-XXXXX order numbers and
     // guest access keys as a module-owned table + sequence. defineConfig
     // merges this list with the default modules, so the stock commerce
@@ -47,6 +82,10 @@ export default defineConfig({
     { resolve: "./src/modules/serviceability" },
     { resolve: "./src/modules/settings" },
     { resolve: "./src/modules/wishlist" },
+    // M2 wave B ops surface: the operator audit log every /admin/siumora
+    // write testifies to, and the COD remittance ledger.
+    { resolve: "./src/modules/audit" },
+    { resolve: "./src/modules/remittance" },
     {
       // Phone-OTP sign-in (design doc M1): the Fastify OTP contract as a
       // Medusa auth provider, reusing packages/messaging's ordered channel

@@ -45,3 +45,8 @@ test-results/
 
 # medusa build output
 .medusa/
+# built admin dashboard, copied out of .medusa/server for source-run serving
+# (apps/medusa package.json build script) — medusa start reads <cwd>/public/admin
+apps/medusa/public/admin/
+# medusa file-local uploads (dev product images)
+apps/medusa/static/

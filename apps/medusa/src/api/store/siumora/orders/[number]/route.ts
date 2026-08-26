@@ -7,6 +7,12 @@ import {
 } from "../../../../../modules/gst/allocate";
 import { invoiceCard } from "../../../../../modules/gst/invoice";
 import {
+  findOpenReturn,
+  getStatusRow,
+  type SqlClient as StatusSqlClient,
+} from "../../../../../modules/returns-ndr/data";
+import { returnEnvelope } from "../../../../../modules/returns-ndr/lifecycle";
+import {
   findIdentityByNumber,
   type SqlClient,
 } from "../../../../../modules/siumora-order/allocate";
@@ -171,12 +177,23 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
     identity.order_id,
   );
 
+  // The status truth (M2 wave B row 8): once returns-ndr has touched the
+  // order its row IS the status — walked transitions and NDR show on the
+  // card. A fresh order has no row yet and keeps the same confirmed-unless-
+  // cancelled mapping the row would be seeded from. Read-only on purpose:
+  // a guest read must not create rows (the write routes ensure lazily).
+  const statusPg = pgConnection as unknown as StatusSqlClient;
+  const [statusRow, openReturn] = await Promise.all([
+    getStatusRow(statusPg, identity.order_id),
+    findOpenReturn(statusPg, identity.order_id),
+  ]);
+
   res.setHeader("Cache-Control", "no-store");
   res.json({
     order: {
       id: order.id,
       number: identity.order_number,
-      status: siumoraOrderStatus(order.status),
+      status: statusRow?.status ?? siumoraOrderStatus(order.status),
       paymentMethod: "cod",
       placedAt: order.created_at,
       address: order.shipping_address ?? null,
@@ -188,6 +205,8 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
       lines,
     },
     invoice: invoiceRow ? invoiceCard(invoiceRow) : null,
-    return: null,
+    // The open return, when one exists — the same inner shape the
+    // requestReturn envelope serves, so the card and the request agree.
+    return: openReturn ? returnEnvelope(openReturn).return : null,
   });
 }

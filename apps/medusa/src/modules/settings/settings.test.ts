@@ -148,3 +148,22 @@ test("invalidate forces the next read to the database", async () => {
   await cache.get();
   assert.equal(loads, 2);
 });
+
+// ── The write validation (M2 ops routes) ──────────────────────
+
+test("a write validates where the read forgives", async () => {
+  const { validateSettingWrite } = await import("./settings.ts");
+
+  assert.deepEqual(validateSettingWrite("payments_enabled", false), {
+    ok: true,
+    key: "payments_enabled",
+  });
+  assert.ok(validateSettingWrite("cod_max_order", 750000).ok);
+
+  // Unknown key, wrong shape, fractional paise, beyond the sanity ceiling:
+  // all refused with the reason worded for the operator who typed it.
+  assert.ok(!validateSettingWrite("free_money", true).ok);
+  assert.ok(!validateSettingWrite("payments_enabled", "yes").ok);
+  assert.ok(!validateSettingWrite("cod_fee", 49.5).ok);
+  assert.ok(!validateSettingWrite("cod_max_order", 10_000_001).ok);
+});

@@ -1033,17 +1033,29 @@ export class MedusaClient implements PublicSurface {
   async requestErasure(): Promise<never> {
     throw new NotPortedError("requestErasure", "the M2 data-principal port");
   }
-  async getGstr1(): Promise<never> {
-    throw new NotPortedError("getGstr1", "the M2 gst module");
+  // ── Admin (the M2 ops routes) ───────────────────────────────
+  //
+  // The operator here is a phone-OTP customer on the ADMIN_PHONES
+  // allow-list: the held JWT rides Authorization exactly as it does for
+  // account reads, and the /admin/siumora middleware admits the customer
+  // actor alongside the dashboard's emailpass user. Role and permission are
+  // decided server-side per request (packages/core rbac via the operator
+  // gate), so a number taken off the list is refused immediately.
+
+  async getGstr1(period: string): Promise<Record<string, unknown>> {
+    return this.request(
+      "GET",
+      `/admin/siumora/gstr1?period=${encodeURIComponent(period)}`,
+    );
   }
-  async getAuditLog(): Promise<never> {
-    throw new NotPortedError("getAuditLog", "the M2 ops routes");
+  async getAuditLog(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/admin/siumora/audit");
   }
-  async getMetrics(): Promise<never> {
-    throw new NotPortedError("getMetrics", "the M2 ops routes");
+  async getMetrics(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/admin/siumora/metrics");
   }
-  async getRemittanceReport(): Promise<never> {
-    throw new NotPortedError("getRemittanceReport", "the M2 ops routes");
+  async getRemittanceReport(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/admin/siumora/remittances");
   }
 }
 

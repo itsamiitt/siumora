@@ -41,7 +41,7 @@ Total: 207 behaviors · P0: 97 · tail: 110
 | [x] | tail | returns the parcel to origin once attempts are exhausted | apps/api/src/api.test.ts |
 | [x] | tail | refuses a return on pierced jewellery with a broken seal | apps/api/src/api.test.ts |
 | [x] | P0 | refuses a second open return on one order | apps/api/src/api.test.ts |
-| [ ] | tail | admin metrics keep transit value out of recognised revenue | apps/api/src/api.test.ts |
+| [x] | tail | admin metrics keep transit value out of recognised revenue | apps/api/src/api.test.ts |
 | [ ] | tail | does not echo an origin that is not allow-listed | apps/api/src/api.test.ts |
 | [ ] | P0 | signs in with a code and returns a usable session | apps/api/src/api.test.ts |
 | [ ] | tail | accepts a number however it is typed and keeps one customer | apps/api/src/api.test.ts |
@@ -56,9 +56,9 @@ Total: 207 behaviors · P0: 97 · tail: 110
 | [ ] | P0 | attaches an order to the customer who was signed in | apps/api/src/api.test.ts |
 | [ ] | P0 | keeps one customer's order out of another's hands | apps/api/src/api.test.ts |
 | [ ] | P0 | claims a guest order when its number signs in later | apps/api/src/api.test.ts |
-| [ ] | P0 | an operator can read any order | apps/api/src/api.test.ts |
-| [ ] | tail | refuses the ops dashboard to an anonymous caller | apps/api/src/api.test.ts |
-| [ ] | tail | refuses the ops dashboard to a customer who is not on the allow-list | apps/api/src/api.test.ts |
+| [x] | P0 | an operator can read any order | apps/api/src/api.test.ts |
+| [x] | tail | refuses the ops dashboard to an anonymous caller | apps/api/src/api.test.ts |
+| [x] | tail | refuses the ops dashboard to a customer who is not on the allow-list | apps/api/src/api.test.ts |
 | [ ] | P0 | gives a verified repeat buyer the trusted COD terms | apps/api/src/api.test.ts |
 | [ ] | P0 | issues an invoice however an order reaches confirmed | apps/api/src/api.test.ts |
 | [ ] | P0 | lets a signed courier webhook move an order it has no session for | apps/api/src/api.test.ts |
@@ -132,10 +132,10 @@ Total: 207 behaviors · P0: 97 · tail: 110
 | [ ] | P0 | the kill-switch pauses checkout and flips back without a restart | apps/api/src/api.test.ts |
 | [ ] | tail | settings are owner levers, not public ones | apps/api/src/api.test.ts |
 | [ ] | tail | refuses a nonsense setting at the boundary | apps/api/src/api.test.ts |
-| [ ] | P0 | the COD cap is a runtime dial, not a compile-time constant | apps/api/src/api.test.ts |
+| [x] | P0 | the COD cap is a runtime dial, not a compile-time constant | apps/api/src/api.test.ts |
 | [ ] | tail | will not let the application rewrite its own log | apps/api/src/api.test.ts |
-| [ ] | tail | shows an operator the log without the phone numbers | apps/api/src/api.test.ts |
-| [ ] | tail | tells the dashboard what this operator may do | apps/api/src/api.test.ts |
+| [x] | tail | shows an operator the log without the phone numbers | apps/api/src/api.test.ts |
+| [x] | tail | tells the dashboard what this operator may do | apps/api/src/api.test.ts |
 | [ ] | P0 | serves the tax invoice as a PDF | apps/api/src/api.test.ts |
 | [ ] | P0 | will not issue an invoice for an order that never raised one | apps/api/src/api.test.ts |
 | [ ] | P0 | refuses to print a tax invoice for an unconfigured seller | apps/api/src/api.test.ts |

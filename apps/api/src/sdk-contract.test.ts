@@ -73,6 +73,10 @@ const MEDUSA_PORTED = new Set<string>([
   "wishlist toggle and read",
   "getStoreConfig: the kill-switch card",
   "invoicePdf: bytes for the key-holder, 404 for anyone else",
+  // M2 wave B: the ops routes (/admin/siumora/*) behind the dual-actor
+  // operator gate — the operator signs in by phone OTP, so the live
+  // instance needs ADMIN_PHONES to include the operator number.
+  "admin reads: metrics, audit, remittances, gstr1",
 ]);
 
 /**
@@ -249,9 +253,15 @@ async function signedInClient(phone: string) {
  * one live instance across the whole run, where the provider's own 45-second
  * resend cooldown is per number — a fresh number per sign-in keeps the
  * anti-abuse contract from failing the suite that ports it.
+ *
+ * The OPERATOR is the one exception in medusa mode: the ops routes admit a
+ * customer only by ADMIN_PHONES membership, and the live instance cannot
+ * allow-list a number invented mid-test. One fixed-number sign-in per run
+ * fits inside the cooldown as long as runs are ~45s apart — which the
+ * standing reseed-before-every-run rule already guarantees.
  */
 function testPhone(base: string): string {
-  if (usingFastify) return base;
+  if (usingFastify || base === OPERATOR_PHONE) return base;
   return `9${String(Math.floor(Math.random() * 1e9)).padStart(9, "0")}`;
 }
 

@@ -7,7 +7,7 @@ eng-reviewed 2026-07-29). Context for every row lives there.
 | Item | Pull trigger |
 |---|---|
 | Back-in-stock alerts | First sold-out SKU |
-| Product admin CRUD + R2 images (catalog is seed-only) | >1 catalog edit/week, or first non-founder operator |
+| ~~Product admin CRUD + R2 images~~ — done 2026-08-26 via Medusa Admin (`apps/medusa` `/app`: product CRUD, image upload on file-local, India-fields widget; R2 = `S3_*` env when credentials exist) | ~~trigger pulled: first non-founder operator~~ |
 | Reviews POST route (read-only today) | 50 delivered orders |
 | Recommendations | Catalog >60 SKUs or ≥500 sessions/day |
 | Meilisearch swap (`packages/core/src/search.ts` names it) | Catalog >500 SKUs or search p95 >100 ms |

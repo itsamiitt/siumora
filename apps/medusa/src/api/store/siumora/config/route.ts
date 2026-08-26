@@ -1,12 +1,9 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
+import { settingsCache } from "../../../../modules/settings/cache";
 import { readSettings, type SqlClient } from "../../../../modules/settings/read";
-import {
-  configEnvelope,
-  createSettingsCache,
-  type SettingsReader,
-} from "../../../../modules/settings/settings";
+import { configEnvelope } from "../../../../modules/settings/settings";
 
 /**
  * GET /store/siumora/config — the kill-switch card.
@@ -26,15 +23,14 @@ import {
  * client and its /config says true.
  */
 
-// Module-level like the Fastify server decoration: one cache per process.
-// The pg connection it captures on first use is the container's singleton.
-let cache: SettingsReader | undefined;
-
+// One cache per process, shared with the admin settings PATCH (which
+// invalidates it) — modules/settings/cache.ts. The pg connection it captures
+// on first use is the container's singleton.
 export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void> {
   const pg = req.scope.resolve(
     ContainerRegistrationKeys.PG_CONNECTION,
   ) as unknown as SqlClient;
-  cache ??= createSettingsCache(() => readSettings(pg));
+  const cache = settingsCache(() => readSettings(pg));
 
   const settings = await cache.get();
   res.setHeader("Cache-Control", "no-store");

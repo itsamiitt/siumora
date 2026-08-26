@@ -10,7 +10,7 @@
     "skipLibCheck": true,
     "declaration": false,
     "sourceMap": false,
-    "outDir": ".medusa/types",
+    "outDir": ".medusa/server",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "resolveJsonModule": true,

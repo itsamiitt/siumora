@@ -128,7 +128,7 @@ jobs:
   # two jobs merge at M5.8 (archive), not at cutover — a rollback target
   # without CI is not a rollback target.
   medusa:
-    name: Medusa boots
+    name: Medusa boots + contract
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -167,8 +167,29 @@ jobs:
       - name: Medusa migrations
         run: pnpm --filter @siumora/medusa db:migrate
 
+      - name: Seed (catalog + serviceability)
+        working-directory: apps/medusa
+        run: |
+          npx medusa exec ./src/scripts/seed.ts
+          npx medusa exec ./src/scripts/seed-serviceability.ts
+
       - name: Boot to /health
         working-directory: apps/medusa
+        env:
+          # The live-instance posture the contract suite expects (mirrors the
+          # local :9101 convention — apps/medusa/README.md): echoed OTPs,
+          # no rate limits, courier simulation, the operator allow-list, and
+          # placeholder seller details so invoice.pdf can issue.
+          OTP_ECHO: "true"
+          DISABLE_RATE_LIMITS: "true"
+          COURIER_SIMULATION: "true"
+          ADMIN_PHONES: "9000000001"
+          SELLER_NAME: "Siumora (ci)"
+          SELLER_ADDRESS: "1 Marine Drive, Mumbai 400001"
+          SELLER_GSTIN: "27ABCDE1234F1Z5"
+          SELLER_STATE_CODE: "27"
+          SELLER_EMAIL: "ci@siumora.example"
+          SELLER_PHONE: "9000000000"
         run: |
           npx medusa develop > /tmp/medusa.log 2>&1 &
           for attempt in $(seq 1 120); do
@@ -181,6 +202,22 @@ jobs:
           echo "medusa did not come up"
           cat /tmp/medusa.log
           exit 1
+
+      - name: SDK contract, medusa transport
+        working-directory: apps/api
+        env:
+          SDK_CONTRACT_BACKEND: medusa
+          MEDUSA_URL: http://localhost:9000
+        run: |
+          # pg is a dependency of apps/medusa, not apps/api — resolve from there.
+          export MEDUSA_PUBLISHABLE_KEY="$(cd ../medusa && node -e "
+            const { Client } = require('pg');
+            const c = new Client({ connectionString: process.env.MEDUSA_DATABASE_URL });
+            c.connect()
+              .then(() => c.query(\"SELECT token FROM api_key WHERE type='publishable' AND revoked_at IS NULL LIMIT 1\"))
+              .then(r => { console.log(r.rows[0].token); return c.end(); });
+          " )"
+          node --test --experimental-strip-types src/sdk-contract.test.ts
 
       - name: Medusa log
         if: failure()

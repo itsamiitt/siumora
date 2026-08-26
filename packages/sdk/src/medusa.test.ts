@@ -188,7 +188,9 @@ test("not-yet-ported surface refuses with 501 not_ported, never a wrong answer",
     assert.match(error.message, /listOrders .* M2/);
     return true;
   });
-  await assert.rejects(client.getMetrics(), (error: unknown) =>
+  // getMetrics and the other admin reads went live with the M2 ops routes;
+  // the session trio is the surface still naming its phase.
+  await assert.rejects(client.signOut(), (error: unknown) =>
     error instanceof NotPortedError,
   );
   // Prepaid checkout refuses too — only the COD path is ported.

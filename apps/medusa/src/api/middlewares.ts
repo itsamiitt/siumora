@@ -14,7 +14,7 @@
  * paths alone).
  */
 
-import { defineMiddlewares } from "@medusajs/framework/http";
+import { authenticate, defineMiddlewares } from "@medusajs/framework/http";
 import type {
   MedusaNextFunction,
   MedusaRequest,
@@ -40,6 +40,20 @@ export default defineMiddlewares({
   routes: [
     // Medusa auth (the OTP flow lives here) — the strictest class.
     { matcher: "/auth", middlewares: [rateLimit] },
+    // The M2 ops routes. Every route under this mount exports
+    // AUTHENTICATE=false to opt out of Medusa's default admin-user-only
+    // gate, and this authenticate() readmits BOTH actor kinds — the
+    // emailpass dashboard user (session cookie or bearer) and the phone-OTP
+    // operator the SDK's admin reads sign in as (bearer). Authorisation
+    // (role + permission) happens per-route in src/lib/operator-gate.ts;
+    // this middleware only establishes who is asking.
+    {
+      matcher: "/admin/siumora/*",
+      middlewares: [
+        rateLimit,
+        authenticate(["user", "customer"], ["session", "bearer"]),
+      ],
+    },
     // The custom checkout/orders namespace, present and future routes alike.
     { matcher: "/store/siumora", middlewares: [rateLimit] },
     // Browse class, loosest.

@@ -83,6 +83,33 @@ export function isSettingKey(value: string): value is SettingKey {
   return value in DEFINITIONS;
 }
 
+/**
+ * Validate an admin write — the M2 ops-route twin of the Fastify
+ * updateSetting's refusal arm (packages/db/src/settings-repository.ts): an
+ * unknown key or a wrong-shaped value is refused at the write, with the
+ * reason worded for the operator who typed it. (The READ stays lenient —
+ * mergeSettings skips bad stored rows — but a write that would be skipped
+ * at every read is a no-op pretending to be a lever.)
+ */
+export function validateSettingWrite(
+  key: string,
+  value: unknown,
+): { ok: true; key: SettingKey } | { ok: false; error: string } {
+  if (!isSettingKey(key)) {
+    return { ok: false, error: `unknown setting: ${key}` };
+  }
+  if (!DEFINITIONS[key].validate(value)) {
+    return {
+      ok: false,
+      error:
+        key === "payments_enabled"
+          ? `${key}: expected a boolean`
+          : `${key}: expected integer paise between 0 and ${PAISE_CEILING}`,
+    };
+  }
+  return { ok: true, key };
+}
+
 /** One row of the siumora_settings table, as the raw SQL read returns it. */
 export interface SettingRow {
   readonly key: string;
