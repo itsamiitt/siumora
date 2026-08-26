@@ -103,6 +103,13 @@ const nextConfig: NextConfig = {
         ? [{ protocol: "https" as const, hostname: process.env.MEDUSA_IMAGE_HOST }]
         : []),
     ],
+    // Next 16 blocks optimizer upstreams that resolve to private IPs (SSRF
+    // guard) — which is every localhost:9101 dev upload. Opened ONLY outside
+    // production: the production image host is public R2, and the guard is
+    // exactly right there.
+    ...(process.env.NODE_ENV !== "production"
+      ? { dangerouslyAllowLocalIP: true }
+      : {}),
   },
 
   // React Compiler is on per plan/02-frontend §1. Top-level in Next 16 —
