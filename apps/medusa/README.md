@@ -17,7 +17,12 @@ npx medusa exec ./src/scripts/seed-serviceability.ts
 pnpm build
 
 # the local no-watcher convention (the file watcher crashes on parallel
-# writes; CI's cold-boot job uses `medusa develop` instead)
+# writes; CI's cold-boot job uses `medusa develop` instead).
+# NODE_ENV=development matters: `medusa start` defaults to production, which
+# marks the dashboard's session cookie Secure — over plain http://localhost
+# the browser never stores it and login silently loops. Behind TLS in real
+# production the default is correct; do not carry this override there.
+NODE_ENV=development \
 PORT=9101 OTP_ECHO=true DISABLE_RATE_LIMITS=true COURIER_SIMULATION=true \
 ADMIN_PHONES=9000000001 \
 SELLER_NAME="Siumora (dev)" SELLER_ADDRESS="…" SELLER_GSTIN="…" \
