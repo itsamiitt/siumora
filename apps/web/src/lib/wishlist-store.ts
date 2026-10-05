@@ -37,11 +37,7 @@ async function ensureId(): Promise<string> {
 export async function listWishlist(): Promise<string[]> {
   const id = await readId();
   if (!id) return [];
-  try {
-    return await api().getWishlist(id);
-  } catch {
-    return [];
-  }
+  return api().getWishlist(id);
 }
 
 export async function isWishlisted(handle: string): Promise<boolean> {
@@ -53,4 +49,10 @@ export async function toggleWishlist(
 ): Promise<{ wishlisted: boolean; count: number }> {
   const id = await ensureId();
   return api().toggleWishlist(id, handle);
+}
+
+export async function removeWishlist(handle: string): Promise<void> {
+  const id = await readId();
+  if (!id) return;
+  await api().removeWishlist(id, handle);
 }

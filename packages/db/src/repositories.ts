@@ -57,13 +57,30 @@ export interface CatalogProduct {
   }>;
 }
 
-export async function listProducts(db: Database): Promise<CatalogProduct[]> {
+export async function listProducts(
+  db: Database,
+  options: { limit?: number } = {},
+): Promise<CatalogProduct[]> {
+  // Pick product IDs before joining variants and collections. A limit on the
+  // joined rows would cut some products' variants or collection membership.
+  const recentIds = options.limit
+    ? (
+        await db
+          .select({ id: products.id })
+          .from(products)
+          .orderBy(desc(products.createdAt), desc(products.id))
+          .limit(options.limit)
+      ).map((row) => row.id)
+    : undefined;
+  if (recentIds?.length === 0) return [];
+
   const rows = await db
     .select()
     .from(products)
     .leftJoin(variants, eq(variants.productId, products.id))
     .leftJoin(productCollections, eq(productCollections.productId, products.id))
-    .leftJoin(collections, eq(collections.id, productCollections.collectionId));
+    .leftJoin(collections, eq(collections.id, productCollections.collectionId))
+    .where(recentIds ? inArray(products.id, recentIds) : undefined);
 
   const byId = new Map<string, CatalogProduct>();
 
@@ -106,7 +123,12 @@ export async function listProducts(db: Database): Promise<CatalogProduct[]> {
     }
   }
 
-  return [...byId.values()];
+  return recentIds
+    ? recentIds.flatMap((id) => {
+        const product = byId.get(id);
+        return product ? [product] : [];
+      })
+    : [...byId.values()];
 }
 
 export async function getProduct(

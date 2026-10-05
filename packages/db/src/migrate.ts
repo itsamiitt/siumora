@@ -728,6 +728,13 @@ ALTER TABLE return_requests ADD COLUMN payout_reference text;
 ALTER TABLE return_requests ADD COLUMN payout_recorded_at timestamptz;
 `,
   },
+  {
+    id: "0018_products_recent_index",
+    sql: `
+-- The home rail asks for a small, deterministic set of recent products.
+CREATE INDEX products_created_id_idx ON products(created_at DESC, id DESC);
+`,
+  },
 ];
 
 /**

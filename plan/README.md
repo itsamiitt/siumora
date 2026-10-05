@@ -20,6 +20,7 @@ A production‑grade, AI‑ready architecture for a single‑vendor e‑commerce
 | [10-seo-geo.md](10-seo-geo.md) | Technical SEO, automated AI‑SEO pipeline, GEO/llms.txt |
 | [11-infra-security-compliance.md](11-infra-security-compliance.md) | Mumbai infra, CI/CD, observability, RBI/DPDP/consumer‑law checklist |
 | [12-roadmap-costs.md](12-roadmap-costs.md) | Phased roadmap (code + paperwork), ₹ costs, alternatives compared |
+| [13-complete-functional-roadmap.md](13-complete-functional-roadmap.md) | Current route-by-route functionality, admin parity, speed and UI acceptance, and cutover gates |
 
 ## Stack at a glance
 

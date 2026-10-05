@@ -178,6 +178,90 @@ test("createMedusaClient: refuses missing configuration by name", () => {
   );
 });
 
+test("updateProfile writes the authenticated Medusa customer and maps the result", async () => {
+  let request: { url: string; init: RequestInit } | undefined;
+  const client = new MedusaClient({
+    baseUrl: "http://example.test",
+    publishableKey: "pk_x",
+    token: "session-token",
+    fetch: (async (url: URL | RequestInfo, init?: RequestInit) => {
+      request = { url: String(url), init: init ?? {} };
+      return Response.json({
+        customer: {
+          id: "cus_1",
+          phone: "9812345678",
+          first_name: "Asha",
+          last_name: "Rao Singh",
+          email: "asha@example.com",
+        },
+      });
+    }) as typeof fetch,
+  });
+
+  const result = await client.updateProfile({
+    name: "  Asha   Rao Singh  ",
+    email: " asha@example.com ",
+  });
+  assert.equal(request?.url, "http://example.test/store/customers/me");
+  assert.equal(request?.init.method, "POST");
+  assert.equal(
+    new Headers(request?.init.headers).get("authorization"),
+    "Bearer session-token",
+  );
+  assert.deepEqual(JSON.parse(String(request?.init.body)), {
+    first_name: "Asha",
+    last_name: "Rao Singh",
+    email: "asha@example.com",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.customer.name, "Asha Rao Singh");
+  assert.equal(result.customer.email, "asha@example.com");
+});
+
+test("limited catalogue read requests only the home rail from Medusa", async () => {
+  const paths: string[] = [];
+  const client = new MedusaClient({
+    baseUrl: "http://example.test",
+    publishableKey: "pk_x",
+    fetch: (async (url: URL | RequestInfo) => {
+      const path = String(url);
+      paths.push(path);
+      if (path.endsWith("/store/regions")) {
+        return Response.json({ regions: [{ id: "reg_in", currency_code: "inr" }] });
+      }
+      return Response.json({ products: [PRODUCT_FIXTURE] });
+    }) as typeof fetch,
+  });
+
+  const products = await client.listProducts({ limit: 8 });
+  assert.equal(products.length, 1);
+  assert.equal(products[0]?.handle, "petal-studs");
+  assert.match(paths[1] ?? "", /[?&]limit=8(?:&|$)/);
+  assert.match(paths[1] ?? "", /[?&]order=-created_at(?:&|$)/);
+});
+
+test("removeWishlist uses the idempotent Medusa item route", async () => {
+  let request: { url: string; method?: string } | undefined;
+  const client = new MedusaClient({
+    baseUrl: "http://example.test",
+    publishableKey: "pk_x",
+    fetch: (async (url: URL | RequestInfo, init?: RequestInit) => {
+      request = { url: String(url), method: init?.method };
+      return Response.json({ count: 0 });
+    }) as typeof fetch,
+  });
+
+  assert.deepEqual(
+    await client.removeWishlist("list_1", "petal-studs"),
+    { count: 0 },
+  );
+  assert.equal(request?.method, "DELETE");
+  assert.equal(
+    request?.url,
+    "http://example.test/store/siumora/wishlists/list_1/items/petal-studs",
+  );
+});
+
 test("not-yet-ported surface refuses with 501 not_ported, never a wrong answer", async () => {
   const client = new MedusaClient({ baseUrl: "http://x", publishableKey: "pk" });
   await assert.rejects(client.listOrders(), (error: unknown) => {

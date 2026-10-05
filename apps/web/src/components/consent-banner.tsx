@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import {
   DEFAULT_CONSENT,
@@ -11,7 +11,10 @@ import {
 } from "@siumora/analytics/client";
 import { Button, MicroLabel } from "@siumora/ui";
 
-import { CONSENT_STORAGE_KEY as STORAGE_KEY } from "@/lib/pre-paint";
+import {
+  CONSENT_OPEN_EVENT,
+  CONSENT_STORAGE_KEY as STORAGE_KEY,
+} from "@/lib/pre-paint";
 
 /**
  * Consent banner — DPDP-aligned, driving Google Consent Mode v2.
@@ -37,6 +40,14 @@ const NONE: ConsentChoice = {
   personalisation: false,
 };
 
+function isConsentChoice(value: unknown): value is ConsentChoice {
+  if (!value || typeof value !== "object") return false;
+  const choice = value as Record<string, unknown>;
+  return typeof choice.analytics === "boolean" &&
+    typeof choice.ads === "boolean" &&
+    typeof choice.personalisation === "boolean";
+}
+
 function applyConsent(state: ConsentState, decided = true) {
   setConsent(state, { decided });
 
@@ -51,11 +62,17 @@ function applyConsent(state: ConsentState, decided = true) {
 }
 
 export function ConsentBanner() {
+  const banner = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     let stored: ConsentChoice | null = null;
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) stored = JSON.parse(raw) as ConsentChoice;
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        if (isConsentChoice(parsed)) stored = parsed;
+      }
     } catch {
       // Corrupt or unavailable storage — ask again rather than assume consent.
     }
@@ -65,6 +82,16 @@ export function ConsentBanner() {
     if (stored) applyConsent(consentFromChoice(stored));
     // Not an answer: events queue until the visitor chooses.
     else applyConsent(DEFAULT_CONSENT, false);
+
+    function onOpen() {
+      returnFocus.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      document.documentElement.setAttribute("data-consent", "ask");
+      requestAnimationFrame(() => banner.current?.querySelector("button")?.focus());
+    }
+    window.addEventListener(CONSENT_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(CONSENT_OPEN_EVENT, onOpen);
   }, []);
 
   function choose(choice: ConsentChoice) {
@@ -75,6 +102,8 @@ export function ConsentBanner() {
     }
     applyConsent(consentFromChoice(choice));
     document.documentElement.removeAttribute("data-consent");
+    (returnFocus.current ?? document.querySelector<HTMLElement>("header a"))?.focus();
+    returnFocus.current = null;
   }
 
   // Always rendered, never conditionally.
@@ -89,6 +118,7 @@ export function ConsentBanner() {
   // has nothing to hydrate that could disagree with the server.
   return (
     <div
+      ref={banner}
       role="dialog"
       aria-label="Cookie choices"
       className="siumora-consent fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-rule)] bg-ground/97 backdrop-blur-sm"

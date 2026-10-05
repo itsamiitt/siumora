@@ -16,6 +16,7 @@ import { THEME_STORAGE_KEY as STORAGE_KEY } from "@/lib/pre-paint";
  */
 
 export type ThemeChoice = "system" | "light" | "dark";
+const THEME_CHANGED_EVENT = "siumora:theme-changed";
 
 
 
@@ -35,15 +36,43 @@ export function ThemeToggle() {
   const [choice, setChoice] = useState<ThemeChoice | undefined>();
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
+    let stored: string | null = null;
+    try {
+      stored = window.localStorage.getItem(STORAGE_KEY);
+    } catch {
+      // A blocked storage API leaves the system preference as the default.
+    }
     setChoice(stored === "light" || stored === "dark" ? stored : "system");
+
+    function onChanged(event: Event) {
+      setChoice((event as CustomEvent<ThemeChoice>).detail);
+    }
+    function onStorage(event: StorageEvent) {
+      if (event.key !== STORAGE_KEY) return;
+      const next = event.newValue === "light" || event.newValue === "dark"
+        ? event.newValue
+        : "system";
+      apply(next);
+      setChoice(next);
+    }
+    window.addEventListener(THEME_CHANGED_EVENT, onChanged);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(THEME_CHANGED_EVENT, onChanged);
+      window.removeEventListener("storage", onStorage);
+    };
   }, []);
 
   function pick(next: ThemeChoice) {
     setChoice(next);
     apply(next);
-    if (next === "system") window.localStorage.removeItem(STORAGE_KEY);
-    else window.localStorage.setItem(STORAGE_KEY, next);
+    try {
+      if (next === "system") window.localStorage.removeItem(STORAGE_KEY);
+      else window.localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // The in-page preference still applies for this visit.
+    }
+    window.dispatchEvent(new CustomEvent<ThemeChoice>(THEME_CHANGED_EVENT, { detail: next }));
   }
 
   function cycle() {

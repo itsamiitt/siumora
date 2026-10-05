@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import { MicroLabel, SiumoraLockupStacked } from "@siumora/ui";
 
+import { CookieChoicesButton } from "./cookie-choices-button";
+
 /**
  * Footer carries the stacked lockup — the primary lockup, used wherever there
  * is room. Ink Plate ground, so the mark is set in ivory with a brass kernel.
@@ -55,9 +57,12 @@ export async function SiteFooter() {
           />
         </div>
 
-        <p className="mt-12 text-xs text-ivory/50">
-          © {new Date().getFullYear()} Siumora. All prices inclusive of taxes.
-        </p>
+        <div className="mt-12 flex flex-wrap items-center justify-between gap-4">
+          <p className="text-xs text-ivory/50">
+            © {new Date().getFullYear()} Siumora. All prices inclusive of taxes.
+          </p>
+          <CookieChoicesButton />
+        </div>
       </div>
     </footer>
   );

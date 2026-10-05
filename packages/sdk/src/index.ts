@@ -232,12 +232,13 @@ export class SiumoraClient {
   // ── Catalogue ───────────────────────────────────────────────
 
   async listProducts(
-    query: { collection?: string; q?: string } = {},
+    query: { collection?: string; q?: string; limit?: number } = {},
     options?: RequestOptions,
   ): Promise<Product[]> {
     const search = new URLSearchParams();
     if (query.collection) search.set("collection", query.collection);
     if (query.q) search.set("q", query.q);
+    if (query.limit !== undefined) search.set("limit", String(query.limit));
     const suffix = search.size > 0 ? `?${search}` : "";
 
     const data = await this.request<{ products: Product[] }>(
@@ -488,6 +489,13 @@ export class SiumoraClient {
     handle: string,
   ): Promise<{ wishlisted: boolean; count: number }> {
     return this.request("POST", `/wishlists/${wishlistId}/toggle`, { handle });
+  }
+
+  async removeWishlist(wishlistId: string, handle: string): Promise<{ count: number }> {
+    return this.request(
+      "DELETE",
+      `/wishlists/${encodeURIComponent(wishlistId)}/items/${encodeURIComponent(handle)}`,
+    );
   }
 
   // ── Data-principal rights ───────────────────────────────────

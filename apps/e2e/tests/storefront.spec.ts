@@ -99,6 +99,122 @@ async function setPaymentsEnabled(request: APIRequestContext, value: boolean) {
   expect(response.ok()).toBe(true);
 }
 
+test("mobile menu exposes collections and utilities, then closes on Escape and navigation", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto("/");
+  await acceptConsent(page);
+
+  const trigger = page.getByRole("button", { name: "Menu" });
+  await expect(trigger).toBeVisible();
+  await expect(page.getByRole("link", { name: /Bag/ })).toBeVisible();
+
+  await trigger.click();
+  const nav = page.getByRole("navigation", { name: "Mobile navigation" });
+  await expect(nav).toBeVisible();
+  for (const label of ["Everyday", "Gifting", "The Petal Edit", "Search", "Saved", "Account"]) {
+    await expect(nav.getByRole("link", { name: label })).toBeVisible();
+  }
+  await expect(nav.getByRole("button", { name: /Deliver to/ })).toBeVisible();
+  await expect(nav.getByRole("button", { name: /Switch between light and dark/ })).toBeVisible();
+  await nav.getByRole("button", { name: /Deliver to/ }).click();
+  await expect(nav.getByRole("textbox", { name: "Pincode" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(nav).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await nav.getByRole("link", { name: "Gifting" }).click();
+  await expect(page).toHaveURL(/\/collections\/gifting$/);
+  await expect(nav).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  await trigger.click();
+  const mobileTheme = nav.getByRole("button", { name: "Switch between light and dark" });
+  await mobileTheme.click();
+  const nextThemeLabel = await mobileTheme.textContent();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(page.getByRole("button", { name: "Switch between light and dark" }))
+    .toHaveText(nextThemeLabel?.trim() ?? "");
+});
+
+test("mobile collection filters are keyboard accessible and shareable", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 740 });
+  await page.goto("/collections/everyday");
+  await acceptConsent(page);
+
+  const trigger = page.getByRole("button", { name: "Filter & sort" });
+  await trigger.click();
+  const drawer = page.getByRole("dialog", { name: "Filter & sort" });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "Close" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await expect(drawer).toBeVisible();
+
+  await drawer.getByRole("button", { name: "In stock" }).click();
+  await expect(page).toHaveURL(/stock=in/);
+  await expect(page.getByText("Applied: In stock")).toBeVisible();
+  await drawer.getByRole("button", { name: /^Show \d+ pieces?$/ }).click();
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await page.reload();
+  await expect(page.getByText("Applied: In stock")).toBeVisible();
+  await page.getByRole("button", { name: "Clear all" }).click();
+  await expect(page).toHaveURL(/\/collections\/everyday$/);
+  await expect(page.getByText("Applied: In stock")).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
+
+test("collection page links reject an out-of-range page without an empty grid", async ({ page }) => {
+  await page.goto("/collections/everyday?page=999");
+  await expect(page).not.toHaveURL(/page=999/);
+  await expect(page.getByText(/^Showing \d/)).toBeVisible();
+});
+
+test("a saved piece moves to the bag with its selected option", async ({ page }) => {
+  await page.goto("/products/petal-studs");
+  await acceptConsent(page);
+  await page.getByRole("button", { name: "Save for later" }).click();
+  await expect(page.getByRole("button", { name: "Saved" })).toBeVisible();
+
+  await page.goto("/wishlist");
+  await expect(page.getByRole("heading", { name: "Petal Studs" })).toBeVisible();
+  await page.getByRole("combobox", { name: "Option for Petal Studs" }).selectOption({ label: "Silver" });
+  await page.getByRole("button", { name: "Move to bag" }).click();
+  await expect(page.getByRole("heading", { name: "Nothing saved yet." })).toBeVisible();
+
+  await page.goto("/cart");
+  await expect(page.getByText("Petal Studs").first()).toBeVisible();
+  await expect(page.getByText("Silver").first()).toBeVisible();
+});
+
+test("cookie choice can be reopened and withdrawn from the footer", async ({ page }) => {
+  await page.goto("/");
+  await acceptConsent(page);
+
+  const choices = page.getByRole("button", { name: "Cookie choices" });
+  await choices.click();
+  const banner = page.getByRole("dialog", { name: "Cookie choices" });
+  await expect(banner).toBeVisible();
+  await banner.getByRole("button", { name: "Decline" }).click();
+  await expect(banner).toBeHidden();
+  await expect(choices).toBeFocused();
+
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("siumora.consent") ?? "null"));
+  expect(stored).toEqual({ analytics: false, ads: false, personalisation: false });
+
+  await page.evaluate(() => localStorage.setItem("siumora.consent", '{"analytics":"yes"}'));
+  await page.reload();
+  await expect(banner).toBeVisible();
+});
+
 test("a person can buy the Petal Studs cash on delivery, end to end", async ({
   page,
 }) => {

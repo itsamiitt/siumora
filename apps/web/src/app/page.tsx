@@ -3,11 +3,11 @@ import Link from "next/link";
 import { CollectionTitle, Display, MicroLabel } from "@siumora/ui";
 
 import { ProductCard } from "@/components/product-card";
-import { listCollections, listProducts } from "@/lib/catalog";
+import { listCollections, listRecentProducts } from "@/lib/catalog";
 
 export default async function HomePage() {
   const [products, collections] = await Promise.all([
-    listProducts(),
+    listRecentProducts(),
     listCollections(),
   ]);
 
@@ -51,19 +51,25 @@ export default async function HomePage() {
             href="/collections/everyday"
             className="transition-colors hover:text-accent-ink"
           >
-            <MicroLabel>View all</MicroLabel>
+            <MicroLabel>Shop everyday</MicroLabel>
           </Link>
         </div>
 
-        <div className="mt-10 grid grid-cols-2 gap-x-6 gap-y-12 lg:grid-cols-4">
-          {products.map((product, index) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              priority={index < 4}
-            />
-          ))}
-        </div>
+        {products.length > 0 ? (
+          <div className="mt-10 grid grid-cols-2 gap-x-6 gap-y-12 lg:grid-cols-4">
+            {products.map((product, index) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                priority={index < 4}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="mt-10 text-sm text-content-muted">
+            New pieces are on their way. Browse the collections below.
+          </p>
+        )}
       </section>
 
       <section className="mx-auto max-w-6xl px-5 pb-8">

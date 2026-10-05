@@ -15,7 +15,7 @@ import {
   placeOrder,
 } from "./repositories.ts";
 import { seed } from "./seed.ts";
-import { orderLines, orders, variants } from "./schema.ts";
+import { orderLines, orders, products, variants } from "./schema.ts";
 import { eq } from "drizzle-orm";
 
 /**
@@ -72,6 +72,31 @@ dbTest("reads the catalogue with variants and collections", async () => {
   assert.equal(studs.variants.length, 2);
   assert.ok(studs.collections.includes("everyday"));
   assert.equal(studs.piercedJewellery, true);
+});
+
+dbTest("recent-product limit keeps every variant and collection for the selected product", async () => {
+  const [original] = await db
+    .select({ createdAt: products.createdAt })
+    .from(products)
+    .where(eq(products.handle, "petal-studs"));
+  assert.ok(original);
+  await db
+    .update(products)
+    .set({ createdAt: new Date("2030-01-01T00:00:00.000Z") })
+    .where(eq(products.handle, "petal-studs"));
+
+  try {
+    const recent = await listProducts(db, { limit: 1 });
+    assert.equal(recent.length, 1);
+    assert.equal(recent[0]?.handle, "petal-studs");
+    assert.equal(recent[0]?.variants.length, 2);
+    assert.ok(recent[0]?.collections.includes("everyday"));
+  } finally {
+    await db
+      .update(products)
+      .set({ createdAt: original.createdAt })
+      .where(eq(products.handle, "petal-studs"));
+  }
 });
 
 dbTest("refuses to add a sold-out variant", async () => {

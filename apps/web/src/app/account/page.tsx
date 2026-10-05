@@ -9,12 +9,13 @@ import { formatPaise } from "@siumora/in-locale";
 import { Display, MicroLabel } from "@siumora/ui";
 
 import { PrivacyControls } from "@/components/privacy-controls";
+import { ProfileForm } from "@/components/profile-form";
 import { SignOutButton } from "@/components/sign-out-button";
 import { listOrders } from "@/lib/order-store";
 import { currentViewer } from "@/lib/session";
 
 export const metadata: Metadata = {
-  title: "Your orders",
+  title: "Your account",
   robots: { index: false, follow: false },
 };
 
@@ -41,7 +42,7 @@ async function AccountPageContents() {
     return (
       <div className="mx-auto flex max-w-md flex-col items-center px-5 py-32 text-center">
         <Display as="h1" size="sm">
-          Your orders
+          Your account
         </Display>
         <p className="mt-4 text-content-muted">
           Sign in with your mobile number to see everything you have ordered.
@@ -56,13 +57,16 @@ async function AccountPageContents() {
     );
   }
 
-  const orders = await listOrders();
+  const orderResult = await listOrders()
+    .then((orders) => ({ orders, unavailable: false }))
+    .catch(() => ({ orders: [], unavailable: true }));
+  const { orders } = orderResult;
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-14">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <Display as="h1" size="sm">
-          Your orders
+          Your account
         </Display>
         <SignOutButton />
       </div>
@@ -83,7 +87,29 @@ async function AccountPageContents() {
         )}
       </p>
 
-      {orders.length === 0 ? (
+      <section className="mt-10 border-t border-[var(--color-rule)] pt-8">
+        <h2>
+          <MicroLabel>Your details</MicroLabel>
+        </h2>
+        <p className="mt-3 text-sm text-content-muted">
+          Your mobile number is used to sign in. Add a name and email address for your account.
+        </p>
+        <ProfileForm name={viewer.customer.name} email={viewer.customer.email} />
+      </section>
+
+      <h2 className="mt-14">
+        <MicroLabel>Your orders</MicroLabel>
+      </h2>
+      {orderResult.unavailable ? (
+        <div role="alert" className="mt-12 border border-[var(--color-rule)] p-5 text-sm">
+          <p>We could not load your orders right now. Please try again shortly.</p>
+          <form action="/account" method="get" className="mt-3">
+            <button type="submit" className="min-h-11 underline underline-offset-4">
+              Try again
+            </button>
+          </form>
+        </div>
+      ) : orders.length === 0 ? (
         <div className="mt-16 text-center">
           <p className="text-content-muted">No orders yet.</p>
           <Link
@@ -132,7 +158,9 @@ async function AccountPageContents() {
       )}
 
       <section className="mt-16 border-t border-[var(--color-rule)] pt-8">
-        <MicroLabel>Your data</MicroLabel>
+        <h2>
+          <MicroLabel>Your data</MicroLabel>
+        </h2>
         <p className="mt-3 max-w-prose text-sm text-content-muted">
           Under the Digital Personal Data Protection Act you can take a copy of
           everything we hold about you, or ask us to erase it.

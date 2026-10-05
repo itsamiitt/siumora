@@ -21,6 +21,13 @@ export async function listProducts(): Promise<Product[]> {
   return api().listProducts({}, { revalidate: CATALOG_REVALIDATE_SECONDS });
 }
 
+export async function listRecentProducts(limit = 8): Promise<Product[]> {
+  return api().listProducts(
+    { limit },
+    { revalidate: CATALOG_REVALIDATE_SECONDS },
+  );
+}
+
 export async function getProduct(handle: string): Promise<Product | undefined> {
   const result = await api().getProduct(handle, {
     revalidate: CATALOG_REVALIDATE_SECONDS,

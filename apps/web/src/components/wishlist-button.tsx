@@ -11,13 +11,7 @@ import { MicroLabel } from "@siumora/ui";
 
 import { toggleWishlistItem } from "@/app/actions/wishlist";
 
-/**
- * Save for later.
- *
- * Optimistic: the label flips immediately and reconciles from the action's
- * return value. `add_to_wishlist` fires only on the add, never on the remove —
- * an un-save is not a signal any ad platform should optimise toward.
- */
+/** The saved state is read after hydration so the product page stays cacheable. */
 export function WishlistButton({
   handle,
   item,
@@ -28,13 +22,15 @@ export function WishlistButton({
   value: number;
 }) {
   const [saved, setSaved] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   const [pending, start] = useTransition();
 
-  // Resolved after hydration rather than during render. Reading the wishlist
-  // cookie on the server would make the product page dynamic and drop it out
-  // of the static tier, which is where the LCP budget lives.
   useEffect(() => {
     const controller = new AbortController();
+    setReady(false);
+    setMessage(null);
 
     void (async () => {
       try {
@@ -42,45 +38,72 @@ export function WishlistButton({
           signal: controller.signal,
           cache: "no-store",
         });
-        if (!response.ok) return;
+        if (!response.ok) throw new Error("Could not load Saved.");
         const data = (await response.json()) as { handles: string[] };
         setSaved(data.handles.includes(handle));
+        setReady(true);
       } catch {
-        // Offline or aborted — the button still works, it just starts unsaved.
+        if (!controller.signal.aborted) {
+          setMessage("Saved items are unavailable right now.");
+        }
       }
     })();
 
     return () => controller.abort();
-  }, [handle]);
+  }, [handle, retry]);
 
   return (
-    <button
-      type="button"
-      aria-pressed={saved}
-      disabled={pending}
-      onClick={() =>
-        start(async () => {
-          const next = !saved;
-          setSaved(next);
-
-          const result = await toggleWishlistItem(handle);
-          setSaved(result.wishlisted);
-
-          if (result.wishlisted) {
-            track("add_to_wishlist", {
-              event_id: mintEventId(),
-              currency: "INR",
-              value,
-              items: [item],
-            });
-          }
-        })
-      }
-      className="transition-colors hover:text-accent-ink"
-    >
-      <MicroLabel tone={saved ? "mulberry" : "ink"}>
-        {saved ? "Saved" : "Save for later"}
-      </MicroLabel>
-    </button>
+    <div>
+      <button
+        type="button"
+        aria-pressed={ready ? saved : undefined}
+        disabled={!ready || pending}
+        onClick={() =>
+          start(async () => {
+            const next = !saved;
+            setSaved(next);
+            setMessage(null);
+            try {
+              const result = await toggleWishlistItem(handle);
+              setSaved(result.wishlisted);
+              if (result.wishlisted) {
+                try {
+                  track("add_to_wishlist", {
+                    event_id: mintEventId(),
+                    currency: "INR",
+                    value,
+                    items: [item],
+                  });
+                } catch {
+                  // Analytics must never change the result of a saved-item write.
+                }
+              }
+            } catch {
+              setSaved(saved);
+              setMessage("Could not update Saved. Please try again.");
+            }
+          })
+        }
+        className="min-h-11 transition-colors hover:text-accent-ink disabled:opacity-60"
+      >
+        <MicroLabel tone={saved ? "mulberry" : "ink"}>
+          {!ready ? "Checking Saved…" : saved ? "Saved" : "Save for later"}
+        </MicroLabel>
+      </button>
+      {message && (
+        <p role="alert" className="mt-2 text-xs text-content-muted">
+          {message}{" "}
+          {!ready && (
+            <button
+              type="button"
+              onClick={() => setRetry((count) => count + 1)}
+              className="underline underline-offset-4"
+            >
+              Retry
+            </button>
+          )}
+        </p>
+      )}
+    </div>
   );
 }

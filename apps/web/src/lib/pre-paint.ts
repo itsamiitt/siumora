@@ -15,6 +15,7 @@
 
 export const THEME_STORAGE_KEY = "siumora.theme";
 export const CONSENT_STORAGE_KEY = "siumora.consent";
+export const CONSENT_OPEN_EVENT = "siumora:open-consent";
 
 /** Applies a stored theme choice, so a dark visitor never sees an ivory flash. */
 const THEME_SCRIPT = `
@@ -31,7 +32,11 @@ try {
  */
 const CONSENT_SCRIPT = `
 try {
-  if (!localStorage.getItem(${JSON.stringify(CONSENT_STORAGE_KEY)})) {
+  var raw = localStorage.getItem(${JSON.stringify(CONSENT_STORAGE_KEY)});
+  var choice = raw ? JSON.parse(raw) : null;
+  if (!choice || typeof choice.analytics !== "boolean" ||
+      typeof choice.ads !== "boolean" ||
+      typeof choice.personalisation !== "boolean") {
     document.documentElement.setAttribute("data-consent", "ask");
   }
 } catch (e) {

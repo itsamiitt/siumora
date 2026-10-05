@@ -75,4 +75,31 @@ export async function registerWishlistRoutes(server: FastifyInstance) {
 
     return { wishlisted: !existing, count: remaining.length };
   });
+
+  server.delete("/wishlists/:wishlistId/items/:handle", async (request) => {
+    const { wishlistId, handle } = z
+      .object({ wishlistId: z.uuid(), handle: z.string().min(1) })
+      .parse(request.params);
+    const [product] = await server.db
+      .select({ id: schema.products.id })
+      .from(schema.products)
+      .where(eq(schema.products.handle, handle));
+
+    // Removal is idempotent, including when a product was deleted meanwhile.
+    if (product) {
+      await server.db
+        .delete(schema.wishlistItems)
+        .where(
+          and(
+            eq(schema.wishlistItems.wishlistId, wishlistId),
+            eq(schema.wishlistItems.productId, product.id),
+          ),
+        );
+    }
+    const remaining = await server.db
+      .select({ productId: schema.wishlistItems.productId })
+      .from(schema.wishlistItems)
+      .where(eq(schema.wishlistItems.wishlistId, wishlistId));
+    return { count: remaining.length };
+  });
 }

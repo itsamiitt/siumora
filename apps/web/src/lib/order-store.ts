@@ -211,12 +211,8 @@ export function nextStatuses(status: OrderStatus): OrderStatus[] {
  * than an empty one.
  */
 export async function listOrders(): Promise<Order[]> {
-  try {
-    const rows = await (await apiAs()).listOrders();
-    return rows.map(toDomain);
-  } catch {
-    return [];
-  }
+  const rows = await (await apiAs()).listOrders();
+  return rows.map(toDomain);
 }
 
 /**

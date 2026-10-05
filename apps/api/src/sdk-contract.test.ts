@@ -521,7 +521,7 @@ contract("requestReturn on a delivered order", async () => {
 
 // ── Wishlist ──────────────────────────────────────────────────
 
-contract("wishlist toggle and read", async () => {
+contract("wishlist toggle, read, and idempotent remove", async () => {
   const products = await client.listProducts();
   const wishlistId = crypto.randomUUID();
 
@@ -531,6 +531,12 @@ contract("wishlist toggle and read", async () => {
 
   const handles = await client.getWishlist(wishlistId);
   assert.deepEqual(handles, [products[0]!.handle]);
+
+  const removed = await client.removeWishlist(wishlistId, products[0]!.handle);
+  assertExactKeys(removed, ["count"], "removeWishlist");
+  assert.equal(removed.count, 0);
+  assert.deepEqual(await client.removeWishlist(wishlistId, products[0]!.handle), { count: 0 });
+  assert.deepEqual(await client.getWishlist(wishlistId), []);
 });
 
 // ── Data-principal rights ─────────────────────────────────────

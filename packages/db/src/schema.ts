@@ -47,7 +47,10 @@ export const products = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("products_handle_key").on(table.handle)],
+  (table) => [
+    uniqueIndex("products_handle_key").on(table.handle),
+    index("products_created_id_idx").on(table.createdAt.desc(), table.id.desc()),
+  ],
 );
 
 export const variants = pgTable(

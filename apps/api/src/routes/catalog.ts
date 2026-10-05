@@ -38,10 +38,17 @@ function toDomain(row: Awaited<ReturnType<typeof listProducts>>[number]): Produc
 export async function registerCatalogRoutes(server: FastifyInstance) {
   server.get("/products", async (request, reply) => {
     const query = z
-      .object({ collection: z.string().optional(), q: z.string().optional() })
+      .object({
+        collection: z.string().optional(),
+        q: z.string().optional(),
+        limit: z.coerce.number().int().min(1).max(24).optional(),
+      })
       .parse(request.query);
 
-    const rows = await listProducts(server.db);
+    const rows = await listProducts(
+      server.db,
+      query.limit && !query.collection && !query.q ? { limit: query.limit } : {},
+    );
     let items = rows.map(toDomain);
 
     if (query.collection) {
@@ -50,6 +57,7 @@ export async function registerCatalogRoutes(server: FastifyInstance) {
     if (query.q) {
       items = searchProducts(items, query.q).map((hit) => hit.product);
     }
+    if (query.limit) items = items.slice(0, query.limit);
 
     // Catalogue data is public and changes rarely; letting the CDN hold it
     // keeps the origin out of the path for most reads.

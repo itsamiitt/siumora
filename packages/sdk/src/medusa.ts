@@ -26,6 +26,7 @@ import {
 } from "@siumora/core";
 
 import { ApiError, SiumoraClient } from "./index.ts";
+import type { AccountCustomer } from "./index.ts";
 
 /**
  * Medusa transport for the commerce surface (design doc M1).
@@ -477,12 +478,15 @@ export class MedusaClient implements PublicSurface {
     return this.regionId;
   }
 
-  private async fetchCatalog(options?: { revalidate?: number }): Promise<Product[]> {
+  private async fetchCatalog(
+    options?: { revalidate?: number; limit?: number },
+  ): Promise<Product[]> {
     const regionId = await this.region();
     const data = await this.request<{ products: MedusaProduct[] }>(
       "GET",
       `/store/products?fields=${encodeURIComponent(PRODUCT_FIELDS)}` +
-        `&region_id=${encodeURIComponent(regionId)}&limit=${CATALOG_PAGE}`,
+        `&region_id=${encodeURIComponent(regionId)}&limit=${options?.limit ?? CATALOG_PAGE}` +
+        (options?.limit ? "&order=-created_at" : ""),
       undefined,
       options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
     );
@@ -492,10 +496,13 @@ export class MedusaClient implements PublicSurface {
   // ── Catalogue ───────────────────────────────────────────────
 
   async listProducts(
-    query: { collection?: string; q?: string } = {},
+    query: { collection?: string; q?: string; limit?: number } = {},
     options?: { revalidate?: number },
   ): Promise<Product[]> {
-    let products = await this.fetchCatalog(options);
+    let products = await this.fetchCatalog({
+      ...options,
+      ...(query.limit && !query.collection && !query.q ? { limit: query.limit } : {}),
+    });
     if (query.collection) {
       // Full membership lives on metadata; Medusa's collection_id only knows
       // the primary. Filtering here keeps multi-collection products visible.
@@ -508,6 +515,7 @@ export class MedusaClient implements PublicSurface {
       // construction, not by re-implementation.
       products = searchProducts(products, query.q).map((hit) => hit.product);
     }
+    if (query.limit) products = products.slice(0, query.limit);
     return products;
   }
 
@@ -1047,6 +1055,13 @@ export class MedusaClient implements PublicSurface {
     );
   }
 
+  async removeWishlist(wishlistId: string, handle: string): Promise<{ count: number }> {
+    return this.request(
+      "DELETE",
+      `/store/siumora/wishlists/${encodeURIComponent(wishlistId)}/items/${encodeURIComponent(handle)}`,
+    );
+  }
+
   async getStoreConfig(): Promise<{ paymentsEnabled: boolean; razorpayConfigured: boolean }> {
     return this.request("GET", "/store/siumora/config");
   }
@@ -1059,8 +1074,30 @@ export class MedusaClient implements PublicSurface {
   async signOutEverywhere(): Promise<never> {
     throw new NotPortedError("signOutEverywhere", "the M2 session port");
   }
-  async updateProfile(): Promise<never> {
-    throw new NotPortedError("updateProfile", "the M2 customer port");
+  async updateProfile(input: {
+    name?: string;
+    email?: string;
+  }): Promise<{ ok: boolean; customer: AccountCustomer }> {
+    if (!this.token) {
+      throw new ApiError(401, "unauthorized", "Sign in to update your details.");
+    }
+
+    const name = input.name?.trim();
+    const parts = name?.split(/\s+/) ?? [];
+    const email = input.email?.trim();
+    const updated = await this.request<{ customer: MedusaCustomer }>(
+      "POST",
+      "/store/customers/me",
+      {
+        ...(name !== undefined
+          ? { first_name: parts[0] ?? "", last_name: parts.slice(1).join(" ") }
+          : {}),
+        ...(email !== undefined ? { email } : {}),
+      },
+    );
+    const phone =
+      normalisePhone(updated.customer.phone ?? "") ?? updated.customer.phone ?? "";
+    return { ok: true, customer: customerCard(updated.customer, phone) };
   }
   async listOrders(): Promise<never> {
     throw new NotPortedError("listOrders", "the M2 order-ownership port");
