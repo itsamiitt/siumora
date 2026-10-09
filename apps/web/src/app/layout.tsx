@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import { Cormorant_Garamond, Jost, Marcellus } from "next/font/google";
 import { GoogleTagManager } from "@next/third-parties/google";
+import { cookies } from "next/headers";
 
 import { SITE, organizationJsonLd, websiteJsonLd } from "@siumora/seo";
 
@@ -12,6 +14,7 @@ import { FestivalBanner } from "@/components/festival-banner";
 import { ServiceWorker } from "@/components/service-worker";
 import { SiteHeader } from "@/components/site-header";
 import { PRE_PAINT_SCRIPT } from "@/lib/pre-paint";
+import { PREVIEW_COOKIE, validPreviewCookie } from "@/lib/launch-preview";
 
 import "./globals.css";
 
@@ -79,24 +82,39 @@ export default function RootLayout({
       </head>
       <body className="flex min-h-dvh flex-col">
         <JsonLdScript data={[organizationJsonLd(), websiteJsonLd()]} />
-        {!comingSoon && <FestivalBanner />}
-        {!comingSoon && <SiteHeader />}
+        <Suspense fallback={null}><StorefrontHeader /></Suspense>
         <main className="flex-1">{children}</main>
-        {!comingSoon && <SiteFooter />}
-        <ConsentBanner />
-        <ServiceWorker />
+        <Suspense fallback={null}><StorefrontFooter /></Suspense>
+        {!comingSoon && <ConsentBanner />}
+        {!comingSoon && <ServiceWorker />}
         {/* Tags load via the framework's optimized loader, never raw script
             tags (eng review 8A); the Pixel additionally waits for ads consent
             and first idle. Consent Mode v2 defaults are denied until the
             banner grants — the GTM container sees the dataLayer state. */}
-        {process.env.NEXT_PUBLIC_GTM_ID && (
+        {!comingSoon && process.env.NEXT_PUBLIC_GTM_ID && (
           <GoogleTagManager gtmId={process.env.NEXT_PUBLIC_GTM_ID} />
         )}
-        {process.env.NEXT_PUBLIC_META_PIXEL_ID && (
+        {!comingSoon && process.env.NEXT_PUBLIC_META_PIXEL_ID && (
           <MetaPixelLoader pixelId={process.env.NEXT_PUBLIC_META_PIXEL_ID} />
         )}
-        <WebVitalsReporter />
+        {!comingSoon && <WebVitalsReporter />}
       </body>
     </html>
   );
+}
+
+async function mayShowStorefrontChrome(): Promise<boolean> {
+  if (process.env.SITE_PHASE !== "coming-soon") return true;
+  const token = (await cookies()).get(PREVIEW_COOKIE)?.value;
+  return validPreviewCookie(token, process.env.COMING_SOON_PREVIEW_PASSWORD);
+}
+
+async function StorefrontHeader() {
+  if (!(await mayShowStorefrontChrome())) return null;
+  return <><FestivalBanner /><SiteHeader /></>;
+}
+
+async function StorefrontFooter() {
+  if (!(await mayShowStorefrontChrome())) return null;
+  return <SiteFooter />;
 }

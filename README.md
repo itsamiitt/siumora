@@ -4,7 +4,11 @@
 
 The brand-kit HTML in `brand-kit/06-web` is the visual reference. The functional
 page is `/coming-soon` in the web app. Set `SITE_PHASE=coming-soon` for the
-web deployment to show it at `/` and hide the storefront navigation. The
+web deployment to show it at `/` and gate the storefront. Set a server-only
+`COMING_SOON_PREVIEW_PASSWORD` of at least 12 characters. The small lock in the
+page header opens a password form; a successful entry grants a signed, HTTP-only
+12-hour preview of the existing storefront. Changing the password revokes prior
+previews. The waiting-list form remains public. The
 signup endpoint follows `COMMERCE_BACKEND`. With `COMMERCE_BACKEND=medusa`, set
 `MEDUSA_URL`, `MEDUSA_PUBLISHABLE_KEY`, and the browser-reachable
 `MEDUSA_ADMIN_URL`; run Medusa migrations before opening signups. Entries live

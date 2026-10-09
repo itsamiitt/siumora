@@ -1,5 +1,6 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 @import "@siumora/ui/theme.css";
 
-/* Workspace UI package ships source, so Tailwind must scan it for classes. */
+/* Scan source only: generated Next build files can contain invalid class-like bytes. */
+@source "../";
 @source "../../../../packages/ui/src";

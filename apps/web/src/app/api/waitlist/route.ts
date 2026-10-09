@@ -2,8 +2,21 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export async function POST(request: NextRequest) {
   // Browsers submit only to our origin. The API URL stays on the server.
+  // Compared against the Host header, not nextUrl.origin: behind a reverse
+  // proxy `next start` builds nextUrl from its own bind address
+  // (https://127.0.0.1:3000), so a real https://siumora.com signup never
+  // matched. Host is what Next's own server-action origin check trusts.
   const origin = request.headers.get("origin");
-  if (origin && origin !== request.nextUrl.origin) {
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  let sameOrigin = !origin;
+  if (origin) {
+    try {
+      sameOrigin = new URL(origin).host === host;
+    } catch {
+      sameOrigin = false;
+    }
+  }
+  if (!sameOrigin) {
     return NextResponse.json({ message: "Invalid request origin." }, { status: 403 });
   }
 
