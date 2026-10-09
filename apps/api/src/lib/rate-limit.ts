@@ -35,6 +35,9 @@ export interface RateRule {
  * legitimately posts thirty orders a minute from one address.
  */
 export const DEFAULT_RULES: readonly RateRule[] = [
+  // The Next.js server proxies public signups, so its shared IP needs a
+  // generous ceiling. Unique emails prevent duplicate records.
+  { prefix: "/waitlist", method: "POST", limit: 120, windowMs: 60_000 },
   // Sign-in. The database limits per phone and per origin over an hour; this
   // is the short-window ceiling that stops a burst before it gets there.
   { prefix: "/auth/", method: "POST", limit: 10, windowMs: 60_000, bucket: "auth" },

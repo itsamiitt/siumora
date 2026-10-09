@@ -1,5 +1,24 @@
 # Siumora
 
+## Coming Soon launch
+
+The brand-kit HTML in `brand-kit/06-web` is the visual reference. The functional
+page is `/coming-soon` in the web app. Set `SITE_PHASE=coming-soon` for the
+web deployment to show it at `/` and hide the storefront navigation. The
+signup endpoint follows `COMMERCE_BACKEND`. With `COMMERCE_BACKEND=medusa`, set
+`MEDUSA_URL`, `MEDUSA_PUBLISHABLE_KEY`, and the browser-reachable
+`MEDUSA_ADMIN_URL`; run Medusa migrations before opening signups. Entries live
+in Medusa's `siumora_waitlist_entry` module table. `/coming-soon/admin` takes
+operators to the **Waiting list** screen in the existing Medusa dashboard,
+where they use their normal Medusa admin login. Access to subscriber details
+requires the owner permission, and the list is paged 50 at a time.
+
+The Fastify path remains for `COMMERCE_BACKEND=fastify`: set `API_URL`, run its
+database migrations, and configure its OTP sender for operator sign-in. Its
+entries live in `waitlist_entries`. The two backends use separate databases;
+switching an existing live signup deployment requires a data migration. Both
+paths normalize email addresses and give the same answer for repeat signups.
+
 Single-vendor e-commerce platform for the Indian market. Demi-fine jewellery,
 ₹1,500–10,000, built to the architecture in [`plan/`](plan/) and the identity in
 [`brand-kit/`](brand-kit/).

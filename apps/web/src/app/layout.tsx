@@ -66,6 +66,7 @@ export const viewport: Viewport = {
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const comingSoon = process.env.SITE_PHASE === "coming-soon";
   return (
     <html
       lang="en-IN"
@@ -78,10 +79,10 @@ export default function RootLayout({
       </head>
       <body className="flex min-h-dvh flex-col">
         <JsonLdScript data={[organizationJsonLd(), websiteJsonLd()]} />
-        <FestivalBanner />
-        <SiteHeader />
+        {!comingSoon && <FestivalBanner />}
+        {!comingSoon && <SiteHeader />}
         <main className="flex-1">{children}</main>
-        <SiteFooter />
+        {!comingSoon && <SiteFooter />}
         <ConsentBanner />
         <ServiceWorker />
         {/* Tags load via the framework's optimized loader, never raw script

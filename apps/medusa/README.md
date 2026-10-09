@@ -1,5 +1,19 @@
 # @siumora/medusa
 
+## Coming Soon waiting list
+
+With `COMMERCE_BACKEND=medusa`, the storefront sends waiting list signups to
+`POST /store/siumora/waitlist`. The `siumoraWaitlist` module stores one record
+per normalized email. Run `medusa db:migrate` after deploying this module.
+Medusa Admin has **Siumora → Waiting list** at `/app/siumora/waitlist`; it uses
+the normal dashboard login, and the API allows only owners to read the paged
+list. Set the web app's `MEDUSA_ADMIN_URL` to the browser-reachable Medusa origin
+so its Admin sign in link can reach the dashboard.
+The list also shows a matching Medusa customer and orders whose email matches
+the signup, including guest orders. Those matches are read live; joining the
+list does not create a customer account or change an order. An email match is
+an operational clue, not proof that the same person controls both records.
+
 The Medusa 2.x commerce backend (Track M). Store API for the storefront's
 Medusa transport, plus the **Admin dashboard** — the CMS-style ops surface —
 at `<backend>/app`.

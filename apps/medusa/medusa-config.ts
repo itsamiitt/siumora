@@ -97,6 +97,7 @@ export default defineConfig({
     { resolve: "./src/modules/serviceability" },
     { resolve: "./src/modules/settings" },
     { resolve: "./src/modules/wishlist" },
+    { resolve: "./src/modules/waitlist" },
     // M2 wave B ops surface: the operator audit log every /admin/siumora
     // write testifies to, and the COD remittance ledger.
     { resolve: "./src/modules/audit" },

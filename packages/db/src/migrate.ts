@@ -735,6 +735,18 @@ ALTER TABLE return_requests ADD COLUMN payout_recorded_at timestamptz;
 CREATE INDEX products_created_id_idx ON products(created_at DESC, id DESC);
 `,
   },
+  {
+    id: "0019_waitlist",
+    sql: `
+CREATE TABLE waitlist_entries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
+  email text NOT NULL UNIQUE CHECK (char_length(email) <= 254),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX waitlist_entries_created_idx ON waitlist_entries(created_at DESC);
+`,
+  },
 ];
 
 /**

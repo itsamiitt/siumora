@@ -147,6 +147,18 @@ export const customers = pgTable(
   (table) => [uniqueIndex("customers_phone_key").on(table.phone)],
 );
 
+/** Prelaunch subscribers are separate from shopper accounts, which require a phone. */
+export const waitlistEntries = pgTable(
+  "waitlist_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("waitlist_entries_email_key").on(table.email)],
+);
+
 /**
  * Data-principal requests under the DPDP Act 2023.
  *

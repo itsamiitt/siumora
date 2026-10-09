@@ -19,6 +19,12 @@ export default function PrivacyPage() {
     >
       <Section heading="What we collect">
         <p>
+          If you join the waiting list, we collect the name and email address
+          you provide. We use them to contact you about Siumora opening. Our
+          staff may also see whether that email appears on a customer account
+          or order, so they can avoid treating an existing customer as new.
+        </p>
+        <p>
           To send you an order: your name, phone number, delivery address and
           email. To take payment: nothing you would recognise as card details —
           those go straight to our payment gateway and never touch our servers.
@@ -31,6 +37,10 @@ export default function PrivacyPage() {
       </Section>
 
       <Section heading="Why we are allowed to">
+        <p>
+          We use waiting list details because you asked to hear when we open.
+          You can withdraw that request by contacting the grievance officer below.
+        </p>
         <p>
           Order data we process because you asked us to send you something —
           performing that contract is the lawful basis, and it does not depend

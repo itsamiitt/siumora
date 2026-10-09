@@ -26,6 +26,7 @@ import { registerTwoFactorRoutes } from "./routes/two-factor.ts";
 import { registerSettingsRoutes } from "./routes/settings.ts";
 import { registerShippingRoutes } from "./routes/shipping.ts";
 import { registerWishlistRoutes } from "./routes/wishlist.ts";
+import { registerWaitlistRoutes } from "./routes/waitlist.ts";
 import type { OtpSender } from "@siumora/messaging";
 import { createRateLimiter, type RateLimiter } from "./lib/rate-limit.ts";
 import { createRazorpayClient, type RazorpayClient } from "./lib/razorpay.ts";
@@ -391,6 +392,7 @@ export async function buildApp(config: AppConfig): Promise<App> {
   await registerShippingRoutes(server);
   await registerWebhookRoutes(server);
   await registerWishlistRoutes(server);
+  await registerWaitlistRoutes(server);
   await registerAdminRoutes(server);
   await registerGstRoutes(server);
   await registerRemittanceRoutes(server);

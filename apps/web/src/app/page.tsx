@@ -1,11 +1,18 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 
 import { CollectionTitle, Display, MicroLabel } from "@siumora/ui";
 
 import { ProductCard } from "@/components/product-card";
 import { listCollections, listRecentProducts } from "@/lib/catalog";
+import ComingSoonPage from "./coming-soon/page";
+
+export const metadata: Metadata = process.env.SITE_PHASE === "coming-soon"
+  ? { title: "Coming soon", description: "Siumora is coming. Join the waiting list for our everyday jewellery opening." }
+  : {};
 
 export default async function HomePage() {
+  if (process.env.SITE_PHASE === "coming-soon") return <ComingSoonPage />;
   const [products, collections] = await Promise.all([
     listRecentProducts(),
     listCollections(),
