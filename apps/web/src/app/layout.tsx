@@ -106,7 +106,7 @@ export default function RootLayout({
 async function mayShowStorefrontChrome(): Promise<boolean> {
   if (process.env.SITE_PHASE !== "coming-soon") return true;
   const token = (await cookies()).get(PREVIEW_COOKIE)?.value;
-  return validPreviewCookie(token, process.env.COMING_SOON_PREVIEW_PASSWORD);
+  return validPreviewCookie(token, process.env.COMING_SOON_PREVIEW_PASSWORD, process.env.COMING_SOON_PREVIEW_SECRET);
 }
 
 async function StorefrontHeader() {

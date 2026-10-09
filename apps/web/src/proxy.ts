@@ -8,7 +8,7 @@ export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   if (publicDuringLaunch(path)) return NextResponse.next();
 
-  if (validPreviewCookie(request.cookies.get(PREVIEW_COOKIE)?.value, process.env.COMING_SOON_PREVIEW_PASSWORD)) {
+  if (validPreviewCookie(request.cookies.get(PREVIEW_COOKIE)?.value, process.env.COMING_SOON_PREVIEW_PASSWORD, process.env.COMING_SOON_PREVIEW_SECRET)) {
     return NextResponse.next();
   }
 

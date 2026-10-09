@@ -5,10 +5,16 @@
 The brand-kit HTML in `brand-kit/06-web` is the visual reference. The functional
 page is `/coming-soon` in the web app. Set `SITE_PHASE=coming-soon` for the
 web deployment to show it at `/` and gate the storefront. Set a server-only
-`COMING_SOON_PREVIEW_PASSWORD` of at least 12 characters. The small lock in the
-page header opens a password form; a successful entry grants a signed, HTTP-only
-12-hour preview of the existing storefront. Changing the password revokes prior
-previews. The waiting-list form remains public. The
+`COMING_SOON_PREVIEW_PASSWORD` containing exactly four digits (leading zeros are
+supported), and a separate random `COMING_SOON_PREVIEW_SECRET` of at least 32
+characters. Generate the secret with
+`node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`.
+The small lock in the page header opens a PIN form; a successful entry grants a
+signed, HTTP-only 12-hour preview of the existing storefront. Changing the PIN
+or signing secret revokes prior previews. Failed entries are limited to five per
+address and thirty across addresses per fifteen minutes on each server process;
+multi-instance deployments should enforce the same limits at their shared ingress.
+The waiting-list form remains public. The
 signup endpoint follows `COMMERCE_BACKEND`. With `COMMERCE_BACKEND=medusa`, set
 `MEDUSA_URL`, `MEDUSA_PUBLISHABLE_KEY`, and the browser-reachable
 `MEDUSA_ADMIN_URL`; run Medusa migrations before opening signups. Entries live
