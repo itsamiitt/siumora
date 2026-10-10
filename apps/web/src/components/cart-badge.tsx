@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { MicroLabel } from "@siumora/ui";
+import { StoreIcon } from "./store-icon";
 
 /** Dispatched after any cart mutation, carrying the authoritative new count. */
 export const CART_CHANGED_EVENT = "siumora:cart-changed";
@@ -57,8 +57,9 @@ export function CartBadge() {
   }, []);
 
   return (
-    <Link href="/cart" className="inline-flex min-h-11 items-center transition-colors hover:text-accent-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ink">
-      <MicroLabel>Bag{count ? ` (${count})` : ""}</MicroLabel>
+    <Link href="/cart" aria-label={`Bag${count ? ` (${count})` : ""}`} className="store-icon-button store-bag">
+      <StoreIcon name="bag" />
+      {count !== null && count > 0 && <span className="store-bag-count" aria-hidden="true">{count}</span>}
     </Link>
   );
 }

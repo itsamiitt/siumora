@@ -12,5 +12,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     listCollections(),
   ]);
 
-  return buildSitemap(products, collections);
+  return [...buildSitemap(products, collections), { url: `${SITE.url}/shop` }];
 }

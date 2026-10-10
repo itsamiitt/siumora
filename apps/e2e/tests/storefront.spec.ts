@@ -112,14 +112,16 @@ test("mobile menu exposes collections and utilities, then closes on Escape and n
 
   await trigger.click();
   const nav = page.getByRole("navigation", { name: "Mobile navigation" });
+  const menu = page.getByRole("dialog", { name: "Shop menu" });
   await expect(nav).toBeVisible();
-  for (const label of ["Everyday", "Gifting", "The Petal Edit", "Search", "Saved", "Account"]) {
+  for (const label of ["All jewellery", "Earrings", "Necklaces", "Rings", "Everyday", "Gifting", "The Petal Edit", "Saved pieces", "Your account"]) {
     await expect(nav.getByRole("link", { name: label })).toBeVisible();
   }
-  await expect(nav.getByRole("button", { name: /Deliver to/ })).toBeVisible();
-  await expect(nav.getByRole("button", { name: /Switch between light and dark/ })).toBeVisible();
-  await nav.getByRole("button", { name: /Deliver to/ }).click();
-  await expect(nav.getByRole("textbox", { name: "Pincode" })).toBeVisible();
+  await expect(menu.getByRole("searchbox", { name: "Search jewellery" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: /Deliver to/ })).toBeVisible();
+  await expect(menu.getByRole("button", { name: /Switch between light and dark/ })).toBeVisible();
+  await menu.getByRole("button", { name: /Deliver to/ }).click();
+  await expect(menu.getByRole("textbox", { name: "Pincode" })).toBeVisible();
 
   await page.keyboard.press("Escape");
   await expect(nav).toBeHidden();
@@ -132,7 +134,7 @@ test("mobile menu exposes collections and utilities, then closes on Escape and n
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   await trigger.click();
-  const mobileTheme = nav.getByRole("button", { name: "Switch between light and dark" });
+  const mobileTheme = menu.getByRole("button", { name: "Switch between light and dark" });
   await mobileTheme.click();
   const nextThemeLabel = await mobileTheme.textContent();
   await page.setViewportSize({ width: 1440, height: 900 });

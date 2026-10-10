@@ -83,7 +83,7 @@ export default function RootLayout({
       <body className="flex min-h-dvh flex-col">
         <JsonLdScript data={[organizationJsonLd(), websiteJsonLd()]} />
         <Suspense fallback={null}><StorefrontHeader /></Suspense>
-        <main className="flex-1">{children}</main>
+        <main id="main-content" tabIndex={-1} className="flex-1">{children}</main>
         <Suspense fallback={null}><StorefrontFooter /></Suspense>
         {!comingSoon && <ConsentBanner />}
         {!comingSoon && <ServiceWorker />}

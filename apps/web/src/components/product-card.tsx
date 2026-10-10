@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import { isInStock, lowestPrice, type Product } from "@siumora/core";
 import { MicroLabel, Price } from "@siumora/ui";
+import { catalogPresentationImage } from "@/lib/catalog-presentation";
+import { StoreIcon } from "./store-icon";
 
 export function ProductCard({
   product,
@@ -20,10 +22,10 @@ export function ProductCard({
 }) {
   const price = lowestPrice(product);
   const available = isInStock(product);
-  const image = product.images[0]!;
+  const image = catalogPresentationImage(product.images[0]!);
 
   return (
-    <Link href={`/products/${product.handle}`} className="group block">
+    <Link href={`/products/${product.handle}`} className="group block store-product-card">
       {/* Paired with the PDP gallery by name, so the plate travels between the
           grid and the detail page instead of cutting. Scoped per product —
           a shared name across the grid would animate the wrong tile. */}
@@ -37,9 +39,10 @@ export function ProductCard({
           width={image.width}
           height={image.height}
           priority={priority}
-          sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"
+          sizes="(min-width: 1440px) 310px, (min-width: 1024px) 25vw, 50vw"
           className="h-full w-full object-cover transition-transform duration-700 ease-[var(--ease-siumora)] group-hover:scale-[1.03]"
         />
+        <span className="store-product-view">Discover piece <StoreIcon name="arrow" width="17" /></span>
 
         {!available && (
           <div className="absolute inset-x-0 bottom-0 bg-ground/92 py-2 text-center">
@@ -48,11 +51,11 @@ export function ProductCard({
         )}
       </div>
 
-      <div className="mt-4">
-        <h3 className="font-heading text-sm uppercase text-content" style={{ letterSpacing: "var(--tracking-caps)" }}>
+      <div className="store-product-info">
+        <h3>
           {product.title}
         </h3>
-        <p className="mt-1 text-sm text-content-muted">{product.subtitle}</p>
+        <p className="store-product-material">{product.material}</p>
         <Price mrp={price.mrp} selling={price.selling} size="sm" className="mt-2" />
       </div>
     </Link>

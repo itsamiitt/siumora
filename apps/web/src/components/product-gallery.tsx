@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 
 import type { Image as ProductImage } from "@siumora/core";
 import { MicroLabel } from "@siumora/ui";
+import { catalogPresentationImage } from "@/lib/catalog-presentation";
 
 /**
  * Product gallery with hold-to-zoom.
@@ -34,8 +35,9 @@ export function ProductGallery({
   const [origin, setOrigin] = useState("50% 50%");
   const frameRef = useRef<HTMLDivElement>(null);
 
-  const image = images[active] ?? images[0];
-  if (!image) return null;
+  const original = images[active] ?? images[0];
+  if (!original) return null;
+  const image = catalogPresentationImage(original);
 
   function track(event: React.PointerEvent<HTMLDivElement>) {
     if (!zoomed) return;
@@ -97,7 +99,7 @@ export function ProductGallery({
               }
             >
               <Image
-                src={thumb.url}
+                src={catalogPresentationImage(thumb).url}
                 alt=""
                 width={thumb.width}
                 height={thumb.height}

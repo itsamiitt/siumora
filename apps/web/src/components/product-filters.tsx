@@ -71,9 +71,12 @@ export function ProductFilters({
   }, [pathname]);
 
   function push(next: FilterState) {
-    const query = filtersToQuery(next);
+    const query = new URLSearchParams(filtersToQuery(next));
+    const category = params.get("category");
+    if (category) query.set("category", category);
+    const suffix = query.toString();
     startTransition(() => {
-      router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      router.push(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
     });
   }
 
