@@ -356,6 +356,10 @@ export interface MedusaClientOptions {
 /**
  * Everything expandable the product mapping needs, in one fields clause.
  * region_id rides along so calculated_price is present as the fallback.
+ *
+ * Medusa 2.21+ refuses a store `fields` path that is not on the route's
+ * allow-list (400). Any path here or in CART_FIELDS outside Medusa's defaults
+ * must also be added to allowFields() in apps/medusa/src/api/middlewares.ts.
  */
 const PRODUCT_FIELDS =
   "id,handle,title,subtitle,description,metadata," +

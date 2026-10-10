@@ -3,12 +3,16 @@ import { test } from "node:test";
 
 import {
   DEFAULT_RULES,
+  HIT_SCRIPT,
+  REDIS_KEY_PREFIX,
   createRateLimiter,
+  createRedisRateLimiter,
   limiterFromEnv,
   rateLimitMiddleware,
   type LimiterRequest,
   type LimiterResponse,
   type RateRule,
+  type RedisEvalClient,
 } from "./rate-limit.ts";
 
 /**
@@ -117,6 +121,8 @@ test("the shipped rules cover what plan/11 §4 names", () => {
   };
 
   assert.ok(covered("/auth/customer/otp", "POST") > 0, "auth");
+  // The paid half of sign-in: every request sends a WhatsApp/SMS message.
+  assert.ok(covered("/store/siumora-auth/otp", "POST") > 0, "otp send");
   assert.ok(covered("/store/siumora/checkout", "POST") > 0, "checkout");
   assert.ok(covered("/store/products?q=jhumka", "GET") > 0, "search");
   // Guessing an order access key is hopeless against a uuid, but every guess
@@ -262,4 +268,170 @@ test("without the escape hatch every environment gets the shipped rules", () => 
     if (!limiter.check("1.1.1.1", "/auth/customer/otp", "POST").allowed) refused = true;
   }
   assert.equal(refused, true);
+});
+
+test("the send-a-code and verify steps share one sign-in budget", () => {
+  // Otherwise a script alternates /store/siumora-auth/otp and
+  // /auth/customer/phone-otp and gets twice the shipped ceiling.
+  const limiter = createRateLimiter(DEFAULT_RULES);
+  for (let n = 0; n < 10; n += 1) {
+    const path = n % 2 === 0 ? "/store/siumora-auth/otp" : "/auth/customer/phone-otp";
+    assert.equal(limiter.check("1.1.1.1", path, "POST").allowed, true, `${n}`);
+  }
+  assert.equal(limiter.check("1.1.1.1", "/store/siumora-auth/otp", "POST").allowed, false);
+});
+
+/* -------------------------------------------------------------------------- *
+ * The shared limiter — driven against a fake Redis that runs HIT_SCRIPT's
+ * semantics (INCR, PEXPIRE on the first hit, PTTL) over a controllable clock.
+ * -------------------------------------------------------------------------- */
+
+class FakeRedis implements RedisEvalClient {
+  readonly keys = new Map<string, { count: number; expiresAt: number }>();
+  calls = 0;
+  down = false;
+  private readonly clock: { now: number };
+
+  constructor(clock: { now: number }) {
+    this.clock = clock;
+  }
+
+  async eval(script: string, numKeys: number, ...args: Array<string | number>) {
+    this.calls += 1;
+    if (this.down) throw new Error("connect ECONNREFUSED 127.0.0.1:6379");
+    assert.equal(script, HIT_SCRIPT);
+    assert.equal(numKeys, 1);
+    const [key, windowMs] = [String(args[0]), Number(args[1])];
+
+    const existing = this.keys.get(key);
+    const live = existing && existing.expiresAt > this.clock.now ? existing : undefined;
+    const entry = live
+      ? { count: live.count + 1, expiresAt: live.expiresAt }
+      : { count: 1, expiresAt: this.clock.now + windowMs };
+    this.keys.set(key, entry);
+    return [entry.count, entry.expiresAt - this.clock.now];
+  }
+}
+
+test("Redis: every instance counts into one budget", async () => {
+  // Two Medusa processes behind one load balancer: the ceiling is the rule's
+  // limit, not twice it.
+  const clock = { now: 1_000_000 };
+  const redis = new FakeRedis(clock);
+  const a = createRedisRateLimiter(redis, { rules: RULES });
+  const b = createRedisRateLimiter(redis, { rules: RULES });
+
+  assert.equal((await a.check("1.1.1.1", "/auth/customer/otp", "POST", clock.now)).allowed, true);
+  assert.equal((await b.check("1.1.1.1", "/auth/customer/otp", "POST", clock.now)).allowed, true);
+  assert.equal((await a.check("1.1.1.1", "/auth/customer/otp", "POST", clock.now)).allowed, true);
+
+  const refused = await b.check("1.1.1.1", "/auth/customer/otp", "POST", clock.now);
+  assert.equal(refused.allowed, false);
+  assert.equal(refused.remaining, 0);
+  assert.equal(refused.retryAfterSeconds, 60);
+});
+
+test("Redis: the window rolls over with the key's expiry, and says how long to wait", async () => {
+  const clock = { now: 1_000_000 };
+  const limiter = createRedisRateLimiter(new FakeRedis(clock), { rules: RULES });
+  for (let n = 0; n < 3; n += 1) await limiter.check("1.1.1.1", "/auth/customer/otp", "POST", clock.now);
+
+  clock.now += 59_900;
+  const waiting = await limiter.check("1.1.1.1", "/auth/customer/otp", "POST", clock.now);
+  assert.equal(waiting.allowed, false);
+  assert.ok(waiting.retryAfterSeconds >= 1);
+
+  clock.now += 101;
+  assert.equal((await limiter.check("1.1.1.1", "/auth/customer/otp", "POST", clock.now)).allowed, true);
+});
+
+test("Redis: keys are namespaced by origin and bucket", async () => {
+  const clock = { now: 1_000_000 };
+  const redis = new FakeRedis(clock);
+  const limiter = createRedisRateLimiter(redis, { rules: RULES });
+  await limiter.check("1.1.1.1", "/auth/customer/otp", "POST", clock.now);
+  await limiter.check("2.2.2.2", "/auth/customer/otp/verify", "POST", clock.now);
+
+  assert.deepEqual(
+    [...redis.keys.keys()].sort(),
+    [`${REDIS_KEY_PREFIX}1.1.1.1:auth`, `${REDIS_KEY_PREFIX}2.2.2.2:auth`],
+  );
+});
+
+test("Redis: a path no rule names never reaches Redis", async () => {
+  const clock = { now: 1_000_000 };
+  const redis = new FakeRedis(clock);
+  const limiter = createRedisRateLimiter(redis, { rules: RULES });
+  assert.equal((await limiter.check("1.1.1.1", "/health", "GET", clock.now)).allowed, true);
+  assert.equal(redis.calls, 0);
+});
+
+test("Redis down: falls back to per-instance limits and reports the fault", async () => {
+  // A cache outage must neither open the OTP endpoint nor refuse every
+  // checkout — the in-process limiter carries on with the same rules.
+  const clock = { now: 1_000_000 };
+  const redis = new FakeRedis(clock);
+  redis.down = true;
+  const faults: unknown[] = [];
+  const limiter = createRedisRateLimiter(redis, {
+    rules: RULES,
+    onError: (error) => faults.push(error),
+  });
+
+  for (let n = 0; n < 3; n += 1) {
+    assert.equal((await limiter.check("1.1.1.1", "/auth/customer/otp", "POST", clock.now)).allowed, true);
+  }
+  assert.equal((await limiter.check("1.1.1.1", "/auth/customer/otp", "POST", clock.now)).allowed, false);
+  assert.equal(faults.length, 4);
+});
+
+test("Redis: a malformed reply is treated as an outage, not as permission", async () => {
+  const limiter = createRedisRateLimiter(
+    { eval: async () => "OK" },
+    { rules: RULES, onError: () => {} },
+  );
+  for (let n = 0; n < 3; n += 1) await limiter.check("1.1.1.1", "/auth/customer/otp", "POST");
+  assert.equal((await limiter.check("1.1.1.1", "/auth/customer/otp", "POST")).allowed, false);
+});
+
+test("middleware answers a Redis-backed refusal with the same envelope", async () => {
+  const clock = { now: 1_000_000 };
+  const handler = rateLimitMiddleware(
+    createRedisRateLimiter(new FakeRedis(clock), { rules: RULES }),
+  );
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  for (let n = 0; n < 3; n += 1) {
+    const x = fakeExchange();
+    handler(x.req, x.res, x.next);
+    await settle();
+    assert.equal(x.calls(), 1, `request ${n} should fall through`);
+  }
+
+  const refused = fakeExchange();
+  handler(refused.req, refused.res, refused.next);
+  await settle();
+  assert.equal(refused.calls(), 0);
+  assert.equal(refused.sent.status, 429);
+  assert.equal((refused.sent.body as { error: string }).error, "rate_limited");
+  assert.ok(refused.sent.headers["Retry-After"]);
+});
+
+test("MEDUSA_REDIS_URL selects the shared limiter; without it the in-process one", async () => {
+  const urls: string[] = [];
+  const clock = { now: Date.now() };
+  const shared = limiterFromEnv(
+    { APP_ENV: "production", MEDUSA_REDIS_URL: "redis://cache:6379" },
+    {
+      connectRedis: (url) => {
+        urls.push(url);
+        return new FakeRedis(clock);
+      },
+    },
+  );
+  assert.deepEqual(urls, ["redis://cache:6379"]);
+  assert.ok(shared.check("1.1.1.1", "/auth/customer/otp", "POST") instanceof Promise);
+
+  const local = limiterFromEnv({ APP_ENV: "development" }, { connectRedis: () => new FakeRedis(clock) });
+  assert.equal(local.check("1.1.1.1", "/auth/customer/otp", "POST") instanceof Promise, false);
 });

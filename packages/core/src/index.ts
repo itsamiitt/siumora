@@ -159,6 +159,7 @@ export {
 
 export {
   ADMIN_SESSION_TTL_SECONDS,
+  DEFAULT_OTP_POLICY,
   OTP_LENGTH,
   OTP_MAX_ATTEMPTS,
   OTP_MAX_SENDS_PER_WINDOW,
@@ -173,6 +174,7 @@ export {
   normalisePhone,
   parseAdminPhones,
   toE164,
+  type OtpPolicy,
   type OtpRequestDecision,
   type OtpRequestInput,
   type OtpVerification,

@@ -16,6 +16,7 @@ export interface MedusaBootEnv {
   JWT_SECRET?: string;
   COOKIE_SECRET?: string;
   MEDUSA_DATABASE_URL?: string;
+  MEDUSA_REDIS_URL?: string;
 }
 
 export function resolveAppEnv(env: MedusaBootEnv): AppEnv {
@@ -41,6 +42,12 @@ export function assertMedusaBootSafety(env: MedusaBootEnv): {
     }
     if (!env.MEDUSA_DATABASE_URL) {
       throw new Error("production boot refused: MEDUSA_DATABASE_URL is not set");
+    }
+    // Rate-limit counters (src/lib/rate-limit.ts) and sessions live in
+    // Redis. Without it every process keeps its own counters, a restart
+    // forgets every window, and the OTP endpoint's ceiling multiplies.
+    if (!env.MEDUSA_REDIS_URL) {
+      throw new Error("production boot refused: MEDUSA_REDIS_URL is not set");
     }
   }
 

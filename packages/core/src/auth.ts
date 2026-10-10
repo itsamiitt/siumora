@@ -30,6 +30,28 @@ export const OTP_SEND_WINDOW_SECONDS = 3600;
 /** Guesses allowed against one code. 5 of 10^6 is not a brute force. */
 export const OTP_MAX_ATTEMPTS = 5;
 
+/**
+ * The tunable half of the rules above, as one value. The constants are the
+ * defaults; the Medusa stack lets an operator tighten them at runtime
+ * (siumora_settings) during an attack, without a deploy. The code length is
+ * not tunable — it is the format the storefront and the templates expect.
+ */
+export interface OtpPolicy {
+  readonly ttlSeconds: number;
+  readonly resendCooldownSeconds: number;
+  readonly maxSendsPerWindow: number;
+  readonly sendWindowSeconds: number;
+  readonly maxAttempts: number;
+}
+
+export const DEFAULT_OTP_POLICY: OtpPolicy = {
+  ttlSeconds: OTP_TTL_SECONDS,
+  resendCooldownSeconds: OTP_RESEND_COOLDOWN_SECONDS,
+  maxSendsPerWindow: OTP_MAX_SENDS_PER_WINDOW,
+  sendWindowSeconds: OTP_SEND_WINDOW_SECONDS,
+  maxAttempts: OTP_MAX_ATTEMPTS,
+};
+
 /** Customer sessions are long — re-authenticating a shopper costs orders. */
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
@@ -92,9 +114,12 @@ export type OtpRequestDecision =
  * impatient tap-tap-tap, the hourly cap stops a script. A refusal always says
  * how long to wait, so the storefront can count down instead of guessing.
  */
-export function evaluateOtpRequest(input: OtpRequestInput): OtpRequestDecision {
+export function evaluateOtpRequest(
+  input: OtpRequestInput,
+  policy: OtpPolicy = DEFAULT_OTP_POLICY,
+): OtpRequestDecision {
   const nowMs = input.now.getTime();
-  const windowStartMs = nowMs - OTP_SEND_WINDOW_SECONDS * 1000;
+  const windowStartMs = nowMs - policy.sendWindowSeconds * 1000;
 
   const recent = input.sentAt
     .map((date) => date.getTime())
@@ -105,14 +130,16 @@ export function evaluateOtpRequest(input: OtpRequestInput): OtpRequestDecision {
   const cooldownLeft =
     newest === undefined
       ? 0
-      : Math.ceil((newest + OTP_RESEND_COOLDOWN_SECONDS * 1000 - nowMs) / 1000);
+      : Math.ceil((newest + policy.resendCooldownSeconds * 1000 - nowMs) / 1000);
 
-  if (recent.length >= OTP_MAX_SENDS_PER_WINDOW) {
-    // The cap lifts when the oldest send ages out of the window, not when the
-    // window length has passed from now.
-    const oldest = recent[recent.length - 1] as number;
+  if (recent.length >= policy.maxSendsPerWindow) {
+    // The cap lifts when the oldest send that still counts ages out of the
+    // window, not when the window length has passed from now. With the cap
+    // lowered at runtime more sends than the cap may be in the window; it is
+    // the one that brings the count back under the cap that matters.
+    const oldest = recent[policy.maxSendsPerWindow - 1] as number;
     const windowLeft = Math.ceil(
-      (oldest + OTP_SEND_WINDOW_SECONDS * 1000 - nowMs) / 1000,
+      (oldest + policy.sendWindowSeconds * 1000 - nowMs) / 1000,
     );
     return {
       allowed: false,
@@ -164,19 +191,20 @@ export interface OtpVerification {
  */
 export function evaluateOtpVerification(
   input: OtpVerificationInput,
+  policy: OtpPolicy = DEFAULT_OTP_POLICY,
 ): OtpVerification {
   if (input.consumedAt) return { status: "consumed", attemptsRemaining: 0 };
   if (input.now.getTime() >= input.expiresAt.getTime()) {
     return { status: "expired", attemptsRemaining: 0 };
   }
-  if (input.attempts >= OTP_MAX_ATTEMPTS) {
+  if (input.attempts >= policy.maxAttempts) {
     return { status: "locked", attemptsRemaining: 0 };
   }
   if (input.matches) return { status: "verified", attemptsRemaining: 0 };
 
   return {
     status: "mismatch",
-    attemptsRemaining: Math.max(0, OTP_MAX_ATTEMPTS - (input.attempts + 1)),
+    attemptsRemaining: Math.max(0, policy.maxAttempts - (input.attempts + 1)),
   };
 }
 

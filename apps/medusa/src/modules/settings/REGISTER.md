@@ -37,6 +37,13 @@ The migration seeds **no rows**, deliberately: defaults are code
 operator has moved a lever; a malformed stored value degrades to the
 default at read, never crashes.
 
+Medusa-only keys (no Fastify mirror): the phone sign-in limits
+`otp_ttl_seconds` (60–600), `otp_resend_cooldown_seconds` (15–600),
+`otp_max_sends_per_window` (1–20), `otp_send_window_seconds` (600–86400) and
+`otp_max_attempts` (1–10). Defaults are core's `DEFAULT_OTP_POLICY`; the
+phone-otp auth provider reads them through the shared pg connection with the
+same 30s cache, and falls back to the defaults if the read fails.
+
 ## 3. Environment variables
 
 | Variable | Purpose |

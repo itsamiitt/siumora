@@ -8,6 +8,7 @@ const PROD_OK = {
   JWT_SECRET: "real-jwt-secret",
   COOKIE_SECRET: "real-cookie-secret",
   MEDUSA_DATABASE_URL: "postgresql://u:p@db:5432/siumora_medusa",
+  MEDUSA_REDIS_URL: "redis://cache:6379",
 };
 
 test("development boots with no env at all", () => {
@@ -49,4 +50,18 @@ test("production refuses a missing database URL", () => {
     () => assertMedusaBootSafety({ ...PROD_OK, MEDUSA_DATABASE_URL: undefined }),
     /MEDUSA_DATABASE_URL/,
   );
+});
+
+test("production refuses a missing Redis URL", () => {
+  // Per-process rate-limit counters would multiply the OTP endpoint's
+  // ceiling by the instance count and reset on every restart.
+  assert.throws(
+    () => assertMedusaBootSafety({ ...PROD_OK, MEDUSA_REDIS_URL: undefined }),
+    /MEDUSA_REDIS_URL/,
+  );
+});
+
+test("development and staging boot without Redis", () => {
+  assert.doesNotThrow(() => assertMedusaBootSafety({}));
+  assert.doesNotThrow(() => assertMedusaBootSafety({ APP_ENV: "staging" }));
 });

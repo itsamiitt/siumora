@@ -16,7 +16,9 @@ export default defineConfig({
       "postgresql://postgres:postgres@localhost:5432/siumora_medusa",
     // No redisUrl locally: dev runs on the in-memory event bus / workflow
     // engine. Production sets MEDUSA_REDIS_URL (Upstash Mumbai) — a
-    // checkout-path dependency, priced in the design doc.
+    // checkout-path dependency, priced in the design doc, and required by
+    // the boot guard: the rate limiter (src/api/middlewares.ts) shares its
+    // counters there.
     ...(process.env.MEDUSA_REDIS_URL ? { redisUrl: process.env.MEDUSA_REDIS_URL } : {}),
     http: {
       storeCors: process.env.STORE_CORS ?? "http://localhost:3000",

@@ -5,7 +5,9 @@
  * handling (parity bar: apps/api/src/routes/auth.ts + its tests). The policy
  * itself — 6-digit code, 300s TTL, 45s resend cooldown, 5 codes/hour,
  * 5 guesses per code — lives in @siumora/core (evaluateOtpRequest /
- * evaluateOtpVerification) and is imported, not copied. What this file adds is
+ * evaluateOtpVerification) and is imported, not copied; those are the
+ * defaults, and the caller may pass a tightened OtpPolicy read from
+ * siumora_settings. What this file adds is
  * the storage shape: instead of an `otp_challenges` table row, the challenge
  * lives in the auth provider identity's `provider_metadata` (see service.ts
  * for why), so the state here must round-trip through JSON.
@@ -24,7 +26,7 @@ import { promisify } from "node:util";
 // concern shared by every @siumora/* import in this app, not a runtime one.
 // prettier-ignore -- single line so @ts-ignore reaches the specifier
 // @ts-ignore -- TS1479 until @siumora/core ships require-condition types
-import { OTP_LENGTH, OTP_SEND_WINDOW_SECONDS, OTP_TTL_SECONDS, evaluateOtpRequest, evaluateOtpVerification, type OtpVerificationStatus } from "@siumora/core";
+import { DEFAULT_OTP_POLICY, OTP_LENGTH, evaluateOtpRequest, evaluateOtpVerification, type OtpPolicy, type OtpVerificationStatus } from "@siumora/core";
 
 const scryptAsync = promisify(scrypt) as (
   password: string,
@@ -119,7 +121,7 @@ export type IssueOutcome =
 /**
  * Issue a fresh challenge for a number, replacing any previous one.
  *
- * The resend throttle (45s cooldown, 5 codes/hour — core's
+ * The resend throttle (45s cooldown, 5 codes/hour by default — core's
  * evaluateOtpRequest) runs over the send history carried in the previous
  * state, so the same rules apply as on the Fastify side without a table to
  * query. History older than the window is trimmed on every write.
@@ -127,13 +129,13 @@ export type IssueOutcome =
 export async function issueChallenge(
   previous: OtpChallengeState | undefined,
   now: Date = new Date(),
-  ttlSeconds: number = OTP_TTL_SECONDS,
+  policy: OtpPolicy = DEFAULT_OTP_POLICY,
 ): Promise<IssueOutcome> {
   const history = (previous?.sent_at ?? [])
     .map((iso) => new Date(iso))
     .filter((date) => !Number.isNaN(date.getTime()));
 
-  const decision = evaluateOtpRequest({ now, sentAt: history });
+  const decision = evaluateOtpRequest({ now, sentAt: history }, policy);
   if (!decision.allowed) {
     return {
       allowed: false,
@@ -144,9 +146,9 @@ export async function issueChallenge(
 
   const code = generateOtp();
   const codeHash = await hashCode(code, randomBytes(16));
-  const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
+  const expiresAt = new Date(now.getTime() + policy.ttlSeconds * 1000);
 
-  const windowStartMs = now.getTime() - OTP_SEND_WINDOW_SECONDS * 1000;
+  const windowStartMs = now.getTime() - policy.sendWindowSeconds * 1000;
   const sentAt = history
     .filter((date) => date.getTime() > windowStartMs)
     .map((date) => date.toISOString())
@@ -186,16 +188,20 @@ export async function judgeChallenge(
   state: OtpChallengeState | undefined,
   code: string,
   now: Date = new Date(),
+  policy: OtpPolicy = DEFAULT_OTP_POLICY,
 ): Promise<JudgeOutcome> {
   if (!state) return { status: "not_found", attemptsRemaining: 0 };
 
-  const verdict = evaluateOtpVerification({
-    now,
-    expiresAt: new Date(state.expires_at),
-    consumedAt: state.consumed_at ? new Date(state.consumed_at) : null,
-    attempts: state.attempts,
-    matches: await codeMatches(code, state.code_hash),
-  });
+  const verdict = evaluateOtpVerification(
+    {
+      now,
+      expiresAt: new Date(state.expires_at),
+      consumedAt: state.consumed_at ? new Date(state.consumed_at) : null,
+      attempts: state.attempts,
+      matches: await codeMatches(code, state.code_hash),
+    },
+    policy,
+  );
 
   if (verdict.status === "verified") {
     return { ...verdict, state: { ...state, consumed_at: now.toISOString() } };

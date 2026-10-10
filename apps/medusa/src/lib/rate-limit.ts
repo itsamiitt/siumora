@@ -13,9 +13,12 @@
  * - Fixed windows rather than a token bucket. The thing defended against is a
  *   script in a loop, and against a script in a loop the difference is nil
  *   while the extra state is not.
- * - **In-process, so the limit is per instance.** Two containers mean twice
- *   the ceiling. The shared counter belongs in Redis (a TODOS.md trigger, not
- *   now); until then this stops the loop, and the WAF in front stops the flood.
+ * - The in-process limiter is per instance: two containers mean twice the
+ *   ceiling, and a restart forgets every window. With MEDUSA_REDIS_URL set
+ *   (required in production — src/boot-guards.ts) {@link limiterFromEnv}
+ *   builds {@link createRedisRateLimiter} instead: same rules, same window
+ *   arithmetic, one shared counter per bucket, and the in-process limiter as
+ *   the fallback while Redis is unreachable.
  * - Keyed by client IP at this layer. The OTP endpoints additionally throttle
  *   by phone number against the database — that limit is about a specific
  *   abuse and lives there, not here.
@@ -57,6 +60,11 @@ export const DEFAULT_RULES: readonly RateRule[] = [
   // Sign-in. The database limits per phone and per origin over an hour; this
   // is the short-window ceiling that stops a burst before it gets there.
   { prefix: "/auth/", method: "POST", limit: 10, windowMs: 60_000, bucket: "auth" },
+  // The send-a-code step lives outside /auth (the built-in route cannot
+  // answer with the challenge payload — see its route.ts), but it is the
+  // costlier half: every hit is a paid WhatsApp/SMS message. Same bucket as
+  // the verify step, exactly as the Fastify /auth/* rule covers both.
+  { prefix: "/store/siumora-auth/", method: "POST", limit: 10, windowMs: 60_000, bucket: "auth" },
   // Each checkout allocates an invoice number under a table lock, so a flood
   // here is contention on the hottest lock in the system.
   { prefix: "/store/siumora/checkout", method: "POST", limit: 12, windowMs: 60_000, bucket: "checkout" },
@@ -120,35 +128,146 @@ export function createRateLimiter(
 
       if (windows.size > SWEEP_THRESHOLD) sweep(now);
 
-      const bucketKey = `${key}:${rule.bucket ?? rule.prefix}`;
+      const bucketKey = bucketKeyFor(key, rule);
       const existing = windows.get(bucketKey);
 
       if (!existing || existing.resetAt <= now) {
         windows.set(bucketKey, { count: 1, resetAt: now + rule.windowMs });
-        return {
-          allowed: true,
-          remaining: rule.limit - 1,
-          retryAfterSeconds: Math.ceil(rule.windowMs / 1000),
-        };
+        return decide(rule, 1, now + rule.windowMs, now);
       }
 
       existing.count += 1;
-      const retryAfterSeconds = Math.max(
-        1,
-        Math.ceil((existing.resetAt - now) / 1000),
-      );
-
-      return {
-        allowed: existing.count <= rule.limit,
-        remaining: Math.max(0, rule.limit - existing.count),
-        retryAfterSeconds,
-      };
+      return decide(rule, existing.count, existing.resetAt, now);
     },
     sweep,
     get size() {
       return windows.size;
     },
   };
+}
+
+function bucketKeyFor(key: string, rule: RateRule): string {
+  return `${key}:${rule.bucket ?? rule.prefix}`;
+}
+
+/**
+ * The window arithmetic both limiters share: the count is this request's
+ * position in its window (1 = it opened the window), resetAt is when the
+ * window rolls over.
+ */
+function decide(
+  rule: RateRule,
+  count: number,
+  resetAt: number,
+  now: number,
+): RateDecision {
+  if (count <= 1) {
+    return {
+      allowed: true,
+      remaining: rule.limit - 1,
+      retryAfterSeconds: Math.ceil(rule.windowMs / 1000),
+    };
+  }
+  return {
+    allowed: count <= rule.limit,
+    remaining: Math.max(0, rule.limit - count),
+    retryAfterSeconds: Math.max(1, Math.ceil((resetAt - now) / 1000)),
+  };
+}
+
+/* -------------------------------------------------------------------------- *
+ * The shared limiter — Redis.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * The one ioredis call this file makes, typed structurally so the tests can
+ * hand in a fake and this file still imports nothing at runtime.
+ */
+export interface RedisEvalClient {
+  eval(
+    script: string,
+    numKeys: number,
+    ...args: Array<string | number>
+  ): Promise<unknown>;
+}
+
+/**
+ * One round trip, atomic: count the hit, open the window on the first one,
+ * report the window's remaining life. The PTTL < 0 arm repairs a key that
+ * somehow lost its expiry (a crash between INCR and PEXPIRE cannot happen
+ * inside a script, but a manual SET could) — a key without a TTL would
+ * refuse that origin forever.
+ */
+export const HIT_SCRIPT = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  ttl = tonumber(ARGV[1])
+end
+return {count, ttl}
+`;
+
+export const REDIS_KEY_PREFIX = "siumora:rl:";
+
+export interface AsyncRateLimiter {
+  check(key: string, path: string, method: string, now?: number): Promise<RateDecision>;
+}
+
+export interface RedisRateLimiterOptions {
+  readonly rules?: readonly RateRule[];
+  /**
+   * Answers while Redis is unreachable — per-instance limits beat none, and
+   * beat refusing every checkout because a cache is down.
+   */
+  readonly fallback?: RateLimiter;
+  readonly onError?: (error: unknown) => void;
+}
+
+/**
+ * The limiter production runs: every Medusa instance counts into the same
+ * Redis key per origin and bucket, so the ceiling is the rule's limit however
+ * many processes serve the site, and a restart forgets nothing.
+ */
+export function createRedisRateLimiter(
+  client: RedisEvalClient,
+  options: RedisRateLimiterOptions = {},
+): AsyncRateLimiter {
+  const rules = options.rules ?? DEFAULT_RULES;
+  const fallback = options.fallback ?? createRateLimiter(rules);
+
+  return {
+    async check(key, path, method, now = Date.now()) {
+      const rule = ruleFor(rules, path, method);
+      if (!rule) return { allowed: true, remaining: Infinity, retryAfterSeconds: 0 };
+
+      try {
+        const reply = await client.eval(
+          HIT_SCRIPT,
+          1,
+          `${REDIS_KEY_PREFIX}${bucketKeyFor(key, rule)}`,
+          rule.windowMs,
+        );
+        const [count, ttlMs] = parseHitReply(reply);
+        return decide(rule, count, now + ttlMs, now);
+      } catch (error) {
+        options.onError?.(error);
+        return fallback.check(key, path, method, now);
+      }
+    },
+  };
+}
+
+function parseHitReply(reply: unknown): [number, number] {
+  if (Array.isArray(reply) && reply.length === 2) {
+    const count = Number(reply[0]);
+    const ttlMs = Number(reply[1]);
+    if (Number.isInteger(count) && count > 0 && Number.isFinite(ttlMs)) {
+      return [count, Math.max(0, ttlMs)];
+    }
+  }
+  throw new Error(`unexpected rate-limit reply from Redis: ${JSON.stringify(reply)}`);
 }
 
 /**
@@ -177,6 +296,13 @@ function ruleFor(
 export interface RateLimitEnv {
   APP_ENV?: string;
   DISABLE_RATE_LIMITS?: string;
+  MEDUSA_REDIS_URL?: string;
+}
+
+export interface LimiterDeps {
+  /** Builds the Redis client when MEDUSA_REDIS_URL is set. */
+  readonly connectRedis?: (url: string) => RedisEvalClient;
+  readonly onRedisError?: (error: unknown) => void;
 }
 
 /**
@@ -192,7 +318,15 @@ export interface RateLimitEnv {
  * NODE_ENV — see src/boot-guards.ts) has already been validated by the config
  * loader, which runs before the API loader.
  */
-export function limiterFromEnv(env: RateLimitEnv = process.env): RateLimiter {
+export function limiterFromEnv(env?: RateLimitEnv): RateLimiter;
+export function limiterFromEnv(
+  env: RateLimitEnv,
+  deps: LimiterDeps,
+): RateLimiter | AsyncRateLimiter;
+export function limiterFromEnv(
+  env: RateLimitEnv = process.env,
+  deps: LimiterDeps = {},
+): RateLimiter | AsyncRateLimiter {
   const disabled = env.DISABLE_RATE_LIMITS === "true";
   const appEnv = env.APP_ENV ?? "development";
   if (disabled && appEnv === "production") {
@@ -201,7 +335,17 @@ export function limiterFromEnv(env: RateLimitEnv = process.env): RateLimiter {
     // open one.
     throw new Error("DISABLE_RATE_LIMITS must not be set in production.");
   }
-  return disabled ? createRateLimiter([]) : createRateLimiter();
+  if (disabled) return createRateLimiter([]);
+
+  // Shared counters wherever Redis exists (production always — the boot
+  // guard refuses to start without it); development without Redis keeps
+  // the in-process limiter, which is all one local process needs.
+  if (env.MEDUSA_REDIS_URL && deps.connectRedis) {
+    return createRedisRateLimiter(deps.connectRedis(env.MEDUSA_REDIS_URL), {
+      onError: deps.onRedisError,
+    });
+  }
+  return createRateLimiter();
 }
 
 /* -------------------------------------------------------------------------- *
@@ -245,7 +389,7 @@ export type LimiterNext = (err?: unknown) => void;
  * without `methods` are mounted via `app.use(matcher, ...)`, and express
  * strips the mount point from `req.url` inside a mounted handler.
  */
-export function rateLimitMiddleware(limiter: RateLimiter) {
+export function rateLimitMiddleware(limiter: RateLimiter | AsyncRateLimiter) {
   return function rateLimit(
     req: LimiterRequest,
     res: LimiterResponse,
@@ -257,14 +401,25 @@ export function rateLimitMiddleware(limiter: RateLimiter) {
     const path = url.split("?")[0] ?? url;
     const key = req.ip ?? req.socket?.remoteAddress ?? "unknown";
 
-    const decision = limiter.check(key, path, req.method);
-    if (decision.allowed) return next();
+    const answer = (decision: RateDecision): void => {
+      if (decision.allowed) return next();
 
-    res.setHeader("Retry-After", String(decision.retryAfterSeconds));
-    res.status(429).json({
-      error: "rate_limited",
-      message: "Too many requests. Try again shortly.",
-      retryAfterSeconds: decision.retryAfterSeconds,
-    });
+      res.setHeader("Retry-After", String(decision.retryAfterSeconds));
+      res.status(429).json({
+        error: "rate_limited",
+        message: "Too many requests. Try again shortly.",
+        retryAfterSeconds: decision.retryAfterSeconds,
+      });
+    };
+
+    const decision = limiter.check(key, path, req.method);
+    // The in-process limiter answers synchronously and is answered the same
+    // way; the Redis limiter's promise never rejects (it falls back), but a
+    // limiter fault must not hang the request, so a rejection lets it pass.
+    if (decision instanceof Promise) {
+      decision.then(answer, () => next());
+    } else {
+      answer(decision);
+    }
   };
 }

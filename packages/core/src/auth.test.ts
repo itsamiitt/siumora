@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  DEFAULT_OTP_POLICY,
   OTP_MAX_ATTEMPTS,
   OTP_MAX_SENDS_PER_WINDOW,
   OTP_RESEND_COOLDOWN_SECONDS,
@@ -165,4 +166,50 @@ test("reads the admin allow-list in whatever shape it is configured", () => {
 test("treats an unset admin allow-list as nobody", () => {
   assert.deepEqual(parseAdminPhones(undefined), []);
   assert.equal(isAdminPhone("9876543210", parseAdminPhones("")), false);
+});
+
+test("the default policy is exactly the published constants", () => {
+  // The Fastify stack calls the rules without a policy; it must keep getting
+  // the same limits it always had.
+  assert.deepEqual(DEFAULT_OTP_POLICY, {
+    ttlSeconds: 300,
+    resendCooldownSeconds: OTP_RESEND_COOLDOWN_SECONDS,
+    maxSendsPerWindow: OTP_MAX_SENDS_PER_WINDOW,
+    sendWindowSeconds: OTP_SEND_WINDOW_SECONDS,
+    maxAttempts: OTP_MAX_ATTEMPTS,
+  });
+});
+
+test("a tightened policy lowers the hourly cap and lengthens the cooldown", () => {
+  const tight = { ...DEFAULT_OTP_POLICY, maxSendsPerWindow: 2, resendCooldownSeconds: 120 };
+
+  const cooling = evaluateOtpRequest({ now: NOW, sentAt: [ago(60)] }, tight);
+  assert.equal(cooling.allowed, false);
+  assert.equal(!cooling.allowed && cooling.retryAfterSeconds, 60);
+
+  const capped = evaluateOtpRequest({ now: NOW, sentAt: [ago(1000), ago(2000)] }, tight);
+  assert.equal(capped.allowed, false);
+});
+
+test("a cap lowered below the sends already made lifts when enough age out", () => {
+  // Five sends under the old cap, then an operator lowers it to 2 mid-attack.
+  // The number may ask again once only one send is left in the window, i.e.
+  // when the second-newest ages out — not when the oldest does.
+  const tight = { ...DEFAULT_OTP_POLICY, maxSendsPerWindow: 2 };
+  const sentAt = [ago(3000), ago(2500), ago(2000), ago(1500), ago(1000)];
+
+  const decision = evaluateOtpRequest({ now: NOW, sentAt }, tight);
+  assert.equal(decision.allowed, false);
+  assert.equal(!decision.allowed && decision.retryAfterSeconds, OTP_SEND_WINDOW_SECONDS - 1500);
+});
+
+test("a tightened policy locks a code after fewer wrong guesses", () => {
+  const tight = { ...DEFAULT_OTP_POLICY, maxAttempts: 2 };
+  const base = { now: NOW, expiresAt: new Date(NOW.getTime() + 60_000), matches: false };
+
+  assert.deepEqual(evaluateOtpVerification({ ...base, attempts: 0 }, tight), {
+    status: "mismatch",
+    attemptsRemaining: 1,
+  });
+  assert.equal(evaluateOtpVerification({ ...base, attempts: 2, matches: true }, tight).status, "locked");
 });

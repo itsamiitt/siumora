@@ -8,7 +8,9 @@ import {
   createSettingsCache,
   isSettingKey,
   mergeSettings,
+  otpPolicyOf,
   razorpayConfigured,
+  validateSettingWrite,
   type Settings,
 } from "./settings.ts";
 
@@ -166,4 +168,61 @@ test("a write validates where the read forgives", async () => {
   assert.ok(!validateSettingWrite("payments_enabled", "yes").ok);
   assert.ok(!validateSettingWrite("cod_fee", 49.5).ok);
   assert.ok(!validateSettingWrite("cod_max_order", 10_000_001).ok);
+});
+
+// ── Sign-in limits (Medusa-only keys) ─────────────────────────
+
+test("the sign-in limits default to core's published policy", () => {
+  assert.deepEqual(otpPolicyOf(mergeSettings([])), {
+    ttlSeconds: 300,
+    resendCooldownSeconds: 45,
+    maxSendsPerWindow: 5,
+    sendWindowSeconds: 3600,
+    maxAttempts: 5,
+  });
+});
+
+test("a stored sign-in limit overrides its default, alone", () => {
+  const policy = otpPolicyOf(
+    mergeSettings([
+      { key: "otp_max_sends_per_window", value: 2 },
+      { key: "otp_resend_cooldown_seconds", value: 120 },
+    ]),
+  );
+  assert.equal(policy.maxSendsPerWindow, 2);
+  assert.equal(policy.resendCooldownSeconds, 120);
+  assert.equal(policy.maxAttempts, 5);
+});
+
+test("sign-in limit writes outside the safety rails are refused with the range", () => {
+  // A code living past NIST's 10-minute ceiling, a lock after zero guesses,
+  // a fractional count: each is a typo under pressure, not a policy.
+  for (const [key, value] of [
+    ["otp_ttl_seconds", 601],
+    ["otp_ttl_seconds", 59],
+    ["otp_max_attempts", 0],
+    ["otp_max_sends_per_window", 2.5],
+    ["otp_send_window_seconds", "3600"],
+  ] as const) {
+    const result = validateSettingWrite(key, value);
+    assert.equal(result.ok, false, `${key}=${String(value)}`);
+    assert.match(!result.ok ? result.error : "", /expected an integer between \d+ and \d+/);
+  }
+  assert.deepEqual(validateSettingWrite("otp_max_attempts", 3), { ok: true, key: "otp_max_attempts" });
+});
+
+test("a malformed stored sign-in limit degrades to the default", () => {
+  const policy = otpPolicyOf(mergeSettings([{ key: "otp_ttl_seconds", value: 99999 }]));
+  assert.equal(policy.ttlSeconds, 300);
+});
+
+test("the existing write refusals keep their wording", () => {
+  assert.deepEqual(validateSettingWrite("payments_enabled", "yes"), {
+    ok: false,
+    error: "payments_enabled: expected a boolean",
+  });
+  assert.deepEqual(validateSettingWrite("cod_fee", -1), {
+    ok: false,
+    error: "cod_fee: expected integer paise between 0 and 10000000",
+  });
 });

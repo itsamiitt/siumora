@@ -440,3 +440,78 @@ test("judgeChallenge refuses a correct code once the TTL has passed", async () =
   assert.equal(good.status, "verified");
   assert.equal(good.state?.consumed_at, inTime.toISOString());
 });
+
+// ── Sign-in limits from siumora_settings ──────────────────────
+
+/** A provider whose container carries a fake shared pg connection. */
+function settingsService(rows: Array<{ key: string; value: unknown }> | Error) {
+  const warnings: string[] = [];
+  const pg = {
+    raw: async (sql: string) => {
+      assert.match(sql, /FROM siumora_settings/);
+      if (rows instanceof Error) throw rows;
+      return { rows };
+    },
+  };
+  const logger = { warn: (message: string) => warnings.push(message) };
+  const service = new PhoneOtpAuthService(
+    { __pg_connection__: pg, logger } as never,
+    { otpEcho: true, transport: {} },
+  );
+  return { service, warnings };
+}
+
+test("an operator-tightened guess limit locks the code sooner", async () => {
+  const { service } = settingsService([{ key: "otp_max_attempts", value: 2 }]);
+  const { service: ids } = fakeIdentityStore();
+  const issued = await requestCode(service, ids, "9812345678");
+  const code = issued.otp!.code!;
+  const wrong = code === "000000" ? "111111" : "000000";
+
+  const first = await verifyCode(service, ids, "9812345678", wrong);
+  assert.equal(first.errorCode, "wrong_code");
+  assert.equal(first.attemptsRemaining, 1);
+  await verifyCode(service, ids, "9812345678", wrong);
+
+  // Two wrong guesses spent: the right code no longer signs in.
+  const locked = await verifyCode(service, ids, "9812345678", code);
+  assert.equal(locked.success, false);
+  assert.equal(locked.errorCode, "code_unusable");
+});
+
+test("an operator-shortened code lifetime is what the challenge carries", async () => {
+  const { service } = settingsService([{ key: "otp_ttl_seconds", value: 120 }]);
+  const { service: ids } = fakeIdentityStore();
+  const before = Date.now();
+  const issued = await requestCode(service, ids, "9812345678");
+  const ttlMs = new Date(issued.otp!.expiresAt).getTime() - before;
+  assert.ok(ttlMs > 115_000 && ttlMs <= 125_000, `expiry ${ttlMs}ms should be ~120s`);
+});
+
+test("an operator-lowered send cap throttles the number sooner", async () => {
+  const { service } = settingsService([
+    { key: "otp_max_sends_per_window", value: 1 },
+    { key: "otp_resend_cooldown_seconds", value: 15 },
+  ]);
+  const { service: ids, identities } = fakeIdentityStore();
+  assert.equal((await requestCode(service, ids, "9812345678")).success, true);
+
+  // Age the first send past the cooldown so only the cap can refuse.
+  const otp = storedOtp(identities, "9812345678");
+  otp.sent_at = [new Date(Date.now() - 60_000).toISOString()];
+  const second = await requestCode(service, ids, "9812345678");
+  assert.equal(second.success, false);
+  assert.equal(second.errorCode, "rate_limited");
+});
+
+test("an unreadable settings table means the shipped limits, not a refused sign-in", async () => {
+  const { service, warnings } = settingsService(new Error("relation does not exist"));
+  const { service: ids } = fakeIdentityStore();
+  const before = Date.now();
+  const issued = await requestCode(service, ids, "9812345678");
+  assert.equal(issued.success, true);
+  const ttlMs = new Date(issued.otp!.expiresAt).getTime() - before;
+  assert.ok(Math.abs(ttlMs - OTP_TTL_SECONDS * 1000) < 5000);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /using defaults/);
+});

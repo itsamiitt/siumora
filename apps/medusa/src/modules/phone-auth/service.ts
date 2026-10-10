@@ -52,8 +52,13 @@
  *   stricter implementation.
  * - The per-IP send cap (20/hour across all numbers) is not portable into a
  *   provider — it needs a cross-identity query the injected service does not
- *   offer. That control belongs to the transport in front of the auth route
- *   (wave-2), like every other Medusa auth provider's rate limiting.
+ *   offer. That control belongs to the transport in front of the auth route:
+ *   src/lib/rate-limit.ts holds both steps to 10/min per IP in one shared
+ *   (Redis) bucket; the hourly per-IP cap is auth plan phase 1.
+ *
+ * The limits themselves (TTL, cooldown, codes per window, guesses) are
+ * core's OtpPolicy, read from siumora_settings so an operator can tighten
+ * them mid-attack — see policy_().
  */
 
 import {
@@ -72,11 +77,17 @@ import type {
 // @ts-ignore mutes TS1479 (ESM-flavored types on a require import) — a
 // packages/* exports-map concern shared app-wide, not a runtime one.
 // @ts-ignore -- TS1479 until @siumora/core ships require-condition types
-import { OTP_TTL_SECONDS, maskPhone, normalisePhone } from "@siumora/core";
+import { DEFAULT_OTP_POLICY, maskPhone, normalisePhone, type OtpPolicy } from "@siumora/core";
 // prettier-ignore -- single line so @ts-ignore reaches the specifier
 // @ts-ignore -- TS1479 until @siumora/messaging ships require-condition types
 import { createOtpSender, type OtpSender, type TransportEnv } from "@siumora/messaging";
 
+import { readSettings, type SqlClient } from "../settings/read.ts";
+import {
+  createSettingsCache,
+  otpPolicyOf,
+  type SettingsReader,
+} from "../settings/settings.ts";
 import {
   isOtpCodeShape,
   issueChallenge,
@@ -99,7 +110,7 @@ export interface PhoneOtpAuthOptions {
    * process.env, which carries the same variable names.
    */
   transport?: TransportEnv;
-  /** Test hook. Defaults to core's OTP_TTL_SECONDS (300). */
+  /** Test hook: overrides the code lifetime whatever the policy says. */
   ttlSeconds?: number;
 }
 
@@ -134,6 +145,15 @@ export type PhoneOtpAuthenticationResponse = AuthenticationResponse & {
 
 type InjectedDependencies = {
   logger?: Logger;
+  /**
+   * The shared knex connection (ContainerRegistrationKeys.PG_CONNECTION),
+   * which Medusa registers in every module's container. Used for one thing:
+   * reading the sign-in limits out of siumora_settings. Module isolation
+   * bars this provider from the settings module's *service*, not from the
+   * table — the read is the same raw SELECT the store routes run
+   * (settings/read.ts), so there is one registry and one validation.
+   */
+  __pg_connection__?: SqlClient;
 };
 
 /** One message for every unusable-code mode — expired, consumed, locked,
@@ -147,7 +167,9 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
 
   protected readonly options_: PhoneOtpAuthOptions;
   protected readonly logger_?: Logger;
+  protected readonly container_: InjectedDependencies;
   protected sender_?: OtpSender;
+  protected settings_?: SettingsReader;
 
   static validateOptions(options: Record<string, unknown>): void {
     if (options?.otpEcho === true && options?.appEnv === "production") {
@@ -161,6 +183,7 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
   constructor(container: InjectedDependencies, options: PhoneOtpAuthOptions = {}) {
     super();
     this.options_ = options;
+    this.container_ = container ?? {};
     this.logger_ = container?.logger;
     // Channel resolution happens once, here — WhatsApp when its template is
     // approved, else DLT SMS, else undefined (refuse or echo, below).
@@ -229,10 +252,13 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
     }
 
     const existingMetadata = this.providerMetadataOf_(identity);
+    const policy = await this.policy_();
     const issued = await issueChallenge(
       readChallengeState(existingMetadata),
       now,
-      this.options_.ttlSeconds ?? OTP_TTL_SECONDS,
+      this.options_.ttlSeconds === undefined
+        ? policy
+        : { ...policy, ttlSeconds: this.options_.ttlSeconds },
     );
 
     if (!issued.allowed) {
@@ -325,6 +351,7 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
       readChallengeState(existingMetadata),
       code,
       new Date(),
+      await this.policy_(),
     );
 
     // Persist the consequences (attempt counted, or code consumed) before
@@ -353,6 +380,33 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
 
     // expired | consumed | locked | not_found — one indistinguishable answer.
     return this.fail_({ errorCode: "code_unusable", error: CODE_UNUSABLE });
+  }
+
+  /**
+   * The sign-in limits in force: siumora_settings over core's defaults,
+   * cached for the settings TTL (30s) so a send costs no extra query.
+   *
+   * A failed read answers with the defaults rather than refusing sign-in:
+   * the defaults are the shipped limits, and a settings outage must not take
+   * every customer's sign-in down with it. With no connection at all (unit
+   * tests, a container without Postgres) the defaults apply directly.
+   */
+  protected async policy_(): Promise<OtpPolicy> {
+    if (!this.settings_) {
+      // Resolved on first use, not in the constructor: the container entry
+      // is a lazy resolver, and boot order is the framework's business.
+      const pg = this.container_.__pg_connection__;
+      if (!pg) return DEFAULT_OTP_POLICY;
+      this.settings_ = createSettingsCache(() => readSettings(pg));
+    }
+    try {
+      return otpPolicyOf(await this.settings_.get());
+    } catch (error) {
+      this.logger_?.warn?.(
+        `phone-otp: could not read sign-in limits, using defaults: ${messageOf(error)}`,
+      );
+      return DEFAULT_OTP_POLICY;
+    }
   }
 
   protected providerMetadataOf_(

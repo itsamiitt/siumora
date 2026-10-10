@@ -1,4 +1,4 @@
-import { mergeSettings, type Settings } from "./settings";
+import { mergeSettings, type Settings } from "./settings.ts";
 
 /**
  * The settings read-path, in raw SQL against the shared pg connection

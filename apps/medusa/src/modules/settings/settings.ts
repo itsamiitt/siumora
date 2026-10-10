@@ -19,6 +19,10 @@
  * envelope both stacks serve.
  */
 
+// prettier-ignore -- single line so @ts-ignore reaches the specifier
+// @ts-ignore -- TS1479 until @siumora/core ships require-condition types
+import { DEFAULT_OTP_POLICY, type OtpPolicy } from "@siumora/core";
+
 export interface Settings {
   /**
    * The kill-switch. False = checkout refuses and the storefront renders the
@@ -31,6 +35,16 @@ export interface Settings {
   readonly codFee: number;
   /** COD floor in paise — below this the fee exceeds the margin. */
   readonly codMinOrder: number;
+  /**
+   * Phone sign-in limits (core's OtpPolicy), read by the phone-otp auth
+   * provider so an operator can tighten them during an attack without a
+   * deploy. Medusa-only keys: the Fastify stack keeps its constants.
+   */
+  readonly otpTtlSeconds: number;
+  readonly otpResendCooldownSeconds: number;
+  readonly otpMaxSendsPerWindow: number;
+  readonly otpSendWindowSeconds: number;
+  readonly otpMaxAttempts: number;
 }
 
 /**
@@ -44,17 +58,29 @@ export const SETTING_DEFAULTS: Settings = {
   codMaxOrder: 500000,
   codFee: 4900,
   codMinOrder: 49900,
+  otpTtlSeconds: DEFAULT_OTP_POLICY.ttlSeconds,
+  otpResendCooldownSeconds: DEFAULT_OTP_POLICY.resendCooldownSeconds,
+  otpMaxSendsPerWindow: DEFAULT_OTP_POLICY.maxSendsPerWindow,
+  otpSendWindowSeconds: DEFAULT_OTP_POLICY.sendWindowSeconds,
+  otpMaxAttempts: DEFAULT_OTP_POLICY.maxAttempts,
 };
 
 export type SettingKey =
   | "payments_enabled"
   | "cod_max_order"
   | "cod_fee"
-  | "cod_min_order";
+  | "cod_min_order"
+  | "otp_ttl_seconds"
+  | "otp_resend_cooldown_seconds"
+  | "otp_max_sends_per_window"
+  | "otp_send_window_seconds"
+  | "otp_max_attempts";
 
 interface SettingDefinition {
   readonly prop: keyof Settings;
   readonly validate: (value: unknown) => boolean;
+  /** What a valid value is, worded for the operator whose write was refused. */
+  readonly expected: string;
 }
 
 /** Paise sanity ceiling: ₹1,00,000. A cap above that is a typo, not a policy. */
@@ -69,14 +95,37 @@ function isPaise(value: unknown): boolean {
   );
 }
 
+const PAISE_EXPECTED = `expected integer paise between 0 and ${PAISE_CEILING}`;
+
+/**
+ * An integer within bounds. The bounds are the safety rails on a lever an
+ * operator pulls under pressure: no code that lives past NIST's 10-minute
+ * out-of-band ceiling, no zero-attempt lock that refuses every shopper, no
+ * cooldown so long that a lost message strands a real customer.
+ */
+function intBetween(prop: keyof Settings, min: number, max: number): SettingDefinition {
+  return {
+    prop,
+    validate: (value) =>
+      typeof value === "number" && Number.isInteger(value) && value >= min && value <= max,
+    expected: `expected an integer between ${min} and ${max}`,
+  };
+}
+
 const DEFINITIONS: Record<SettingKey, SettingDefinition> = {
   payments_enabled: {
     prop: "paymentsEnabled",
     validate: (value) => typeof value === "boolean",
+    expected: "expected a boolean",
   },
-  cod_max_order: { prop: "codMaxOrder", validate: isPaise },
-  cod_fee: { prop: "codFee", validate: isPaise },
-  cod_min_order: { prop: "codMinOrder", validate: isPaise },
+  cod_max_order: { prop: "codMaxOrder", validate: isPaise, expected: PAISE_EXPECTED },
+  cod_fee: { prop: "codFee", validate: isPaise, expected: PAISE_EXPECTED },
+  cod_min_order: { prop: "codMinOrder", validate: isPaise, expected: PAISE_EXPECTED },
+  otp_ttl_seconds: intBetween("otpTtlSeconds", 60, 600),
+  otp_resend_cooldown_seconds: intBetween("otpResendCooldownSeconds", 15, 600),
+  otp_max_sends_per_window: intBetween("otpMaxSendsPerWindow", 1, 20),
+  otp_send_window_seconds: intBetween("otpSendWindowSeconds", 600, 86_400),
+  otp_max_attempts: intBetween("otpMaxAttempts", 1, 10),
 };
 
 export function isSettingKey(value: string): value is SettingKey {
@@ -99,15 +148,20 @@ export function validateSettingWrite(
     return { ok: false, error: `unknown setting: ${key}` };
   }
   if (!DEFINITIONS[key].validate(value)) {
-    return {
-      ok: false,
-      error:
-        key === "payments_enabled"
-          ? `${key}: expected a boolean`
-          : `${key}: expected integer paise between 0 and ${PAISE_CEILING}`,
-    };
+    return { ok: false, error: `${key}: ${DEFINITIONS[key].expected}` };
   }
   return { ok: true, key };
+}
+
+/** The sign-in limits, in the shape core's OTP rules take. */
+export function otpPolicyOf(settings: Settings): OtpPolicy {
+  return {
+    ttlSeconds: settings.otpTtlSeconds,
+    resendCooldownSeconds: settings.otpResendCooldownSeconds,
+    maxSendsPerWindow: settings.otpMaxSendsPerWindow,
+    sendWindowSeconds: settings.otpSendWindowSeconds,
+    maxAttempts: settings.otpMaxAttempts,
+  };
 }
 
 /** One row of the siumora_settings table, as the raw SQL read returns it. */
