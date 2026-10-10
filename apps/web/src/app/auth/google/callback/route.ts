@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { api } from "@/lib/api";
 import { linkCartToAccount } from "@/lib/cart-store";
-import { holdGoogleLink, takeNext } from "@/lib/google-signin";
+import { holdGoogleLink, takeGoogleState, takeNext } from "@/lib/google-signin";
 import { startSession } from "@/lib/session";
 import { linkWishlistToAccount } from "@/lib/wishlist-store";
 
@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
   const code = params.get("code");
   const state = params.get("state");
   const next = await takeNext();
+  const expectedState = await takeGoogleState();
   const signin = (extra: Record<string, string>) => {
     const url = new URL("/signin", request.url);
     url.searchParams.set("next", next);
@@ -27,20 +28,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(url);
   };
 
-  // Cancelled at Google, or a forged hit on this URL.
-  if (!code || !state || params.get("error")) return signin({ error: "google" });
+  // Cancelled at Google, a forged hit, or a round trip this browser did not
+  // start (login CSRF — the state must match the one /start stored here).
+  if (!code || !state || params.get("error") || !expectedState || state !== expectedState) {
+    return signin({ error: "google" });
+  }
 
   try {
     const outcome = await api().googleFinish({ code, state });
     if (outcome.needsPhone) {
-      await holdGoogleLink(outcome.linkToken);
+      await holdGoogleLink(outcome.linkToken, outcome.googleEmail);
       return signin({ link: "google" });
     }
 
     await startSession(outcome.token, outcome.expiresAt, { rolling: !outcome.isAdmin });
     const signedIn = api().withToken(outcome.token);
     await Promise.allSettled([linkCartToAccount(signedIn), linkWishlistToAccount(signedIn)]);
-    return NextResponse.redirect(new URL(next, request.url));
+    return NextResponse.redirect(new URL(next, request.nextUrl.origin));
   } catch {
     return signin({ error: "google" });
   }

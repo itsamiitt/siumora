@@ -4,6 +4,7 @@ import { Modules } from "@medusajs/framework/utils";
 import { setAuthAppMetadataWorkflow } from "@medusajs/medusa/core-flows";
 
 import { VERIFIED_AT_KEY, VERIFIED_EMAIL_KEY } from "./email-verification";
+import { sessionKindFor } from "./customer-signin";
 import { isGuestEmail } from "./guest-email";
 import { readToken, tokenSecret } from "./signed-token";
 
@@ -25,7 +26,10 @@ export async function linkGoogleIdentity(
   req: MedusaRequest,
   linkToken: unknown,
   customerId: string,
+  phone: string,
 ): Promise<boolean> {
+  // Operator accounts start from an OTP on a listed number, never Google.
+  if (sessionKindFor(phone) === "operator") return false;
   const payload = readToken(linkToken, "google_link", tokenSecret());
   const authIdentityId = typeof payload?.authIdentityId === "string" ? payload.authIdentityId : undefined;
   if (!authIdentityId) return false;

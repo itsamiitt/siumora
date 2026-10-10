@@ -1145,19 +1145,30 @@ export class MedusaClient implements PublicSurface {
     const name = input.name?.trim();
     const parts = name?.split(/\s+/) ?? [];
     const email = input.email?.trim();
-    const updated = await this.request<{ customer: MedusaCustomer }>(
-      "POST",
+
+    // Names through Medusa's own profile route — the only fields it takes
+    // since the security review. Read back either way, to compare the email.
+    const current = await this.request<{ customer: MedusaCustomer }>(
+      name !== undefined ? "POST" : "GET",
       "/store/customers/me",
-      {
-        ...(name !== undefined
-          ? { first_name: parts[0] ?? "", last_name: parts.slice(1).join(" ") }
-          : {}),
-        ...(email !== undefined ? { email } : {}),
-      },
+      name !== undefined
+        ? { first_name: parts[0] ?? "", last_name: parts.slice(1).join(" ") }
+        : undefined,
     );
     const phone =
-      normalisePhone(updated.customer.phone ?? "") ?? updated.customer.phone ?? "";
-    return { ok: true, customer: customerCard(updated.customer, phone) };
+      normalisePhone(current.customer.phone ?? "") ?? current.customer.phone ?? "";
+
+    // A changed email goes through the step-up route; 403
+    // step_up_required surfaces to the caller, which asks for a fresh code.
+    if (email !== undefined && email.toLowerCase() !== (realEmail(current.customer.email) ?? "").toLowerCase()) {
+      const changed = await this.request<{ customer: AccountCustomer | null }>(
+        "POST",
+        "/store/siumora/me/email",
+        { email },
+      );
+      if (changed.customer) return { ok: true, customer: changed.customer };
+    }
+    return { ok: true, customer: customerCard(current.customer, phone) };
   }
   /** The account's own orders — placed signed in, or claimed. */
   async listOrders(): Promise<Array<Record<string, unknown>>> {

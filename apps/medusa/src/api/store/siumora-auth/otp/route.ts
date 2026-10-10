@@ -110,7 +110,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
   const auth = req.scope.resolve<IAuthModuleService>(Modules.AUTH);
   const result = (await auth.authenticate("phone-otp", {
-    url: req.url,
+    url: "/store/siumora-auth/otp",
     headers: req.headers as Record<string, string>,
     query: (req.query ?? {}) as Record<string, string>,
     body: { phone, ...(channel ? { channel } : {}), allowSms: smsBudget.allowed ? "true" : "false" },

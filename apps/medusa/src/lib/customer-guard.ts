@@ -1,8 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 
-import { stepUpFresh } from "../modules/customer-session/session";
-import { loadCustomer } from "./customer-signin";
-import { currentSession, type SiumoraSessionContext } from "./session-auth";
+import { stepUpFresh } from "../modules/customer-session/session.ts";
+import { currentSession, type SiumoraSessionContext } from "./session-auth.ts";
 
 /**
  * The two gates customer routes use: signed in at all, and signed in with a
@@ -41,25 +40,31 @@ export function requireStepUp(
   return session;
 }
 
+/** What a customer may change through Medusa's own POST /store/customers/me. */
+export const SELF_EDITABLE_FIELDS = new Set(["first_name", "last_name", "company_name"]);
+
 /**
- * Middleware on Medusa's own POST /store/customers/me: changing the email
- * (where receipts and, in phase 4, verification links go) needs a fresh
- * code. A name change alone does not.
+ * Middleware on Medusa's own POST /store/customers/me (security review).
+ * Medusa 2.21 lets a customer set their own `phone` and `metadata` there —
+ * and the phone is the account: it decides the operator role, where step-up
+ * codes go, which guest orders are claimable. So this route takes names
+ * only; the phone changes through /store/siumora-auth/phone (two OTPs) and
+ * the email through /store/siumora/me/email (step-up).
  */
-export async function emailChangeNeedsStepUp(
+export function restrictSelfUpdate(
   req: MedusaRequest,
   res: MedusaResponse,
   next: (error?: unknown) => void,
-): Promise<void> {
-  const email = (req.body as { email?: unknown } | undefined)?.email;
-  const session = currentSession(req);
-  if (req.method !== "POST" || email === undefined || !session) return next();
-
-  const customer = await loadCustomer(req, session.customerId);
-  const unchanged =
-    typeof email === "string" &&
-    email.trim().toLowerCase() === (customer?.email ?? "").toLowerCase();
-  if (unchanged || stepUpFresh(session.stepUpAt, new Date())) return next();
-
-  res.status(403).json(STEP_UP_REFUSAL);
+): void {
+  if (req.method !== "POST") return next();
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const refused = Object.keys(body).filter((key) => !SELF_EDITABLE_FIELDS.has(key));
+  if (refused.length > 0) {
+    res.status(400).json({
+      error: "field_not_editable",
+      message: `These can't be changed here: ${refused.join(", ")}.`,
+    });
+    return;
+  }
+  next();
 }

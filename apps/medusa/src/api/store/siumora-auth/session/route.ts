@@ -13,7 +13,7 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 // @ts-ignore -- TS1479 until @siumora/core ships require-condition types
 import { normalisePhone } from "@siumora/core";
 
-import { customerCard, loadCustomer, sessionKindFor } from "../../../../lib/customer-signin";
+import { customerCard, loadCustomer, sessionKindFor, verifiedPhone } from "../../../../lib/customer-signin";
 import { currentSession } from "../../../../lib/session-auth";
 import { STEP_UP_WINDOW_SECONDS, stepUpFresh } from "../../../../modules/customer-session/session";
 
@@ -34,7 +34,8 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
   const now = new Date();
   res.json({
     signedIn: true,
-    isAdmin: phone ? sessionKindFor(phone) === "operator" : false,
+    // Operator status from the VERIFIED number only (security review).
+    isAdmin: (await verifiedPhone(req, session.customerId, customer)) !== undefined && sessionKindFor(phone) === "operator",
     customer: customerCard(customer, phone),
     session: {
       id: session.id,

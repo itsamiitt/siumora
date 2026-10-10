@@ -208,10 +208,11 @@ test("updateProfile writes the authenticated Medusa customer and maps the result
     new Headers(request?.init.headers).get("authorization"),
     "Bearer session-token",
   );
+  // Names only: Medusa's profile route takes nothing else, and an
+  // unchanged email is not sent anywhere.
   assert.deepEqual(JSON.parse(String(request?.init.body)), {
     first_name: "Asha",
     last_name: "Rao Singh",
-    email: "asha@example.com",
   });
   assert.equal(result.ok, true);
   assert.equal(result.customer.name, "Asha Rao Singh");
@@ -514,4 +515,16 @@ test("a pending Google link rides the phone verify", async () => {
   const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
   await client.verifyOtp("9812345678", "123456", { googleLinkToken: "lt" });
   assert.deepEqual(calls[0]!.body, { phone: "9812345678", code: "123456", googleLinkToken: "lt" });
+});
+
+test("a changed email goes through the step-up route, never Medusa's profile route", async () => {
+  const { impl, calls } = scripted({
+    "POST /store/customers/me": { customer: { id: "cus_1", phone: "9812345678", first_name: "Asha", last_name: "", email: "9812345678@guest.siumora.in" } },
+    "POST /store/siumora/me/email": { ok: true, customer: { id: "cus_1", phone: "9812345678", maskedPhone: "98••••5678", name: "Asha", email: "asha@example.com" } },
+  });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl }).withToken("sst_" + "d".repeat(43));
+  const result = await client.updateProfile({ name: "Asha", email: "asha@example.com" });
+  assert.equal(result.customer.email, "asha@example.com");
+  assert.ok(!(calls[0]!.body as Record<string, unknown>).email, "no email on the profile route");
+  assert.deepEqual(calls[1]!.body, { email: "asha@example.com" });
 });

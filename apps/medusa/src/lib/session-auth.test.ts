@@ -5,6 +5,7 @@ import { getAuthContextFromJwtToken } from "@medusajs/framework/http";
 import { generateJwtToken } from "@medusajs/framework/utils";
 
 import { hashSessionToken, mintSessionToken } from "../modules/customer-session/session.ts";
+import { restrictSelfUpdate } from "./customer-guard.ts";
 import { refuseCustomerTokenMinting, sessionAuth } from "./session-auth.ts";
 
 /**
@@ -157,4 +158,48 @@ test("refresh and session exchange refuse a customer bearer, not a user's", () =
     passed = true;
   });
   assert.equal(passed, true);
+});
+
+test("Medusa's header parsing is ours: trailing junk does not smuggle a customer JWT", async () => {
+  const customerJwt = sign({ actor_id: "cus_9", actor_type: "customer" });
+  const { req } = fakeRequest({ authorization: `Bearer ${customerJwt} junk` });
+  await run(req);
+  assert.equal(req.headers.authorization, undefined);
+
+  let status = 0;
+  const res = { status: (code: number) => ((status = code), { json: () => undefined }) } as never;
+  refuseCustomerTokenMinting({ headers: { authorization: `Bearer ${customerJwt} x` } } as never, res, () => undefined);
+  assert.equal(status, 403);
+});
+
+test("a customer identity Medusa already attached is cleared — on admin routes too", async () => {
+  const { req } = fakeRequest({ url: "/admin/siumora/metrics" });
+  const request = req as typeof req & { session?: { auth_context?: { actor_type?: string } } };
+  request.auth_context = { actor_id: "cus_9", actor_type: "customer" };
+  request.session = { auth_context: { actor_type: "customer" } };
+  await run(req);
+  assert.equal(request.auth_context, undefined);
+  assert.equal(request.session?.auth_context, undefined);
+});
+
+// ── Medusa's own profile route takes names only (security review) ──
+
+
+test("the profile route refuses phone, metadata and email, and lets names through", () => {
+  const attempt = (body: Record<string, unknown>) => {
+    let status = 0;
+    let passed = false;
+    restrictSelfUpdate(
+      { method: "POST", body } as never,
+      { status: (code: number) => ((status = code), { json: () => undefined }) } as never,
+      () => {
+        passed = true;
+      },
+    );
+    return { status, passed };
+  };
+  assert.deepEqual(attempt({ first_name: "Asha", last_name: "Rao" }), { status: 0, passed: true });
+  assert.equal(attempt({ phone: "9000000001" }).status, 400, "the phone is the account");
+  assert.equal(attempt({ metadata: { siumora_verified_email: "x@y.z" } }).status, 400);
+  assert.equal(attempt({ first_name: "A", email: "x@y.z" }).status, 400);
 });

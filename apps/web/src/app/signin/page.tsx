@@ -7,6 +7,8 @@ import { Display } from "@siumora/ui";
 
 import { SignInForm } from "@/components/sign-in-form";
 import { currentViewer } from "@/lib/session";
+import { pendingGoogleEmail } from "@/lib/google-signin";
+import { safeNext } from "@/lib/safe-next";
 import { signInOptions } from "@/lib/signin-options";
 
 export const metadata: Metadata = {
@@ -24,7 +26,7 @@ async function SignInPageContents({
 
   // Only a same-site path is followed. An open redirect here would let a link
   // that looks like ours bounce a shopper to a copy of this very page.
-  const destination = next?.startsWith("/") && !next.startsWith("//") ? next : "/account";
+  const destination = safeNext(next);
 
   if (await currentViewer()) redirect(destination);
 
@@ -33,7 +35,7 @@ async function SignInPageContents({
   // it is linked (auth plan phase 4). Or Google refused / was cancelled.
   const notice =
     link === "google"
-      ? "Almost there — verify your mobile number once to finish signing in with Google."
+      ? `Almost there — verify your mobile number to link the Google account ${(await pendingGoogleEmail()) ?? "you chose"}. Not you? Close this page; nothing is linked.`
       : error === "google"
         ? "Google sign-in didn't finish. Try again, or use your mobile number."
         : undefined;

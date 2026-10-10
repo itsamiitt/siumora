@@ -14,10 +14,8 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import type { IAuthModuleService } from "@medusajs/framework/types";
 import { Modules } from "@medusajs/framework/utils";
 
-// @ts-ignore -- TS1479 until @siumora/core ships require-condition types
-import { normalisePhone } from "@siumora/core";
-
-import { loadCustomer, logAuthEvent, pgOf } from "../../../../lib/customer-signin";
+import { logAuthEvent, pgOf, verifiedPhone } from "../../../../lib/customer-signin";
+import { withinGuessCap } from "../../../../lib/guess-cap";
 import { otpFailure } from "../../../../lib/otp-verdict";
 import { currentSession } from "../../../../lib/session-auth";
 import { markStepUp } from "../../../../modules/customer-session/data";
@@ -30,8 +28,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     res.status(401).json({ error: "not_signed_in", message: "Sign in to continue." });
     return;
   }
-  const customer = await loadCustomer(req, session.customerId);
-  const phone = normalisePhone(customer?.phone ?? "");
+  const phone = await verifiedPhone(req, session.customerId);
   if (!phone) {
     res.status(409).json({ error: "no_phone", message: "This account has no phone number to verify." });
     return;
@@ -46,9 +43,11 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     return;
   }
 
+  if (!(await withinGuessCap(req, res, phone))) return;
+
   const auth = req.scope.resolve<IAuthModuleService>(Modules.AUTH);
   const result = (await auth.authenticate("phone-otp", {
-    url: req.url,
+    url: "/store/siumora-auth/step-up",
     headers: req.headers as Record<string, string>,
     query: {},
     body: { phone, code },

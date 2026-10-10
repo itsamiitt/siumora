@@ -135,7 +135,7 @@ export type GoogleOutcome =
     claimableOrders?: number;
     customer: AccountCustomer;
   })
-  | { ok: true; needsPhone: true; linkToken: string };
+  | { ok: true; needsPhone: true; linkToken: string; googleEmail?: string };
 
 export interface RequestOptions {
   /** Sent as Idempotency-Key so a retry cannot place a second order. */

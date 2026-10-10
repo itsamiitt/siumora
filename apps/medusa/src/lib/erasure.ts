@@ -87,7 +87,15 @@ export async function eraseCustomer(
   }
   const linkedGoogle = (customer.metadata as Record<string, unknown> | null)?.siumora_google_identity;
   if (typeof linkedGoogle === "string") identityIds.add(linkedGoogle);
-  if (identityIds.size > 0) await auth.deleteAuthIdentities([...identityIds]);
+  // Only identities that sign in to THIS customer (security review): the
+  // stored phone or a metadata id must never let one account delete the
+  // sign-in of another.
+  const owned_: string[] = [];
+  for (const identityId of identityIds) {
+    const identity = await auth.retrieveAuthIdentity(identityId).catch(() => undefined);
+    if (identity?.app_metadata?.customer_id === customerId) owned_.push(identityId);
+  }
+  if (owned_.length > 0) await auth.deleteAuthIdentities(owned_);
 
   // ── The customer record and its address book. ──
   const addressIds = (customer.addresses ?? []).map((address) => address.id);

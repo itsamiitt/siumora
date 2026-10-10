@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { api } from "@/lib/api";
-import { rememberNext, safeNext } from "@/lib/google-signin";
+import { rememberGoogleState, rememberNext, safeNext } from "@/lib/google-signin";
 
 /**
  * GET /auth/google/start?next=/checkout — off to Google (auth plan phase 4).
@@ -19,6 +19,9 @@ export async function GET(request: NextRequest) {
     if (!methods.google) return NextResponse.redirect(signin);
     const { location } = await api().googleStart();
     if (!location.startsWith("https://accounts.google.com/")) return NextResponse.redirect(signin);
+    const state = new URL(location).searchParams.get("state");
+    if (!state) return NextResponse.redirect(signin);
+    await rememberGoogleState(state);
     await rememberNext(next);
     return NextResponse.redirect(location);
   } catch {

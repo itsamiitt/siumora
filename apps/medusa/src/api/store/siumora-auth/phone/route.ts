@@ -28,8 +28,9 @@ import { setAuthAppMetadataWorkflow } from "@medusajs/medusa/core-flows";
 import { maskPhone, normalisePhone } from "@siumora/core";
 
 import { requireStepUp } from "../../../../lib/customer-guard";
-import { loadCustomer, logAuthEvent, pgOf } from "../../../../lib/customer-signin";
+import { loadCustomer, logAuthEvent, pgOf, verifiedPhone } from "../../../../lib/customer-signin";
 import { guestEmail, isGuestEmail } from "../../../../lib/guest-email";
+import { withinGuessCap } from "../../../../lib/guess-cap";
 import { otpFailure } from "../../../../lib/otp-verdict";
 import { phoneChangedMessage, sendSecurityAlert } from "../../../../lib/security-alert";
 import { revokeAllSessions } from "../../../../modules/customer-session/data";
@@ -57,28 +58,20 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   }
 
   const customer = await loadCustomer(req, session.customerId);
-  const oldPhone = normalisePhone(customer?.phone ?? "") as string | undefined;
+  const oldPhone = await verifiedPhone(req, session.customerId, customer);
   if (oldPhone === newPhone) {
     res.status(400).json({ error: "same_phone", message: "That is already your number." });
     return;
   }
 
-  const auth = req.scope.resolve<IAuthModuleService>(Modules.AUTH);
-  const existingId = await identityIdFor(auth, newPhone);
-  if (existingId) {
-    const existing = await auth.retrieveAuthIdentity(existingId);
-    const owner = existing.app_metadata?.customer_id;
-    if (typeof owner === "string" && owner && owner !== session.customerId) {
-      res.status(409).json({
-        error: "phone_in_use",
-        message: "That number already has its own Siumora account. Contact us to merge them.",
-      });
-      return;
-    }
-  }
+  if (!(await withinGuessCap(req, res, newPhone))) return;
 
+  const auth = req.scope.resolve<IAuthModuleService>(Modules.AUTH);
+  // The code is judged FIRST (security review): "that number has an account"
+  // is only ever said to someone who just proved they hold the number, so
+  // this route cannot be used to test which numbers shop here.
   const result = (await auth.authenticate("phone-otp", {
-    url: req.url,
+    url: "/store/siumora-auth/phone",
     headers: req.headers as Record<string, string>,
     query: {},
     body: { phone: newPhone, code },
@@ -91,9 +84,18 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     return;
   }
 
-  // The new number signs in to this account…
   const newIdentity = result.authIdentity;
-  if (newIdentity.app_metadata?.customer_id !== session.customerId) {
+  const owner = newIdentity.app_metadata?.customer_id;
+  if (typeof owner === "string" && owner && owner !== session.customerId) {
+    res.status(409).json({
+      error: "phone_in_use",
+      message: "That number already has its own Siumora account. Contact us to merge them.",
+    });
+    return;
+  }
+
+  // The new number signs in to this account…
+  if (owner !== session.customerId) {
     await setAuthAppMetadataWorkflow(req.scope).run({
       input: { authIdentityId: newIdentity.id, actorType: "customer", value: session.customerId },
     });

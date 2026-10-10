@@ -119,7 +119,7 @@ async function requestCode(
   ids: AuthIdentityProviderService,
   phone: string,
 ): Promise<Response> {
-  return (await service.authenticate({ body: { phone } }, ids)) as Response;
+  return (await service.authenticate({ url: "/store/siumora-auth/otp", body: { phone } }, ids)) as Response;
 }
 
 async function verifyCode(
@@ -128,7 +128,7 @@ async function verifyCode(
   phone: string,
   code: string,
 ): Promise<Response> {
-  return (await service.authenticate({ body: { phone, code } }, ids)) as Response;
+  return (await service.authenticate({ url: "/store/siumora-auth/verify", body: { phone, code } }, ids)) as Response;
 }
 
 /** The stored challenge blob for a number — the tests' clock seam. */
@@ -360,22 +360,16 @@ test("never stores the code in the clear", async () => {
 
 // ── Register and options ──────────────────────────────────────
 
-test("register runs the same two-step flow", async () => {
-  const { service: ids } = fakeIdentityStore();
+test("register is Medusa's /register route — refused like the others", async () => {
+  const { service: ids, identities } = fakeIdentityStore();
   const service = echoService();
-
-  const issued = (await service.register(
-    { body: { phone: "9812345677" } },
+  const response = (await service.register(
+    { url: "/auth/customer/phone-otp/register", body: { phone: "9812345677" } },
     ids,
   )) as Response;
-  assert.equal(issued.success, true);
-  assert.match(issued.otp?.code ?? "", /^\d{6}$/);
-
-  const verified = (await service.register(
-    { body: { phone: "9812345677", code: issued.otp!.code! } },
-    ids,
-  )) as Response;
-  assert.equal(verified.success, true);
+  assert.equal(response.success, false);
+  assert.equal(response.errorCode, "sign_in_unavailable");
+  assert.equal(identities.size, 0);
 });
 
 test("validateOptions refuses OTP_ECHO in production", () => {
@@ -531,11 +525,22 @@ test("the store route's delivery hints reach the sender, and the reply names the
   });
 
   const response = (await service.authenticate(
-    { body: { phone: "9812345678", channel: "sms", allowSms: "false" } },
+    { url: "/store/siumora-auth/otp", body: { phone: "9812345678", channel: "sms", allowSms: "false" } },
     ids,
   )) as Response;
 
   assert.deepEqual(seen, [{ prefer: "sms", allowSms: false }]);
   assert.equal(response.otp?.channel, "sms");
   assert.deepEqual(response.otp?.channels, ["whatsapp", "sms"]);
+});
+
+test("Medusa's own auth routes cannot drive the provider — not even percent-encoded", async () => {
+  const { service: ids, identities } = fakeIdentityStore();
+  const service = echoService();
+  for (const url of ["/auth/customer/phone-otp", "/auth/x/phone-otp", "/auth/customer/phone%2Dotp", undefined]) {
+    const response = (await service.authenticate({ url, body: { phone: "9812345678" } } as never, ids)) as Response;
+    assert.equal(response.success, false, String(url));
+    assert.equal(response.errorCode, "sign_in_unavailable");
+  }
+  assert.equal(identities.size, 0, "no challenge issued, nothing sent");
 });

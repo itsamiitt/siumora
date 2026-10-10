@@ -1,13 +1,13 @@
 import type { MedusaRequest } from "@medusajs/framework/http";
-import type { AuthIdentityDTO } from "@medusajs/framework/types";
-import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
+import type { AuthIdentityDTO, IAuthModuleService } from "@medusajs/framework/types";
+import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils";
 import {
   createCustomerAccountWorkflow,
   setAuthAppMetadataWorkflow,
 } from "@medusajs/medusa/core-flows";
 
 // @ts-ignore -- TS1479 until @siumora/core ships require-condition types
-import { maskPhone, parseAdminRoles } from "@siumora/core";
+import { maskPhone, normalisePhone, parseAdminRoles } from "@siumora/core";
 
 import {
   createSession,
@@ -134,6 +134,31 @@ export async function ensureCustomer(
   return result.id;
 }
 
+/**
+ * The customer's phone, but only if it is VERIFIED: the number's own
+ * phone-otp sign-in identity is linked to this customer. `customer.phone`
+ * alone is a column — an admin can edit it, and before the security review
+ * a customer could too — so nothing that grants power (operator role,
+ * step-up target, guest-order claims, the COD gate, erasure) reads it bare.
+ */
+export async function verifiedPhone(
+  req: MedusaRequest,
+  customerId: string,
+  customer?: CustomerRow,
+): Promise<string | undefined> {
+  const row = customer ?? (await loadCustomer(req, customerId));
+  const phone = normalisePhone(row?.phone ?? "") as string | undefined;
+  if (!phone) return undefined;
+  const auth = req.scope.resolve<IAuthModuleService>(Modules.AUTH);
+  const providers = await auth.listProviderIdentities({ entity_id: phone, provider: "phone-otp" });
+  for (const provider of providers) {
+    if (!provider.auth_identity_id) continue;
+    const identity = await auth.retrieveAuthIdentity(provider.auth_identity_id);
+    if (identity.app_metadata?.customer_id === customerId) return phone;
+  }
+  return undefined;
+}
+
 export async function isBlocked(req: MedusaRequest, customerId: string): Promise<boolean> {
   return (await readSecurity(pgOf(req), customerId)).blockedAt !== null;
 }
@@ -147,7 +172,7 @@ export interface OpenedSession extends CreatedSession {
 
 export async function openSession(
   req: MedusaRequest,
-  input: { customerId: string; authIdentityId: string; phone: string },
+  input: { customerId: string; authIdentityId: string; phone: string; stepUp?: boolean },
 ): Promise<OpenedSession> {
   const pg = pgOf(req);
   const now = new Date();
@@ -163,6 +188,7 @@ export async function openSession(
     userAgent,
     ip: coarseIp(req.ip),
     now,
+    ...(input.stepUp === false ? { stepUp: false } : {}),
   });
   return { ...created, kind, device, newDevice: isNewDevice(device, known) };
 }

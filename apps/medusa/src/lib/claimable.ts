@@ -1,15 +1,12 @@
 import type { MedusaRequest } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
-// @ts-ignore -- TS1479 until @siumora/core ships require-condition types
-import { normalisePhone } from "@siumora/core";
-
 import {
   unownedIdentities,
   type OwnedIdentityRow,
   type SqlClient,
 } from "../modules/siumora-order/ownership";
-import { loadCustomer, pgOf } from "./customer-signin";
+import { pgOf, verifiedPhone } from "./customer-signin";
 import { guestEmail } from "./guest-email";
 
 /**
@@ -21,8 +18,7 @@ export async function claimableIdentities(
   req: MedusaRequest,
   customerId: string,
 ): Promise<OwnedIdentityRow[]> {
-  const customer = await loadCustomer(req, customerId);
-  const phone = normalisePhone(customer?.phone ?? "");
+  const phone = await verifiedPhone(req, customerId);
   if (!phone) return [];
 
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY);

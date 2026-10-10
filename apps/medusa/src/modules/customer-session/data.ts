@@ -44,6 +44,8 @@ export async function createSession(
     userAgent?: string | undefined;
     ip?: string | null | undefined;
     now: Date;
+    /** False for a Google sign-in: only a phone OTP counts as a step-up. */
+    stepUp?: boolean;
   },
 ): Promise<CreatedSession> {
   const id = newId("sises");
@@ -66,8 +68,9 @@ export async function createSession(
       input.ip ?? null,
       now,
       expiresAt.toISOString(),
-      // Signing in IS an OTP just passed: the session starts stepped up.
-      now,
+      // Signing in with an OTP IS a fresh code: the session starts stepped
+      // up. A Google sign-in proves no phone, so it does not (security review).
+      input.stepUp === false ? null : now,
       now,
       now,
     ],

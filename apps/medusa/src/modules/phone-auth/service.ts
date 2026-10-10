@@ -201,6 +201,17 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
     data: AuthenticationInput,
     authIdentityProviderService: AuthIdentityProviderService,
   ): Promise<AuthenticationResponse> {
+    // Only the Siumora sign-in routes may drive this provider (security
+    // review). Medusa's own /auth/:actor_type/phone-otp[/register] routes
+    // would otherwise issue codes past every cap the store routes hold
+    // (Turnstile, per-IP, per-number, SMS budget) and mint raw customer
+    // JWTs outside the session table — through an unlisted actor type, or a
+    // percent-encoded path a middleware matcher never sees. Those routes
+    // pass the request's own URL; ours pass their fixed path.
+    if (!isSiumoraAuthRoute(data.url)) {
+      return this.fail_({ errorCode: "sign_in_unavailable", error: "Sign in through the storefront." });
+    }
+
     const body = (data.body ?? {}) as Record<string, unknown>;
 
     const rawPhone = typeof body.phone === "string" ? body.phone : "";
@@ -458,6 +469,11 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
     };
     return response;
   }
+}
+
+/** The fixed paths the Siumora store routes hand the provider. */
+export function isSiumoraAuthRoute(url: unknown): boolean {
+  return typeof url === "string" && /^\/store\/siumora-auth\/(otp|verify|step-up|phone)$/.test(url);
 }
 
 function isNotFound(error: unknown): boolean {

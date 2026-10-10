@@ -169,6 +169,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   }
 
   let orderId: string;
+  // Only the request that completes the cart may adopt its order: a replay
+  // (same key, or an already-completed cart id) must not hand a guest's
+  // order to whoever replays it (security review).
+  let completedHere = false;
 
   if (cart.completed_at) {
     // Already completed — Medusa's native semantics make completion
@@ -266,6 +270,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
         input: { id: cartId },
       });
       orderId = result.id;
+      completedHere = true;
     } catch (error) {
       // Stock ran out between add and complete, payment session refused, …
       // — the caller's request failed, not the server: same 409
@@ -288,7 +293,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   }
 
   // A signed-in shopper's order is theirs, and the address joins their book.
-  await adoptPlacedOrder(req, orderId, cart.shipping_address);
+  if (completedHere) await adoptPlacedOrder(req, orderId, cart.shipping_address);
 
   // Identity first, then the statutory invoice — the M2 gst module. COD
   // confirmed at placement, so completion is what raises the invoice.

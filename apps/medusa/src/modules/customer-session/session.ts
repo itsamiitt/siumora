@@ -64,10 +64,21 @@ export function hashSessionToken(token: string): string {
  * Medusa's own authenticate() to judge.
  */
 export function sessionTokenFromHeader(header: unknown): string | undefined {
-  if (typeof header !== "string") return undefined;
-  const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
-  const token = match?.[1];
+  const token = bearerToken(header);
   return token && isSessionToken(token) ? token : undefined;
+}
+
+/**
+ * The bearer token from an Authorization header, parsed EXACTLY as Medusa's
+ * authenticate() parses it (an unanchored `(\S+)\s+(\S+)`, first match).
+ * Anything stricter here would let `Bearer <jwt> junk` slip past our checks
+ * while Medusa still accepts the token (security review).
+ */
+export function bearerToken(header: unknown): string | undefined {
+  if (typeof header !== "string") return undefined;
+  const match = /(\S+)\s+(\S+)/.exec(header);
+  if (!match || match[1]!.toLowerCase() !== "bearer") return undefined;
+  return match[2];
 }
 
 export function sessionTtlSeconds(kind: SessionKind): number {

@@ -21,7 +21,7 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http";
 
-import { emailChangeNeedsStepUp } from "../lib/customer-guard";
+import { restrictSelfUpdate } from "../lib/customer-guard";
 import { limiterFromEnv, rateLimitMiddleware } from "../lib/rate-limit";
 import { connectRedis, logRedisError } from "../lib/redis";
 import {
@@ -79,12 +79,14 @@ export default defineMiddlewares({
         authenticate(["user", "customer"], ["session", "bearer"]),
       ],
     },
-    // Changing the account email needs a fresh code (StepUpGate, auth plan
-    // phase 2) — enforced on Medusa's own profile route.
+    // Medusa's own profile route takes names only (security review): its
+    // validator would otherwise let a customer set their own phone and
+    // metadata. Phone and email change through the Siumora routes, with
+    // their OTP and step-up.
     {
       matcher: "/store/customers/me",
       methods: ["POST"],
-      middlewares: [emailChangeNeedsStepUp],
+      middlewares: [restrictSelfUpdate],
     },
     // The custom checkout/orders namespace, present and future routes alike.
     { matcher: "/store/siumora", middlewares: [rateLimit] },

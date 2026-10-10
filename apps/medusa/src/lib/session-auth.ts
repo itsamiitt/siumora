@@ -16,6 +16,7 @@ import {
 } from "../modules/customer-session/data.ts";
 import {
   REQUEST_JWT_TTL,
+  bearerToken,
   sessionTokenFromHeader,
   touchDecision,
 } from "../modules/customer-session/session.ts";
@@ -88,20 +89,29 @@ export async function sessionAuth(
 ): Promise<void> {
   const token = sessionTokenFromHeader(req.headers.authorization);
   if (!token) {
-    // A customer JWT straight from a client — a Google callback token, an
-    // old token from before sessions — is not a session: it cannot be
-    // revoked or blocked. On /store a customer is signed in by session
-    // only, so it is dropped (Medusa's global /store auth may already have
-    // read it, hence the auth_context too). Google's hand-off route is the
-    // one exception: that token is exactly what it exchanges.
+    // A customer credential that is not a session — a raw JWT (a Google
+    // callback token, one minted before sessions), or a Medusa cookie
+    // session built from one — cannot be revoked or blocked. On /store and
+    // /admin/siumora a customer is signed in by session only, so every such
+    // credential is dropped: the header, the auth_context Medusa's global
+    // /store auth may already have set from it, and a cookie session's
+    // customer context. Google's hand-off route is the one exception: that
+    // token is exactly what it exchanges.
     const path = (req.originalUrl ?? req.url).split("?")[0] ?? "";
-    if (
-      unverifiedActorType(req.headers.authorization) === "customer" &&
-      path.startsWith("/store") &&
-      path !== GOOGLE_HANDOFF_PATH
-    ) {
-      delete req.headers.authorization;
-      delete (req as SessionRequest).auth_context;
+    if (path !== GOOGLE_HANDOFF_PATH) {
+      const request = req as SessionRequest & {
+        session?: { auth_context?: { actor_type?: string } };
+      };
+      if (
+        unverifiedActorType(req.headers.authorization) === "customer" ||
+        request.auth_context?.actor_type === "customer"
+      ) {
+        delete req.headers.authorization;
+        delete request.auth_context;
+      }
+      if (request.session?.auth_context?.actor_type === "customer") {
+        delete request.session.auth_context;
+      }
     }
     return next();
   }
@@ -154,9 +164,7 @@ export async function sessionAuth(
 
 /** The payload of a JWT, unverified — only used to route, never to trust. */
 function unverifiedActorType(header: unknown): string | undefined {
-  if (typeof header !== "string") return undefined;
-  const token = /^Bearer\s+(\S+)$/i.exec(header.trim())?.[1];
-  const payload = token?.split(".")[1];
+  const payload = bearerToken(header)?.split(".")[1];
   if (!payload) return undefined;
   try {
     const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {

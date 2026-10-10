@@ -2,6 +2,7 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
 import { recordAudit, type SqlClient } from "../modules/audit/data";
+import { verifiedPhone } from "./customer-signin";
 import { settingsCache } from "../modules/settings/cache";
 import { readSettings, type SqlClient as SettingsSqlClient } from "../modules/settings/read";
 import {
@@ -73,7 +74,10 @@ async function loadContact(
     filters: { id: actorId },
   });
   const row = data[0] as { email?: string | null; phone?: string | null } | undefined;
-  return (actorType === "user" ? row?.email : row?.phone) ?? null;
+  if (actorType === "user") return row?.email ?? null;
+  // A phone operator's number counts only if it signs in to this customer:
+  // the column alone is not proof of holding the number (security review).
+  return (await verifiedPhone(req, actorId)) ?? null;
 }
 
 export async function requireOperator(

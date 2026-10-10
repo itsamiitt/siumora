@@ -3,7 +3,8 @@
  * account (auth plan phase 2).
  *
  * - This browser's open cart is transferred to the customer (Medusa's own
- *   transferCartCustomerWorkflow), so checkout knows who is buying.
+ *   transferCartCustomerWorkflow), so checkout knows who is buying — unless
+ *   another registered account already owns it.
  * - Bags the account left open on other devices in the last 30 days are
  *   folded into it, then marked merged so they are never folded twice.
  * - With no cart on this browser, the account's most recent open bag is
@@ -57,6 +58,20 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     });
     current = data[0] as CartRow | undefined;
     if (current?.completed_at) current = undefined;
+    if (current?.customer_id && current.customer_id !== session.customerId) {
+      // Medusa's transfer checks nothing (security review): never take a
+      // bag that belongs to another registered account. A guest customer's
+      // (has_account false — set at guest checkout) may be adopted.
+      const { data: owners } = await query.graph({
+        entity: "customer",
+        fields: ["id", "has_account"],
+        filters: { id: current.customer_id },
+      });
+      if ((owners[0] as { has_account?: boolean } | undefined)?.has_account !== false) {
+        fail("cart belongs to another account", current.id);
+        current = undefined;
+      }
+    }
     if (current && current.customer_id !== session.customerId) {
       try {
         await transferCartCustomerWorkflow(req.scope).run({

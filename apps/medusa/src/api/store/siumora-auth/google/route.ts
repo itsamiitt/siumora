@@ -24,9 +24,6 @@ import { getAuthContextFromJwtToken } from "@medusajs/framework/http";
 import type { IAuthModuleService } from "@medusajs/framework/types";
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils";
 
-// @ts-ignore -- TS1479 until @siumora/core ships require-condition types
-import { normalisePhone } from "@siumora/core";
-
 import {
   customerCard,
   isBlocked,
@@ -35,6 +32,7 @@ import {
   openSession,
   pgOf,
   sessionKindFor,
+  verifiedPhone,
 } from "../../../../lib/customer-signin";
 import { issueToken, tokenSecret } from "../../../../lib/signed-token";
 import { settingsCache } from "../../../../modules/settings/cache";
@@ -72,10 +70,16 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   const customerId = identity.app_metadata?.customer_id;
 
   if (typeof customerId !== "string" || !customerId) {
+    // Named (masked) on the link step so the shopper can see WHICH Google
+    // account they are about to attach to their phone.
+    const google = identity.provider_identities?.find((entry) => entry.provider === "google");
+    const email = typeof google?.user_metadata?.email === "string" ? google.user_metadata.email : "";
+    const at = email.indexOf("@");
     res.setHeader("Cache-Control", "no-store");
     res.json({
       ok: true,
       needsPhone: true,
+      ...(at > 0 ? { googleEmail: `${email.slice(0, 1)}…${email.slice(at)}` } : {}),
       linkToken: issueToken(
         "google_link",
         { authIdentityId: identity.id },
@@ -87,7 +91,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   }
 
   const customer = await loadCustomer(req, customerId);
-  const phone = normalisePhone(customer?.phone ?? "") as string | undefined;
+  const phone = customer ? await verifiedPhone(req, customerId, customer) : undefined;
   if (!customer || !phone) {
     // Linked to an account that has since lost its phone (erased, merged
     // away): treat as unlinked rather than open a phoneless session.
@@ -109,7 +113,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     return;
   }
 
-  const session = await openSession(req, { customerId, authIdentityId: identity.id, phone });
+  // stepUp false: Google proves an email, not the phone — phone and email
+  // changes, erasure and large COD still ask for a fresh code.
+  const session = await openSession(req, { customerId, authIdentityId: identity.id, phone, stepUp: false });
   await logAuthEvent(
     req,
     { type: "signin_completed", customerId, channel: "google", detail: { kind: session.kind } },

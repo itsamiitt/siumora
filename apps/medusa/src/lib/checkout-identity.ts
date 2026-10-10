@@ -16,7 +16,7 @@ import {
   setOwnerIfUnowned,
   type SqlClient as OwnershipSqlClient,
 } from "../modules/siumora-order/ownership";
-import { loadCustomer, pgOf } from "./customer-signin";
+import { pgOf, verifiedPhone } from "./customer-signin";
 import { fetchOrders } from "./order-card";
 import { currentSession } from "./session-auth";
 
@@ -57,8 +57,7 @@ export async function codGate(
   if (!settings.codRequiresOtp) return { ok: true };
 
   const session = currentSession(req);
-  const customer = session ? await loadCustomer(req, session.customerId) : undefined;
-  const signedInPhone = normalisePhone(customer?.phone ?? "") as string | undefined;
+  const signedInPhone = session ? await verifiedPhone(req, session.customerId) : undefined;
   const orderPhone = normalisePhone(cart.shipping_address?.phone ?? "") as string | undefined;
   const totalPaise = cart.total === undefined ? 0 : majorToPaise(wireNumber(cart.total, "total"));
 
