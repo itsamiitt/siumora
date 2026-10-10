@@ -30,6 +30,8 @@ import type {
   AccountCustomer,
   ClaimableOrder,
   DeviceSession,
+  GoogleOutcome,
+  SignInMethods,
   SavedAddress,
   OtpIssued,
   OtpRequestOptions,
@@ -712,6 +714,7 @@ export class MedusaClient implements PublicSurface {
   async verifyOtp(
     phone: string,
     code: string,
+    options: { googleLinkToken?: string } = {},
   ): Promise<{
     ok: true;
     token: string;
@@ -722,7 +725,12 @@ export class MedusaClient implements PublicSurface {
     claimableOrders?: number;
     customer: AccountCustomer;
   }> {
-    return this.request("POST", "/store/siumora-auth/verify", { phone, code });
+    return this.request("POST", "/store/siumora-auth/verify", {
+      phone,
+      code,
+      // A Google sign-in waiting on this phone (phase 4) links on success.
+      ...(options.googleLinkToken ? { googleLinkToken: options.googleLinkToken } : {}),
+    });
   }
 
   async getSession(): Promise<
@@ -769,6 +777,41 @@ export class MedusaClient implements PublicSurface {
     code: string,
   ): Promise<{ ok: boolean; maskedPhone: string; signedOutDevices: number }> {
     return this.request("POST", "/store/siumora-auth/phone", { phone, code });
+  }
+
+  // ── Google and email (auth plan phase 4) ────────────────────
+
+  async getSignInMethods(): Promise<SignInMethods> {
+    return this.request("GET", "/store/siumora-auth/methods", undefined, { revalidate: 60 });
+  }
+
+  /** Where to send the shopper to choose their Google account. */
+  async googleStart(): Promise<{ location: string }> {
+    return this.request("POST", "/auth/customer/google", {});
+  }
+
+  /**
+   * Back from Google: Medusa's provider turns the code into a short JWT for
+   * the Google identity, and the Siumora route turns that into a session —
+   * or into { needsPhone, linkToken } when this Google account is not yet
+   * tied to a phone.
+   */
+  async googleFinish(query: { code: string; state: string }): Promise<GoogleOutcome> {
+    const search = new URLSearchParams({ code: query.code, state: query.state });
+    const { token } = await this.request<{ token: string }>(
+      "POST",
+      `/auth/customer/google/callback?${search}`,
+      {},
+    );
+    return this.request("POST", "/store/siumora-auth/google", {}, { bearer: token });
+  }
+
+  async requestEmailVerification(): Promise<{ ok: boolean; alreadyVerified: boolean }> {
+    return this.request("POST", "/store/siumora/me/email/request", {});
+  }
+
+  async verifyEmail(token: string): Promise<{ ok: boolean }> {
+    return this.request("POST", "/store/siumora/me/email/verify", { token });
   }
 
   // ── The signed-in account (auth plan phase 2) ───────────────

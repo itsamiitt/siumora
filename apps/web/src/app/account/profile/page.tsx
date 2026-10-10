@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { MicroLabel } from "@siumora/ui";
 
 import { AccountShell, SignedOutAccount } from "@/components/account/account-shell";
+import { EmailVerificationStatus } from "@/components/account/email-verification";
 import { PhoneChange } from "@/components/account/phone-change";
 import { ProfileForm } from "@/components/profile-form";
 import { currentViewer } from "@/lib/session";
@@ -33,6 +34,10 @@ async function ProfileContents() {
           name={viewer.customer.name}
           email={viewer.customer.email}
           maskedPhone={viewer.customer.maskedPhone}
+        />
+        <EmailVerificationStatus
+          email={viewer.customer.email}
+          verified={viewer.customer.emailVerified === true}
         />
       </section>
 

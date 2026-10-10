@@ -123,6 +123,11 @@ export const otpVerifiedSchema = signinBase;
 export const otpFailedSchema = signinBase.extend({
   reason: z.enum(["wrong_code", "code_unusable", "rate_limited", "send_failed", "challenge_failed", "blocked", "error"]),
 });
+/** Which arm of an experiment this shopper saw — sent once per sign-in form. */
+export const experimentExposureSchema = base.extend({
+  experiment: z.string(),
+  variant: z.string(),
+});
 export const signinCompletedSchema = signinBase.extend({
   method: z.enum(["phone", "google"]),
   claimed_orders: z.number().int().nonnegative().optional(),
@@ -150,6 +155,7 @@ export const EVENT_SCHEMAS = {
   otp_verified: otpVerifiedSchema,
   otp_failed: otpFailedSchema,
   signin_completed: signinCompletedSchema,
+  experiment_exposure: experimentExposureSchema,
 } as const;
 
 export type EventName = keyof typeof EVENT_SCHEMAS;

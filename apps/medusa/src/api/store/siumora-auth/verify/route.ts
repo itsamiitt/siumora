@@ -36,6 +36,7 @@ import {
   pgOf,
 } from "../../../../lib/customer-signin";
 import { claimableIdentities } from "../../../../lib/claimable";
+import { linkGoogleIdentity } from "../../../../lib/google-link";
 import { otpFailure } from "../../../../lib/otp-verdict";
 import { newDeviceMessage, sendSecurityAlert } from "../../../../lib/security-alert";
 import { settingsCache } from "../../../../modules/settings/cache";
@@ -86,6 +87,12 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
       message: "This account can't sign in right now. Contact us at the grievance desk.",
     });
     return;
+  }
+
+  // A Google sign-in waiting on this phone (phase 4): the OTP just proved
+  // the number, so the Google account links to its customer now.
+  if (body.googleLinkToken !== undefined && (await linkGoogleIdentity(req, body.googleLinkToken, customerId))) {
+    await logAuthEvent(req, { type: "google_linked", customerId, channel: "google" }, phone);
   }
 
   const session = await openSession(req, {

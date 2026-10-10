@@ -7,6 +7,7 @@ import { ApiError, type DeviceSession, type OtpChannel } from "@siumora/sdk";
 
 import { api } from "@/lib/api";
 import { linkCartToAccount } from "@/lib/cart-store";
+import { clearGoogleLink, pendingGoogleLink } from "@/lib/google-signin";
 import { linkWishlistToAccount } from "@/lib/wishlist-store";
 import { apiAs, currentViewer, endSession, sessionToken, startSession } from "@/lib/session";
 
@@ -83,7 +84,10 @@ export interface VerifyCodeResult {
 
 export async function verifyCode(phone: string, code: string): Promise<VerifyCodeResult> {
   try {
-    const session = await api().verifyOtp(phone, code);
+    // A Google sign-in waiting for this phone (phase 4): the OTP links it.
+    const googleLinkToken = await pendingGoogleLink();
+    const session = await api().verifyOtp(phone, code, googleLinkToken ? { googleLinkToken } : {});
+    if (googleLinkToken) await clearGoogleLink();
     // Operator sessions are a fixed 12 hours; a customer's rolls (Medusa).
     await startSession(session.token, session.expiresAt, { rolling: !session.isAdmin });
 

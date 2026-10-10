@@ -7,6 +7,7 @@ import { Display } from "@siumora/ui";
 
 import { SignInForm } from "@/components/sign-in-form";
 import { currentViewer } from "@/lib/session";
+import { signInOptions } from "@/lib/signin-options";
 
 export const metadata: Metadata = {
   title: "Sign in",
@@ -17,15 +18,25 @@ export const metadata: Metadata = {
 async function SignInPageContents({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; link?: string; error?: string }>;
 }) {
-  const { next } = await searchParams;
+  const { next, link, error } = await searchParams;
 
   // Only a same-site path is followed. An open redirect here would let a link
   // that looks like ours bounce a shopper to a copy of this very page.
   const destination = next?.startsWith("/") && !next.startsWith("//") ? next : "/account";
 
   if (await currentViewer()) redirect(destination);
+
+  const options = await signInOptions(destination);
+  // Back from Google with an account not yet tied to a phone: one OTP and
+  // it is linked (auth plan phase 4). Or Google refused / was cancelled.
+  const notice =
+    link === "google"
+      ? "Almost there — verify your mobile number once to finish signing in with Google."
+      : error === "google"
+        ? "Google sign-in didn't finish. Try again, or use your mobile number."
+        : undefined;
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-20">
@@ -38,7 +49,12 @@ async function SignInPageContents({
       </p>
 
       <div className="mt-12">
-        <SignInForm next={destination} />
+        <SignInForm
+          next={destination}
+          {...(options.variant ? { variant: options.variant } : {})}
+          {...(options.googleHref && link !== "google" ? { googleHref: options.googleHref } : {})}
+          {...(notice ? { notice } : {})}
+        />
       </div>
     </div>
   );

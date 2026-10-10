@@ -49,6 +49,10 @@ export interface SignInFlowProps {
   variant?: string;
   /** The primary action's words. */
   submitLabel?: string;
+  /** "Continue with Google" goes here when this shopper's arm offers it. */
+  googleHref?: string;
+  /** Shown above the form, e.g. "verify your phone to finish with Google". */
+  notice?: string;
 }
 
 /**
@@ -71,6 +75,8 @@ export function SignInFlow({
   maskedPhone,
   variant,
   submitLabel,
+  googleHref,
+  notice,
 }: SignInFlowProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -94,6 +100,13 @@ export function SignInFlow({
   useEffect(() => {
     if (step === "code") codeRef.current?.focus();
   }, [step]);
+
+  // The A/B arm this shopper saw, once per form (auth plan phase 4): the
+  // test is judged on checkout completion, segmented by this exposure.
+  useEffect(() => {
+    if (!variant) return;
+    track("experiment_exposure", { event_id: mintEventId(), experiment: "signin_google", variant });
+  }, [variant]);
 
   // A refusal with a wait ("too many codes") counts down like the resend.
   useEffect(() => {
@@ -226,6 +239,11 @@ export function SignInFlow({
 
   return (
     <div className="mx-auto max-w-sm">
+      {notice && (
+        <p role="status" className="mb-6 border border-accent-ink/25 bg-accent/[0.04] p-3 text-sm">
+          {notice}
+        </p>
+      )}
       {step === "phone" ? (
         <form
           onSubmit={(event) => {
@@ -265,6 +283,25 @@ export function SignInFlow({
             We send the code on WhatsApp, or by SMS if WhatsApp isn&apos;t available. Standard
             rates may apply.
           </p>
+
+          {googleHref && !stepUp && !lockPhone && (
+            <>
+              <div className="my-6 flex items-center gap-3 text-xs text-content-faint" aria-hidden="true">
+                <span className="h-px flex-1 bg-content/15" />
+                or
+                <span className="h-px flex-1 bg-content/15" />
+              </div>
+              <a
+                href={googleHref}
+                className="flex h-12 w-full items-center justify-center border border-content/20 text-sm transition-colors hover:border-content/40"
+              >
+                Continue with Google
+              </a>
+              <p className="mt-2 text-xs text-content-faint">
+                The first time, we also ask for your phone number — it is how your orders find you.
+              </p>
+            </>
+          )}
         </form>
       ) : (
         <form

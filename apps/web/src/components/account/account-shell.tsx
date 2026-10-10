@@ -7,6 +7,7 @@ import { Display, MicroLabel } from "@siumora/ui";
 import { SignInForm } from "@/components/sign-in-form";
 import { SignOutButton } from "@/components/sign-out-button";
 import type { Viewer } from "@/lib/session";
+import { signInOptions } from "@/lib/signin-options";
 
 /**
  * The account area's frame (auth plan phase 2): a heading, who is signed
@@ -25,7 +26,8 @@ const SECTIONS: ReadonlyArray<{ key: AccountSection; href: string; label: string
   { key: "privacy", href: "/account/privacy", label: "Privacy" },
 ];
 
-export function SignedOutAccount({ next }: { next: string }) {
+export async function SignedOutAccount({ next }: { next: string }) {
+  const options = await signInOptions(next);
   return (
     <div className="mx-auto flex max-w-md flex-col items-center px-5 py-24 text-center">
       <Display as="h1" size="sm">
@@ -35,7 +37,11 @@ export function SignedOutAccount({ next }: { next: string }) {
         Sign in with your mobile number to see everything you have ordered.
       </p>
       <div className="mt-10 w-full text-left">
-        <SignInForm next={next} />
+        <SignInForm
+          next={next}
+          {...(options.variant ? { variant: options.variant } : {})}
+          {...(options.googleHref ? { googleHref: options.googleHref } : {})}
+        />
       </div>
     </div>
   );

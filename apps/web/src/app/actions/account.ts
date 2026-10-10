@@ -63,3 +63,24 @@ export async function changePhone(
     return refusal(error, "Could not change your number.");
   }
 }
+
+/** Send a verification link to the account's email (phase 4). */
+export async function requestEmailVerification(): Promise<ActionResult & { alreadyVerified?: boolean }> {
+  try {
+    const result = await (await apiAs()).requestEmailVerification();
+    return { ok: true, alreadyVerified: result.alreadyVerified };
+  } catch (error) {
+    return refusal(error, "Could not send the link just now.");
+  }
+}
+
+/** The link's landing page confirms here — needs no session. */
+export async function verifyEmail(token: string): Promise<ActionResult> {
+  try {
+    await (await apiAs()).verifyEmail(token);
+    revalidatePath("/account/profile");
+    return { ok: true };
+  } catch (error) {
+    return refusal(error, "That link didn't work. Send a new one from your profile.");
+  }
+}

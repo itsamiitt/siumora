@@ -78,13 +78,33 @@ function authContextFor(session: ResolvedSession): Record<string, unknown> {
   };
 }
 
+/** The one store route that takes a raw customer JWT: Google's hand-off. */
+const GOOGLE_HANDOFF_PATH = "/store/siumora-auth/google";
+
 export async function sessionAuth(
   req: MedusaRequest,
   _res: MedusaResponse,
   next: MedusaNextFunction,
 ): Promise<void> {
   const token = sessionTokenFromHeader(req.headers.authorization);
-  if (!token) return next();
+  if (!token) {
+    // A customer JWT straight from a client — a Google callback token, an
+    // old token from before sessions — is not a session: it cannot be
+    // revoked or blocked. On /store a customer is signed in by session
+    // only, so it is dropped (Medusa's global /store auth may already have
+    // read it, hence the auth_context too). Google's hand-off route is the
+    // one exception: that token is exactly what it exchanges.
+    const path = (req.originalUrl ?? req.url).split("?")[0] ?? "";
+    if (
+      unverifiedActorType(req.headers.authorization) === "customer" &&
+      path.startsWith("/store") &&
+      path !== GOOGLE_HANDOFF_PATH
+    ) {
+      delete req.headers.authorization;
+      delete (req as SessionRequest).auth_context;
+    }
+    return next();
+  }
 
   const request = req as SessionRequest;
   const pg = pgOf(req);

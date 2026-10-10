@@ -33,6 +33,7 @@ export const EMAIL_SUBJECTS: Record<string, string> = {
   return_approved: "Your return is on",
   refund_issued: "Your refund is on its way",
   back_in_stock: "Back in stock at Siumora",
+  email_verify: "Confirm your email for Siumora",
 };
 
 export function emailSubject(templateKey: string): string {

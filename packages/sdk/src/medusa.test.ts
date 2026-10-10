@@ -489,3 +489,29 @@ test("the account surfaces call their routes and map the address book", async ()
   const wishlist = calls.find((call) => call.url.endsWith("/me/wishlist"));
   assert.deepEqual(wishlist?.body, {}, "no browser list, nothing sent");
 });
+
+test("Google: start, then callback and hand-off with the Google token as bearer", async () => {
+  const googleJwt = "eyJ.google.jwt";
+  const { impl, calls } = scripted({
+    "POST /auth/customer/google": { location: "https://accounts.google.com/o/oauth2/v2/auth?x=1" },
+    "POST /auth/customer/google/callback": { token: googleJwt },
+    "POST /store/siumora-auth/google": { ok: true, needsPhone: true, linkToken: "lt" },
+    "GET /store/siumora-auth/methods": { phone: true, google: true, googlePercent: 50 },
+  });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  assert.match((await client.googleStart()).location, /accounts\.google\.com/);
+  assert.deepEqual(await client.googleFinish({ code: "c 1", state: "s" }), { ok: true, needsPhone: true, linkToken: "lt" });
+  assert.deepEqual(await client.getSignInMethods(), { phone: true, google: true, googlePercent: 50 });
+
+  const callback = calls.find((call) => call.url.includes("/google/callback"));
+  assert.match(callback!.url, /code=c\+1&state=s/);
+  const handoff = calls.find((call) => call.url.endsWith("/store/siumora-auth/google"));
+  assert.equal(handoff!.auth, `Bearer ${googleJwt}`);
+});
+
+test("a pending Google link rides the phone verify", async () => {
+  const { impl, calls } = scripted({ "POST /store/siumora-auth/verify": { ok: true } });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  await client.verifyOtp("9812345678", "123456", { googleLinkToken: "lt" });
+  assert.deepEqual(calls[0]!.body, { phone: "9812345678", code: "123456", googleLinkToken: "lt" });
+});

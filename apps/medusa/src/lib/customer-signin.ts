@@ -25,6 +25,7 @@ import {
   phoneKey,
   type SessionKind,
 } from "../modules/customer-session/session";
+import { emailVerified } from "./email-verification";
 import { guestEmail, realEmail } from "./guest-email";
 
 /**
@@ -74,9 +75,10 @@ export interface CustomerRow {
   first_name: string | null;
   last_name: string | null;
   has_account?: boolean;
+  metadata?: Record<string, unknown> | null;
 }
 
-const CUSTOMER_FIELDS = ["id", "email", "phone", "first_name", "last_name", "has_account"];
+const CUSTOMER_FIELDS = ["id", "email", "phone", "first_name", "last_name", "has_account", "metadata"];
 
 export async function loadCustomer(
   req: MedusaRequest,
@@ -173,5 +175,6 @@ export function customerCard(customer: CustomerRow, phone: string) {
     maskedPhone: maskPhone(phone),
     name: [customer.first_name ?? "", customer.last_name ?? ""].join(" ").trim(),
     email: realEmail(customer.email),
+    emailVerified: emailVerified(realEmail(customer.email), customer.metadata),
   };
 }

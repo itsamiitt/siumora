@@ -9,6 +9,23 @@ loadEnv(process.env.NODE_ENV || "development", process.cwd());
 // src/boot-guards.test.ts.
 const { jwtSecret, cookieSecret } = assertMedusaBootSafety(process.env);
 
+// Google sign-in (auth plan phase 4) exists only once its credentials do; the
+// storefront offers it only when the owner also switches it on in Settings →
+// Customer sign-in. Google redirects back to the STOREFRONT, which hands the
+// code to Medusa — the callback is a storefront URL, never this API's.
+const googleSignIn =
+  process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+    ? {
+        resolve: "@medusajs/medusa/auth-google",
+        id: "google",
+        options: {
+          clientId: process.env.GOOGLE_CLIENT_ID,
+          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+          callbackUrl: `${(process.env.STOREFRONT_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/auth/google/callback`,
+        },
+      }
+    : undefined;
+
 export default defineConfig({
   projectConfig: {
     databaseUrl:
@@ -37,11 +54,13 @@ export default defineConfig({
       // bounds what is left — a dashboard bearer, a Google callback token —
       // to 15 minutes (auth plan phase 0).
       jwtExpiresIn: "15m",
-      // Operators sign in with emailpass; customers only ever with the
-      // phone-OTP provider. Absent, every provider serves every actor.
+      // Operators sign in with emailpass; customers with the phone-OTP
+      // provider, plus Google when configured (linked to a customer only
+      // after an OTP proves the phone — src/lib/google-link.ts). Absent,
+      // every provider serves every actor.
       authMethodsPerActor: {
         user: ["emailpass"],
-        customer: ["phone-otp"],
+        customer: googleSignIn ? ["phone-otp", "google"] : ["phone-otp"],
       },
     },
   },
@@ -123,6 +142,7 @@ export default defineConfig({
           // Overriding the auth module REPLACES its default provider list,
           // it does not merge — emailpass must stay or admin login dies.
           { resolve: "@medusajs/medusa/auth-emailpass", id: "emailpass" },
+          ...(googleSignIn ? [googleSignIn] : []),
           {
             resolve: "./src/modules/phone-auth",
             id: "phone-otp",

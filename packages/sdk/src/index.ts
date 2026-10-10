@@ -51,6 +51,8 @@ export interface AccountCustomer {
   maskedPhone: string;
   name: string;
   email: string | null;
+  /** Whether that email was confirmed by link or by Google (Medusa only). */
+  emailVerified?: boolean;
 }
 
 export type OtpChannel = "whatsapp" | "sms";
@@ -113,6 +115,27 @@ export interface SavedAddress {
   pincode: string;
   isDefault: boolean;
 }
+
+/** Which sign-in methods to offer (Medusa only beyond phone). */
+export interface SignInMethods {
+  phone: boolean;
+  google: boolean;
+  /** Share of shoppers who see Google — the A/B arm. */
+  googlePercent: number;
+}
+
+/** A finished Google hand-off: a session, or "verify your phone first". */
+export type GoogleOutcome =
+  | ({ needsPhone?: false } & {
+    ok: true;
+    token: string;
+    expiresAt: string;
+    isAdmin: boolean;
+    claimedOrders: number;
+    claimableOrders?: number;
+    customer: AccountCustomer;
+  })
+  | { ok: true; needsPhone: true; linkToken: string };
 
 export interface RequestOptions {
   /** Sent as Idempotency-Key so a retry cannot place a second order. */
@@ -253,6 +276,7 @@ export class SiumoraClient {
   async verifyOtp(
     phone: string,
     code: string,
+    _options: { googleLinkToken?: string } = {},
   ): Promise<{
     ok: true;
     token: string;
@@ -316,6 +340,26 @@ export class SiumoraClient {
     _code: string,
   ): Promise<{ ok: boolean; maskedPhone: string; signedOutDevices: number }> {
     throw new ApiError(501, "not_supported", "Changing the phone needs the Medusa backend.");
+  }
+
+  async getSignInMethods(): Promise<SignInMethods> {
+    return { phone: true, google: false, googlePercent: 0 };
+  }
+
+  async googleStart(): Promise<{ location: string }> {
+    throw new ApiError(501, "not_supported", "Google sign-in needs the Medusa backend.");
+  }
+
+  async googleFinish(_query: { code: string; state: string }): Promise<GoogleOutcome> {
+    throw new ApiError(501, "not_supported", "Google sign-in needs the Medusa backend.");
+  }
+
+  async requestEmailVerification(): Promise<{ ok: boolean; alreadyVerified: boolean }> {
+    throw new ApiError(501, "not_supported", "Email verification needs the Medusa backend.");
+  }
+
+  async verifyEmail(_token: string): Promise<{ ok: boolean }> {
+    throw new ApiError(501, "not_supported", "Email verification needs the Medusa backend.");
   }
 
   async signOut(): Promise<void> {
