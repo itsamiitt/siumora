@@ -13,12 +13,12 @@ import {
   touchSession,
   type ResolvedSession,
   type SqlClient,
-} from "../modules/customer-session/data";
+} from "../modules/customer-session/data.ts";
 import {
   REQUEST_JWT_TTL,
   sessionTokenFromHeader,
   touchDecision,
-} from "../modules/customer-session/session";
+} from "../modules/customer-session/session.ts";
 
 /**
  * The session door (auth plan phase 1) — mounted on /store and
