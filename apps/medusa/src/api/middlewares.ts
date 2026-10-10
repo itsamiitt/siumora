@@ -21,6 +21,7 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http";
 
+import { emailChangeNeedsStepUp } from "../lib/customer-guard";
 import { limiterFromEnv, rateLimitMiddleware } from "../lib/rate-limit";
 import { connectRedis, logRedisError } from "../lib/redis";
 import {
@@ -77,6 +78,13 @@ export default defineMiddlewares({
         sessionAuth,
         authenticate(["user", "customer"], ["session", "bearer"]),
       ],
+    },
+    // Changing the account email needs a fresh code (StepUpGate, auth plan
+    // phase 2) — enforced on Medusa's own profile route.
+    {
+      matcher: "/store/customers/me",
+      methods: ["POST"],
+      middlewares: [emailChangeNeedsStepUp],
     },
     // The custom checkout/orders namespace, present and future routes alike.
     { matcher: "/store/siumora", middlewares: [rateLimit] },

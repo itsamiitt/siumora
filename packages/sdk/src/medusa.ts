@@ -28,7 +28,9 @@ import {
 import { ApiError, SiumoraClient } from "./index.ts";
 import type {
   AccountCustomer,
+  ClaimableOrder,
   DeviceSession,
+  SavedAddress,
   OtpIssued,
   OtpRequestOptions,
   SessionInfo,
@@ -716,6 +718,8 @@ export class MedusaClient implements PublicSurface {
     expiresAt: string;
     isAdmin: boolean;
     claimedOrders: number;
+    /** Guest orders on this phone the account page will offer to claim. */
+    claimableOrders?: number;
     customer: AccountCustomer;
   }> {
     return this.request("POST", "/store/siumora-auth/verify", { phone, code });
@@ -754,6 +758,75 @@ export class MedusaClient implements PublicSurface {
   /** Re-prove the phone for a sensitive action (StepUpGate). */
   async stepUp(code: string): Promise<{ ok: boolean; stepUpExpiresAt: string }> {
     return this.request("POST", "/store/siumora-auth/step-up", { code });
+  }
+
+  /**
+   * Move the account to a new number: needs a fresh step-up on the current
+   * number, and `code` is the one sent to the NEW number.
+   */
+  async changePhone(
+    phone: string,
+    code: string,
+  ): Promise<{ ok: boolean; maskedPhone: string; signedOutDevices: number }> {
+    return this.request("POST", "/store/siumora-auth/phone", { phone, code });
+  }
+
+  // ── The signed-in account (auth plan phase 2) ───────────────
+
+  /** Guest orders on this account's phone, waiting for "Is this your order?". */
+  async listClaimableOrders(): Promise<ClaimableOrder[]> {
+    const data = await this.request<{ orders: ClaimableOrder[] }>(
+      "GET",
+      "/store/siumora/me/claimable-orders",
+    );
+    return data.orders;
+  }
+
+  async claimOrders(numbers: string[]): Promise<{ ok: boolean; claimed: number }> {
+    return this.request("POST", "/store/siumora/me/claim", { numbers });
+  }
+
+  /** Tie this browser's wishlist to the account; answers the id to keep. */
+  async linkWishlist(wishlistId?: string): Promise<{ wishlistId: string | null }> {
+    return this.request("POST", "/store/siumora/me/wishlist", wishlistId ? { wishlistId } : {});
+  }
+
+  /** Tie this browser's bag to the account; answers the cart id to keep. */
+  async linkCart(cartId?: string): Promise<{ cartId: string | null }> {
+    return this.request("POST", "/store/siumora/me/cart", cartId ? { cartId } : {});
+  }
+
+  /** The account's address book (Medusa's own customer addresses). */
+  async listAddresses(): Promise<SavedAddress[]> {
+    const data = await this.request<{
+      addresses: Array<{
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        phone: string | null;
+        address_1: string | null;
+        address_2: string | null;
+        city: string | null;
+        province: string | null;
+        postal_code: string | null;
+        is_default_shipping?: boolean;
+      }>;
+    }>("GET", "/store/customers/me/addresses?limit=50");
+    return data.addresses.map((address) => ({
+      id: address.id,
+      name: [address.first_name ?? "", address.last_name ?? ""].join(" ").trim(),
+      phone: address.phone ?? "",
+      line1: address.address_1 ?? "",
+      ...(address.address_2 ? { line2: address.address_2 } : {}),
+      city: address.city ?? "",
+      stateCode: address.province ?? "",
+      pincode: address.postal_code ?? "",
+      isDefault: Boolean(address.is_default_shipping),
+    }));
+  }
+
+  async deleteAddress(id: string): Promise<void> {
+    await this.request("DELETE", `/store/customers/me/addresses/${encodeURIComponent(id)}`);
   }
 
   // ── Checkout and orders ─────────────────────────────────────
@@ -1043,14 +1116,27 @@ export class MedusaClient implements PublicSurface {
       normalisePhone(updated.customer.phone ?? "") ?? updated.customer.phone ?? "";
     return { ok: true, customer: customerCard(updated.customer, phone) };
   }
-  async listOrders(): Promise<never> {
-    throw new NotPortedError("listOrders", "the M2 order-ownership port");
+  /** The account's own orders — placed signed in, or claimed. */
+  async listOrders(): Promise<Array<Record<string, unknown>>> {
+    const data = await this.request<{ orders: Array<Record<string, unknown>> }>(
+      "GET",
+      "/store/siumora/me/orders",
+    );
+    return data.orders;
   }
-  async exportMyData(): Promise<never> {
-    throw new NotPortedError("exportMyData", "the M2 data-principal port");
+  async exportMyData(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/store/siumora/me/data");
   }
-  async requestErasure(): Promise<never> {
-    throw new NotPortedError("requestErasure", "the M2 data-principal port");
+  /** Needs a fresh step-up: answers 403 step_up_required otherwise. */
+  async requestErasure(): Promise<{
+    requestId: string;
+    alreadyOpen: boolean;
+    erased: boolean;
+    pendingBecause?: string;
+    resolveBy: string;
+    retained: Array<{ keeps: string; forHowLong: string; because: string }>;
+  }> {
+    return this.request("POST", "/store/siumora/me/erasure", {});
   }
   // ── Admin (the M2 ops routes) ───────────────────────────────
   //

@@ -1,6 +1,10 @@
 /**
  * POST /store/siumora-auth/verify — exchange a code for a session.
  *
+ * Also (phase 2): a WhatsApp alert when the device is new to the account,
+ * and `claimableOrders` — guest orders on this phone the account page will
+ * offer with "Is this your order?".
+ *
  * One request instead of the old three-call dance (built-in auth route →
  * create customer → refresh token): the phone-otp provider judges the code,
  * the customer is found or created for the verified phone, and a revocable
@@ -29,8 +33,13 @@ import {
   loadCustomer,
   logAuthEvent,
   openSession,
+  pgOf,
 } from "../../../../lib/customer-signin";
+import { claimableIdentities } from "../../../../lib/claimable";
 import { otpFailure } from "../../../../lib/otp-verdict";
+import { newDeviceMessage, sendSecurityAlert } from "../../../../lib/security-alert";
+import { settingsCache } from "../../../../modules/settings/cache";
+import { readSettings, type SqlClient as SettingsSqlClient } from "../../../../modules/settings/read";
 import type { PhoneOtpAuthenticationResponse } from "../../../../modules/phone-auth/service";
 
 export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<void> {
@@ -90,6 +99,23 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     phone,
   );
 
+  // A device this account has not signed in from before: tell the account
+  // holder on WhatsApp (auth plan phase 2). Not awaited past its bound.
+  const settings = await settingsCache(() =>
+    readSettings(pgOf(req) as unknown as SettingsSqlClient),
+  ).get();
+  if (session.newDevice && settings.newDeviceAlerts) {
+    void sendSecurityAlert(req, phone, newDeviceMessage(session.device, new Date()), "security_new_device").then(
+      async (sent) => {
+        if (sent) await logAuthEvent(req, { type: "new_device_alert", customerId, channel: "whatsapp" }, phone);
+      },
+    );
+  }
+
+  // Guest orders on this phone waiting for "Is this your order?". Counted,
+  // never attached: the account page asks.
+  const claimable = await claimableIdentities(req, customerId).catch(() => []);
+
   const customer = await loadCustomer(req, customerId);
   res.setHeader("Cache-Control", "no-store");
   res.json({
@@ -97,7 +123,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     token: session.token,
     expiresAt: session.expiresAt.toISOString(),
     isAdmin: session.kind === "operator",
+    // Fastify parity field: orders attached at sign-in. Always 0 here —
+    // guest orders are offered (claimableOrders), not attached.
     claimedOrders: 0,
+    claimableOrders: claimable.length,
     customer: customerCard(customer ?? { id: customerId, email: null, phone, first_name: null, last_name: null }, phone),
   });
 }

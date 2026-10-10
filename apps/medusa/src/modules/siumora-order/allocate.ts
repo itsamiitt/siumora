@@ -34,7 +34,7 @@ export interface SqlClient {
 }
 
 const COLUMNS =
-  "id, order_id, cart_id, order_number, access_key, idempotency_key, created_at";
+  "id, order_id, cart_id, order_number, access_key, idempotency_key, customer_id, created_at";
 
 export async function findIdentityByOrderId(
   client: SqlClient,

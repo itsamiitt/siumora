@@ -11,6 +11,8 @@ export interface PlaceOrderResult {
   ok: boolean;
   orderNumber?: string;
   message?: string;
+  /** Machine-readable refusal: verify_phone, step_up_required, … */
+  error?: string;
   /** Present when the browser should open the payment modal for this order. */
   razorpay?: RazorpayHandoff;
 }
@@ -51,7 +53,9 @@ export async function submitOrder(input: {
     ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
     ...(input.buyerGstin ? { buyerGstin: input.buyerGstin } : {}),
   });
-  if (!result.ok) return { ok: false, message: result.message };
+  if (!result.ok) {
+    return { ok: false, message: result.message, ...(result.error ? { error: result.error } : {}) };
+  }
 
   // The cart is emptied only after the order exists, so a failure mid-flight
   // leaves the customer their bag rather than losing both.

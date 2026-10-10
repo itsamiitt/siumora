@@ -65,3 +65,26 @@ export function pgWishlistStore(client: SqlClient): WishlistStore {
     },
   };
 }
+
+/**
+ * Fold one wishlist into another (auth plan phase 2): what was hearted on
+ * this browser before signing in joins the account's list. ON CONFLICT DO
+ * NOTHING keeps "a piece is on a list once"; the source list is emptied so
+ * an old cookie cannot resurrect it.
+ */
+export async function mergeWishlists(
+  client: SqlClient,
+  fromId: string,
+  intoId: string,
+): Promise<number> {
+  if (fromId === intoId) return 0;
+  const result = await client.raw(
+    `INSERT INTO siumora_wishlists (wishlist_id, handle, created_at, updated_at)
+     SELECT ?, handle, created_at, now() FROM siumora_wishlists WHERE wishlist_id = ?
+     ON CONFLICT (wishlist_id, handle) DO NOTHING
+     RETURNING handle`,
+    [intoId, fromId],
+  );
+  await client.raw(`DELETE FROM siumora_wishlists WHERE wishlist_id = ?`, [fromId]);
+  return result.rows.length;
+}

@@ -9,6 +9,7 @@ import {
   revokeSessionById,
   type SqlClient,
 } from "./data.ts";
+import { openPrivacyRequest } from "./privacy.ts";
 import {
   STEP_UP_WINDOW_SECONDS,
   TOUCH_INTERVAL_MS,
@@ -227,4 +228,40 @@ test("an auth event write never throws", async () => {
     },
   };
   assert.equal(await recordAuthEvent(pg, { type: "otp_sent", channel: "whatsapp" }), false);
+});
+
+// ── Privacy requests (phase 2) ──────────────────────────────────────────
+
+
+test("an erasure request already open is returned, not duplicated", async () => {
+  const open = {
+    id: "sipr_1",
+    customer_id: "cus_1",
+    kind: "erasure",
+    status: "acknowledged",
+    note: "1 order is still in progress",
+    resolve_by: "2026-11-09T00:00:00.000Z",
+    completed_at: null,
+    created_at: "2026-10-10T00:00:00.000Z",
+  };
+  const { pg, calls } = fakePg(() => [open]);
+  const result = await openPrivacyRequest(pg, { customerId: "cus_1", kind: "erasure", now: new Date() });
+  assert.equal(result.existing, true);
+  assert.equal(result.request.id, "sipr_1");
+  assert.equal(calls.length, 1, "no insert");
+});
+
+test("a new request gets the 30-day statutory deadline", async () => {
+  const now = new Date("2026-10-10T00:00:00Z");
+  let inserted: readonly unknown[] = [];
+  const { pg } = fakePg((sql, bindings) => {
+    if (sql.startsWith("INSERT")) {
+      inserted = bindings;
+      return [{ id: bindings[0], resolve_by: bindings[3] }];
+    }
+    return [];
+  });
+  const result = await openPrivacyRequest(pg, { customerId: "cus_1", kind: "erasure", now });
+  assert.equal(result.existing, false);
+  assert.equal(inserted[3], "2026-11-09T00:00:00.000Z");
 });

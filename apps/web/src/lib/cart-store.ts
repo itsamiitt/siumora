@@ -102,3 +102,25 @@ function messageFor(error: unknown): string {
     ? error.message
     : "Could not update the bag.";
 }
+
+/**
+ * Tie this browser's bag to the account that just signed in (auth plan
+ * phase 2): the API transfers it to the customer and folds in bags left on
+ * other devices, or hands back the account's latest bag when this browser
+ * has none. Only callable from a Server Action — it may set the cookie.
+ */
+export async function linkCartToAccount(client: {
+  linkCart(cartId?: string): Promise<{ cartId: string | null }>;
+}): Promise<void> {
+  const current = await readCartId();
+  const { cartId } = await client.linkCart(current);
+  if (cartId && cartId !== current) {
+    (await cookies()).set(CART_COOKIE, cartId, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30,
+    });
+  }
+}

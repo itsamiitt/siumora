@@ -9,6 +9,8 @@ import {
   type ShippingAddress,
 } from "@siumora/core";
 
+import { ApiError } from "@siumora/sdk";
+
 import { currentCartId } from "./cart-store";
 import { apiAs, orderAccessKey, rememberOrderKey } from "./session";
 
@@ -102,7 +104,7 @@ export async function placeOrder(
   input: PlaceOrderInput,
 ): Promise<
   | { ok: true; orderNumber: string; razorpay?: RazorpayHandoff }
-  | { ok: false; message: string }
+  | { ok: false; message: string; error?: string }
 > {
   const cartId = await currentCartId();
   if (!cartId) return { ok: false, message: "Your bag is empty." };
@@ -136,6 +138,9 @@ export async function placeOrder(
         error instanceof Error && error.message
           ? error.message
           : "Could not place the order.",
+      // verify_phone / step_up_required tell checkout which sheet to open
+      // (the COD gate, auth plan phase 2) instead of showing an error.
+      ...(error instanceof ApiError ? { error: error.code } : {}),
     };
   }
 }

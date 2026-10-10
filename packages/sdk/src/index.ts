@@ -91,6 +91,29 @@ export interface DeviceSession {
   current: boolean;
 }
 
+/** A guest order on the account's phone, offered with "Is this your order?". */
+export interface ClaimableOrder {
+  number: string;
+  placedAt: string;
+  itemCount: number;
+  /** Paise. */
+  total: number;
+  city: string | null;
+}
+
+/** An address from the account's address book, in the checkout's shape. */
+export interface SavedAddress {
+  id: string;
+  name: string;
+  phone: string;
+  line1: string;
+  line2?: string;
+  city: string;
+  stateCode: string;
+  pincode: string;
+  isDefault: boolean;
+}
+
 export interface RequestOptions {
   /** Sent as Idempotency-Key so a retry cannot place a second order. */
   idempotencyKey?: string;
@@ -260,6 +283,39 @@ export class SiumoraClient {
 
   async stepUp(_code: string): Promise<{ ok: boolean; stepUpExpiresAt: string }> {
     throw new ApiError(501, "not_supported", "Step-up needs the Medusa backend.");
+  }
+
+  // The account surfaces added with the auth plan's phase 2 are Medusa-only
+  // too; the Fastify stack claims guest orders at sign-in instead.
+  async listClaimableOrders(): Promise<ClaimableOrder[]> {
+    return [];
+  }
+
+  async claimOrders(_numbers: string[]): Promise<{ ok: boolean; claimed: number }> {
+    throw new ApiError(501, "not_supported", "Order claiming needs the Medusa backend.");
+  }
+
+  async linkWishlist(wishlistId?: string): Promise<{ wishlistId: string | null }> {
+    return { wishlistId: wishlistId ?? null };
+  }
+
+  async linkCart(cartId?: string): Promise<{ cartId: string | null }> {
+    return { cartId: cartId ?? null };
+  }
+
+  async listAddresses(): Promise<SavedAddress[]> {
+    return [];
+  }
+
+  async deleteAddress(_id: string): Promise<void> {
+    throw new ApiError(501, "not_supported", "The address book needs the Medusa backend.");
+  }
+
+  async changePhone(
+    _phone: string,
+    _code: string,
+  ): Promise<{ ok: boolean; maskedPhone: string; signedOutDevices: number }> {
+    throw new ApiError(501, "not_supported", "Changing the phone needs the Medusa backend.");
   }
 
   async signOut(): Promise<void> {

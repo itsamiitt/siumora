@@ -136,6 +136,8 @@ export interface IdentityRow {
   order_number: string;
   access_key: string;
   idempotency_key: string | null;
+  /** The owning account (auth plan phase 2); null for an unclaimed guest order. */
+  customer_id?: string | null;
   created_at: string | Date;
 }
 
@@ -164,4 +166,19 @@ export function completionEnvelope(
     invoiceNumber: null,
     accessKey: identity.access_key,
   };
+}
+
+/**
+ * Whether the signed-in actor owns an order (auth plan phase 2): the
+ * account recorded on the identity — placed signed in, or claimed — or the
+ * Medusa order's own customer. One rule for every route that serves an
+ * order without its access key.
+ */
+export function ownsOrder(
+  actorId: string | undefined,
+  identity: { customer_id?: string | null },
+  order: { customer_id?: string | null },
+): boolean {
+  if (!actorId) return false;
+  return identity.customer_id === actorId || order.customer_id === actorId;
 }

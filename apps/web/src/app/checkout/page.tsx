@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 import { CheckoutForm } from "@/components/checkout-form";
 import { OrderSummary } from "@/components/order-summary";
 import { getCartLines } from "@/lib/cart-store";
+import { apiAs, currentViewer } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Checkout",
@@ -53,6 +54,13 @@ async function CheckoutPageContents() {
   const lines = await getCartLines();
   if (lines.length === 0) redirect("/cart");
 
+  // Signed in: start from their number and their address book (auth plan
+  // phase 2). A failed read just means typing the address once more.
+  const viewer = await currentViewer();
+  const savedAddresses = viewer
+    ? await (await apiAs()).listAddresses().catch(() => [])
+    : [];
+
   const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
   const totals = calculateTotals(lines, {
     interState: false,
@@ -71,7 +79,12 @@ async function CheckoutPageContents() {
       </div>
 
       <div className="mt-10 grid gap-14 lg:grid-cols-[1fr_22rem]">
-        <CheckoutForm subtotal={subtotal} razorpayConfigured={razorpayConfigured} />
+        <CheckoutForm
+          subtotal={subtotal}
+          razorpayConfigured={razorpayConfigured}
+          savedAddresses={savedAddresses}
+          {...(viewer ? { viewerPhone: viewer.customer.phone } : {})}
+        />
 
         <aside className="lg:sticky lg:top-28 lg:self-start">
           <OrderSummary totals={totals} />

@@ -7,6 +7,7 @@ import { useEffect, useState, useTransition } from "react";
 import { track, mintEventId, gaClientId } from "@siumora/analytics/client";
 
 import type { CodDecision } from "@siumora/core";
+import type { SavedAddress } from "@siumora/sdk";
 import { isValidGstin } from "@siumora/core/gstin";
 import {
   INDIAN_STATES,
@@ -18,6 +19,7 @@ import { Button, MicroLabel } from "@siumora/ui";
 
 import { submitOrder } from "@/app/actions/order";
 import { quoteCheckout } from "@/app/actions/checkout";
+import { SignInSheet } from "@/components/auth/auth-sheet";
 import { openRazorpayCheckout } from "@/lib/razorpay-checkout";
 
 
@@ -34,16 +36,26 @@ export type PaymentMethod = "upi" | "card" | "netbanking" | "cod";
 export function CheckoutForm({
   subtotal,
   razorpayConfigured = false,
+  savedAddresses = [],
+  viewerPhone,
 }: {
   subtotal: number;
   razorpayConfigured?: boolean;
+  /** The signed-in shopper's address book, offered first (auth plan phase 2). */
+  savedAddresses?: SavedAddress[];
+  /** The signed-in shopper's number, as the default delivery phone. */
+  viewerPhone?: string;
 }) {
-  const [phone, setPhone] = useState("");
-  const [pincode, setPincode] = useState("");
-  const [stateCode, setStateCode] = useState("");
+  const preferred = savedAddresses.find((address) => address.isDefault) ?? savedAddresses[0];
+  const [savedId, setSavedId] = useState<string | null>(preferred?.id ?? null);
+  const [phone, setPhone] = useState(preferred?.phone ?? viewerPhone ?? "");
+  const [pincode, setPincode] = useState(preferred?.pincode ?? "");
+  const [stateCode, setStateCode] = useState(preferred?.stateCode ?? "");
   const [method, setMethod] = useState<PaymentMethod>("upi");
   const [cod, setCod] = useState<CodDecision | null>(null);
-  const [addressLine, setAddressLine] = useState("");
+  const [addressLine, setAddressLine] = useState(
+    preferred ? [preferred.line1, preferred.line2].filter(Boolean).join(", ") : "",
+  );
   const [addressQuality, setAddressQuality] = useState<{
     score: number;
     issues: string[];
@@ -53,8 +65,10 @@ export function CheckoutForm({
   const [phoneVerified, setPhoneVerified] = useState(false);
   const [business, setBusiness] = useState(false);
   const [gstin, setGstin] = useState("");
-  const [name, setName] = useState("");
-  const [city, setCity] = useState("");
+  const [name, setName] = useState(preferred?.name ?? "");
+  const [city, setCity] = useState(preferred?.city ?? "");
+  // The COD gate's sheets: verify the delivery number, or a fresh code.
+  const [sheet, setSheet] = useState<"verify" | "stepup" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [placing, startPlacing] = useTransition();
   const router = useRouter();
@@ -110,65 +124,77 @@ export function CheckoutForm({
   const canPay =
     phoneValid && pincodeValid && stateCode !== "" && (!business || gstinValid);
 
+  function placeNow() {
+    setError(null);
+    startPlacing(async () => {
+      // Minted here and persisted on the order so the browser purchase
+      // pixel and the server-side send share one id and dedupe.
+      const eventId = mintEventId();
+
+      track("add_payment_info", {
+        event_id: mintEventId(),
+        currency: "INR",
+        value: subtotal / 100,
+        payment_type: method,
+        items: [],
+      });
+
+      const result = await submitOrder({
+        address: {
+          name: name.trim() || "Customer",
+          phone: phone,
+          line1: addressLine,
+          city: city.trim(),
+          stateCode,
+          pincode,
+        },
+        paymentMethod: method,
+        requiresCodConfirmation:
+          method === "cod" && cod?.verification !== "none",
+        eventId,
+        // Captured here because the server cannot see the cookie, and GA4
+        // will not accept a server event without it.
+        gaClientId: gaClientId(),
+        ...(business && gstinValid ? { buyerGstin: gstin } : {}),
+        codFee: method === "cod" ? (cod?.fee ?? 0) : 0,
+      });
+
+      if (result.ok && result.orderNumber) {
+        if (result.razorpay) {
+          // The modal collects the payment; the signed webhook and the
+          // recon sweep confirm it. Paid or dismissed, the order page is
+          // the next stop — it renders whatever the server knows is true.
+          await openRazorpayCheckout({
+            keyId: result.razorpay.keyId,
+            orderId: result.razorpay.orderId,
+            amountPaise: result.razorpay.amountPaise,
+            contact: phone,
+            ...(name.trim() ? { name: name.trim() } : {}),
+          });
+        }
+        router.push(`/orders/${result.orderNumber}`);
+      } else if (result.error === "verify_phone") {
+        // COD needs the delivery number verified (auth plan phase 2).
+        setSheet("verify");
+      } else if (result.error === "step_up_required") {
+        setSheet("stepup");
+      } else {
+        setError(result.message ?? "Could not place the order.");
+      }
+    });
+  }
+
   return (
+    <>
     <form
       className="space-y-10"
       onSubmit={(e) => {
         e.preventDefault();
         if (!canPay || placing) return;
-        setError(null);
-
-        startPlacing(async () => {
-          // Minted here and persisted on the order so the browser purchase
-          // pixel and the server-side send share one id and dedupe.
-          const eventId = mintEventId();
-
-          track("add_payment_info", {
-            event_id: mintEventId(),
-            currency: "INR",
-            value: subtotal / 100,
-            payment_type: method,
-            items: [],
-          });
-
-          const result = await submitOrder({
-            address: {
-              name: name.trim() || "Customer",
-              phone: phone,
-              line1: addressLine,
-              city: city.trim(),
-              stateCode,
-              pincode,
-            },
-            paymentMethod: method,
-            requiresCodConfirmation:
-              method === "cod" && cod?.verification !== "none",
-            eventId,
-            // Captured here because the server cannot see the cookie, and GA4
-            // will not accept a server event without it.
-            gaClientId: gaClientId(),
-            ...(business && gstinValid ? { buyerGstin: gstin } : {}),
-            codFee: method === "cod" ? (cod?.fee ?? 0) : 0,
-          });
-
-          if (result.ok && result.orderNumber) {
-            if (result.razorpay) {
-              // The modal collects the payment; the signed webhook and the
-              // recon sweep confirm it. Paid or dismissed, the order page is
-              // the next stop — it renders whatever the server knows is true.
-              await openRazorpayCheckout({
-                keyId: result.razorpay.keyId,
-                orderId: result.razorpay.orderId,
-                amountPaise: result.razorpay.amountPaise,
-                contact: phone,
-                ...(name.trim() ? { name: name.trim() } : {}),
-              });
-            }
-            router.push(`/orders/${result.orderNumber}`);
-          } else {
-            setError(result.message ?? "Could not place the order.");
-          }
-        });
+        // Cash on delivery to an unverified number comes back as
+        // verify_phone (the server holds the cod_requires_otp lever) and opens
+        // the verify sheet in place — the shopper never leaves the page.
+        placeNow();
       }}
     >
       <Section step="1" title="Contact">
@@ -209,6 +235,53 @@ export function CheckoutForm({
       </Section>
 
       <Section step="2" title="Delivery address">
+        {savedAddresses.length > 0 && (
+          <fieldset className="mb-6">
+            <legend className="mb-2 text-sm text-content-muted">Your saved addresses</legend>
+            <div className="space-y-2">
+              {savedAddresses.map((address) => (
+                <label
+                  key={address.id}
+                  className="flex cursor-pointer gap-3 border border-content/15 p-3 text-sm has-[:checked]:border-accent-ink"
+                >
+                  <input
+                    type="radio"
+                    name="saved-address"
+                    checked={savedId === address.id}
+                    onChange={() => {
+                      setSavedId(address.id);
+                      setName(address.name);
+                      setPhone(address.phone);
+                      setPincode(address.pincode);
+                      setStateCode(address.stateCode);
+                      setCity(address.city);
+                      setAddressLine([address.line1, address.line2].filter(Boolean).join(", "));
+                    }}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="block">{address.name}</span>
+                    <span className="block text-content-muted">
+                      {[address.line1, address.line2, address.city, address.pincode]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </span>
+                  </span>
+                </label>
+              ))}
+              <label className="flex cursor-pointer gap-3 border border-content/15 p-3 text-sm has-[:checked]:border-accent-ink">
+                <input
+                  type="radio"
+                  name="saved-address"
+                  checked={savedId === null}
+                  onChange={() => setSavedId(null)}
+                  className="mt-1"
+                />
+                <span>A new address</span>
+              </label>
+            </div>
+          </fieldset>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Pincode" htmlFor="pincode">
             <input
@@ -428,6 +501,35 @@ export function CheckoutForm({
         </p>
       </div>
     </form>
+
+    <SignInSheet
+      open={sheet === "verify"}
+      onClose={() => setSheet(null)}
+      title="Verify your number"
+      intro="Cash on delivery needs the delivery number verified once. We send a code to it — no password."
+      surface="checkout_cod"
+      initialPhone={phone}
+      lockPhone
+      onDone={() => {
+        setSheet(null);
+        setPhoneVerified(true);
+        placeNow();
+      }}
+    />
+    <SignInSheet
+      open={sheet === "stepup"}
+      onClose={() => setSheet(null)}
+      title="Confirm it's you"
+      intro="This order goes to a new address, so we ask for a fresh code before cash on delivery."
+      mode="stepup"
+      surface="checkout_stepup"
+      {...(phone ? { maskedPhone: `${phone.slice(0, 2)}••••${phone.slice(-4)}` } : {})}
+      onDone={() => {
+        setSheet(null);
+        placeNow();
+      }}
+    />
+    </>
   );
 }
 

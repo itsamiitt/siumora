@@ -56,3 +56,24 @@ export async function removeWishlist(handle: string): Promise<void> {
   if (!id) return;
   await api().removeWishlist(id, handle);
 }
+
+/**
+ * Tie this browser's wishlist to the account that just signed in (auth plan
+ * phase 2): the API folds it into the account's list, and this browser
+ * switches to the account's list id. Only callable from a Server Action.
+ */
+export async function linkWishlistToAccount(client: {
+  linkWishlist(wishlistId?: string): Promise<{ wishlistId: string | null }>;
+}): Promise<void> {
+  const current = await readId();
+  const { wishlistId } = await client.linkWishlist(current);
+  if (wishlistId && wishlistId !== current) {
+    (await cookies()).set(WISHLIST_COOKIE, wishlistId, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 180,
+    });
+  }
+}

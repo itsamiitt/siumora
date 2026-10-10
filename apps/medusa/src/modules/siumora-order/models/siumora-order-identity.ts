@@ -30,4 +30,7 @@ export const SiumoraOrderIdentity = model.define("siumora_order_identity", {
   order_number: model.text().unique(),
   access_key: model.text(),
   idempotency_key: model.text().unique().nullable(),
+  // The owning account (auth plan phase 2) — see Migration20261010100000.
+  customer_id: model.text().nullable(),
+  claimed_at: model.dateTime().nullable(),
 });

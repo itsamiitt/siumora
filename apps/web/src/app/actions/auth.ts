@@ -6,6 +6,8 @@ import { normalisePhone } from "@siumora/core";
 import { ApiError, type DeviceSession, type OtpChannel } from "@siumora/sdk";
 
 import { api } from "@/lib/api";
+import { linkCartToAccount } from "@/lib/cart-store";
+import { linkWishlistToAccount } from "@/lib/wishlist-store";
 import { apiAs, currentViewer, endSession, sessionToken, startSession } from "@/lib/session";
 
 /**
@@ -72,6 +74,8 @@ export interface VerifyCodeResult {
   ok: boolean;
   isAdmin?: boolean;
   claimedOrders?: number;
+  /** Guest orders on this phone the account page will offer to claim. */
+  claimableOrders?: number;
   message?: string;
   error?: string;
   attemptsRemaining?: number;
@@ -83,6 +87,11 @@ export async function verifyCode(phone: string, code: string): Promise<VerifyCod
     // Operator sessions are a fixed 12 hours; a customer's rolls (Medusa).
     await startSession(session.token, session.expiresAt, { rolling: !session.isAdmin });
 
+    // The bag and the wishlist follow the shopper into their account (auth
+    // plan phase 2). Best effort: signing in must not fail over a cart.
+    const signedIn = api().withToken(session.token);
+    await Promise.allSettled([linkCartToAccount(signedIn), linkWishlistToAccount(signedIn)]);
+
     // The header, the account page and the ops link all change once someone is
     // signed in, so the whole layout is stale.
     revalidatePath("/", "layout");
@@ -91,6 +100,9 @@ export async function verifyCode(phone: string, code: string): Promise<VerifyCod
       ok: true,
       isAdmin: session.isAdmin,
       claimedOrders: session.claimedOrders,
+      ...("claimableOrders" in session && typeof session.claimableOrders === "number"
+        ? { claimableOrders: session.claimableOrders }
+        : {}),
     };
   } catch (error) {
     return {

@@ -5,13 +5,22 @@ import { useState, useTransition } from "react";
 import type { FormEvent } from "react";
 
 import { saveProfile } from "@/app/actions/auth";
+import { useStepUp } from "@/components/auth/step-up";
 
 interface ProfileFormProps {
   name: string;
   email: string | null;
+  /** For the confirm-it's-you sheet an email change asks for. */
+  maskedPhone?: string;
 }
 
-export function ProfileForm({ name: initialName, email: initialEmail }: ProfileFormProps) {
+export function ProfileForm({
+  name: initialName,
+  email: initialEmail,
+  maskedPhone,
+}: ProfileFormProps) {
+  // A new email needs a fresh code (StepUpGate): it is where receipts go.
+  const { gate, sheet } = useStepUp(maskedPhone);
   const router = useRouter();
   const [name, setName] = useState(initialName);
   const [email, setEmail] = useState(initialEmail ?? "");
@@ -34,10 +43,10 @@ export function ProfileForm({ name: initialName, email: initialEmail }: ProfileF
     }
 
     startTransition(async () => {
-      const result = await saveProfile({
+      const result = await gate(() => saveProfile({
         name: cleanName,
         ...(cleanEmail ? { email: cleanEmail } : {}),
-      });
+      }));
       if (!result.ok) {
         setMessage(result.message ?? "Could not save those details.");
         return;
@@ -94,6 +103,7 @@ export function ProfileForm({ name: initialName, email: initialEmail }: ProfileF
           {message}
         </p>
       </div>
+      {sheet}
     </form>
   );
 }

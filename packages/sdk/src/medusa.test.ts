@@ -264,14 +264,6 @@ test("removeWishlist uses the idempotent Medusa item route", async () => {
 
 test("not-yet-ported surface refuses with 501 not_ported, never a wrong answer", async () => {
   const client = new MedusaClient({ baseUrl: "http://x", publishableKey: "pk" });
-  await assert.rejects(client.listOrders(), (error: unknown) => {
-    assert.ok(error instanceof NotPortedError);
-    assert.ok(error instanceof ApiError);
-    assert.equal(error.status, 501);
-    assert.equal(error.code, "not_ported");
-    assert.match(error.message, /listOrders .* M2/);
-    return true;
-  });
   // Prepaid checkout refuses too — only the COD path is ported.
   await assert.rejects(
     client.checkout({
@@ -287,7 +279,13 @@ test("not-yet-ported surface refuses with 501 not_ported, never a wrong answer",
       paymentMethod: "upi",
       eventId: "e",
     }),
-    (error: unknown) => error instanceof NotPortedError,
+    (error: unknown) => {
+      assert.ok(error instanceof NotPortedError);
+      assert.ok(error instanceof ApiError);
+      assert.equal(error.status, 501);
+      assert.equal(error.code, "not_ported");
+      return true;
+    },
   );
 });
 
@@ -450,4 +448,44 @@ test("session reads, sign-out and device revocation ride the session bearer", as
   assert.deepEqual(await client.revokeSession("sises_1"), { ok: true, current: false });
   assert.equal((await client.stepUp("123456")).ok, true);
   assert.ok(calls.every((call) => call.auth === `Bearer ${token}`));
+});
+
+test("the account surfaces call their routes and map the address book", async () => {
+  const token = "sst_" + "c".repeat(43);
+  const { impl, calls } = scripted({
+    "GET /store/siumora/me/orders": { orders: [{ number: "SIU-00001" }] },
+    "GET /store/siumora/me/claimable-orders": { orders: [{ number: "SIU-00002", placedAt: "x", itemCount: 1, total: 100, city: "Pune" }] },
+    "POST /store/siumora/me/claim": { ok: true, claimed: 1 },
+    "POST /store/siumora/me/wishlist": { wishlistId: "11111111-1111-4111-8111-111111111111" },
+    "POST /store/siumora/me/cart": { cartId: "cart_01ABCDEFGHIJKLMNOPQRSTUVWX" },
+    "GET /store/siumora/me/data": { customer: { id: "cus_1" } },
+    "POST /store/siumora/me/erasure": { requestId: "sipr_1", alreadyOpen: false, erased: true, resolveBy: "x", retained: [] },
+    "POST /store/siumora-auth/phone": { ok: true, maskedPhone: "98••••0000", signedOutDevices: 2 },
+    "GET /store/customers/me/addresses": {
+      addresses: [{
+        id: "cuaddr_1", first_name: "Asha", last_name: "Rao", phone: "9812345678",
+        address_1: "4B Rose Villa", address_2: null, city: "Pune", province: "27",
+        postal_code: "411001", is_default_shipping: true,
+      }],
+    },
+  });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl }).withToken(token);
+
+  assert.deepEqual(await client.listOrders(), [{ number: "SIU-00001" }]);
+  assert.equal((await client.listClaimableOrders())[0]!.city, "Pune");
+  assert.deepEqual(await client.claimOrders(["SIU-00002"]), { ok: true, claimed: 1 });
+  assert.equal((await client.linkWishlist()).wishlistId, "11111111-1111-4111-8111-111111111111");
+  assert.equal((await client.linkCart("cart_01ABCDEFGHIJKLMNOPQRSTUVWX")).cartId, "cart_01ABCDEFGHIJKLMNOPQRSTUVWX");
+  assert.deepEqual(await client.exportMyData(), { customer: { id: "cus_1" } });
+  assert.equal((await client.requestErasure()).erased, true);
+  assert.equal((await client.changePhone("9800000000", "123456")).signedOutDevices, 2);
+  assert.deepEqual(await client.listAddresses(), [{
+    id: "cuaddr_1", name: "Asha Rao", phone: "9812345678", line1: "4B Rose Villa",
+    city: "Pune", stateCode: "27", pincode: "411001", isDefault: true,
+  }]);
+
+  const claim = calls.find((call) => call.url.endsWith("/me/claim"));
+  assert.deepEqual(claim?.body, { numbers: ["SIU-00002"] });
+  const wishlist = calls.find((call) => call.url.endsWith("/me/wishlist"));
+  assert.deepEqual(wishlist?.body, {}, "no browser list, nothing sent");
 });

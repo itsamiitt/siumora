@@ -7,6 +7,7 @@ import {
   createPaymentSessionsWorkflow,
 } from "@medusajs/medusa/core-flows";
 
+import { adoptPlacedOrder, codGate, type CheckoutAddress } from "../../../../../../lib/checkout-identity";
 import { type GstTxClient } from "../../../../../../modules/gst/allocate";
 import { ensureInvoiceForOrder, type GraphQuery } from "../../../../../../modules/gst/issue";
 import {
@@ -93,6 +94,9 @@ const SYSTEM_PAYMENT_PROVIDER = "pp_system_default";
 interface CartSnapshot {
   id: string;
   completed_at: string | Date | null;
+  /** BigNumber on the wire, majors. */
+  total?: unknown;
+  shipping_address?: CheckoutAddress | null;
   items?: Array<{ id: string; requires_shipping?: boolean } | null> | null;
   shipping_methods?: Array<{ id: string } | null> | null;
   payment_collection?: {
@@ -147,6 +151,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     fields: [
       "id",
       "completed_at",
+      "total",
+      "shipping_address.*",
       "items.id",
       "items.requires_shipping",
       "shipping_methods.id",
@@ -187,6 +193,16 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     if (items.length === 0) {
       // Same refusal, same words, as the Fastify checkout.
       res.status(409).json({ error: "checkout_failed", message: "Your bag is empty." });
+      return;
+    }
+
+    // ── Who is paying on delivery (auth plan phase 2). COD needs the
+    // delivery phone verified — signed in on it — and a large order to a
+    // new address needs a fresh code. 403 with the reason, so the
+    // storefront opens the matching sheet instead of failing the order.
+    const gate = await codGate(req, cart);
+    if (!gate.ok) {
+      res.status(403).json(gate.body);
       return;
     }
 
@@ -270,6 +286,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     });
     return;
   }
+
+  // A signed-in shopper's order is theirs, and the address joins their book.
+  await adoptPlacedOrder(req, orderId, cart.shipping_address);
 
   // Identity first, then the statutory invoice — the M2 gst module. COD
   // confirmed at placement, so completion is what raises the invoice.

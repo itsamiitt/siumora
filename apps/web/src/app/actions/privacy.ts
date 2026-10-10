@@ -41,6 +41,8 @@ export interface ErasureResult {
   pendingBecause?: string;
   resolveBy?: string;
   message?: string;
+  /** step_up_required: the StepUpGate asks for a fresh code first. */
+  error?: string;
 }
 
 export async function requestErasure(): Promise<ErasureResult> {
@@ -59,6 +61,9 @@ export async function requestErasure(): Promise<ErasureResult> {
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
       return { ok: false, message: "Sign in to make this request." };
+    }
+    if (error instanceof ApiError && error.code === "step_up_required") {
+      return { ok: false, error: error.code, message: error.message };
     }
     return { ok: false, message: "Could not record the request. Try again shortly." };
   }

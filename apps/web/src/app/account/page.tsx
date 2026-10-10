@@ -6,13 +6,13 @@ import Link from "next/link";
 
 import type { OrderStatus } from "@siumora/core";
 import { formatPaise } from "@siumora/in-locale";
-import { Display, MicroLabel } from "@siumora/ui";
+import type { ClaimableOrder } from "@siumora/sdk";
+import { MicroLabel } from "@siumora/ui";
 
-import { PrivacyControls } from "@/components/privacy-controls";
-import { ProfileForm } from "@/components/profile-form";
-import { SignOutButton } from "@/components/sign-out-button";
+import { AccountShell, SignedOutAccount } from "@/components/account/account-shell";
+import { ClaimOrders } from "@/components/account/claim-orders";
 import { listOrders } from "@/lib/order-store";
-import { currentViewer } from "@/lib/session";
+import { apiAs, currentViewer } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Your account",
@@ -37,71 +37,27 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
 
 async function AccountPageContents() {
   const viewer = await currentViewer();
+  if (!viewer) return <SignedOutAccount next="/account" />;
 
-  if (!viewer) {
-    return (
-      <div className="mx-auto flex max-w-md flex-col items-center px-5 py-32 text-center">
-        <Display as="h1" size="sm">
-          Your account
-        </Display>
-        <p className="mt-4 text-content-muted">
-          Sign in with your mobile number to see everything you have ordered.
-        </p>
-        <Link
-          href="/signin?next=/account"
-          className="mt-8 border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
-        >
-          <MicroLabel>Sign in</MicroLabel>
-        </Link>
-      </div>
-    );
-  }
-
-  const orderResult = await listOrders()
-    .then((orders) => ({ orders, unavailable: false }))
-    .catch(() => ({ orders: [], unavailable: true }));
+  const client = await apiAs();
+  const [orderResult, claimable] = await Promise.all([
+    listOrders()
+      .then((orders) => ({ orders, unavailable: false }))
+      .catch(() => ({ orders: [], unavailable: true })),
+    // "Is this your order?" — guest orders on this number (Medusa only).
+    client.listClaimableOrders().catch((): ClaimableOrder[] => []),
+  ]);
   const { orders } = orderResult;
 
   return (
-    <div className="mx-auto max-w-3xl px-5 py-14">
-      <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <Display as="h1" size="sm">
-          Your account
-        </Display>
-        <SignOutButton />
-      </div>
+    <AccountShell viewer={viewer} section="orders">
+      <ClaimOrders orders={claimable} />
 
-      <p className="mt-3 text-sm text-content-faint">
-        Signed in as {viewer.customer.maskedPhone}.
-        {viewer.isAdmin && (
-          <>
-            {" "}
-            <Link
-              href="/admin"
-              className="border-b border-content/40 pb-0.5 hover:border-accent-ink hover:text-accent-ink"
-            >
-              Open the ops dashboard
-            </Link>
-            .
-          </>
-        )}
-      </p>
-
-      <section className="mt-10 border-t border-[var(--color-rule)] pt-8">
-        <h2>
-          <MicroLabel>Your details</MicroLabel>
-        </h2>
-        <p className="mt-3 text-sm text-content-muted">
-          Your mobile number is used to sign in. Add a name and email address for your account.
-        </p>
-        <ProfileForm name={viewer.customer.name} email={viewer.customer.email} />
-      </section>
-
-      <h2 className="mt-14">
+      <h2 className="mt-10">
         <MicroLabel>Your orders</MicroLabel>
       </h2>
       {orderResult.unavailable ? (
-        <div role="alert" className="mt-12 border border-[var(--color-rule)] p-5 text-sm">
+        <div role="alert" className="mt-8 border border-[var(--color-rule)] p-5 text-sm">
           <p>We could not load your orders right now. Please try again shortly.</p>
           <form action="/account" method="get" className="mt-3">
             <button type="submit" className="min-h-11 underline underline-offset-4">
@@ -110,7 +66,7 @@ async function AccountPageContents() {
           </form>
         </div>
       ) : orders.length === 0 ? (
-        <div className="mt-16 text-center">
+        <div className="mt-12 text-center">
           <p className="text-content-muted">No orders yet.</p>
           <Link
             href="/collections/everyday"
@@ -120,7 +76,7 @@ async function AccountPageContents() {
           </Link>
         </div>
       ) : (
-        <ul className="mt-10 divide-y divide-[var(--color-rule)] border-y border-[var(--color-rule)]">
+        <ul className="mt-8 divide-y divide-[var(--color-rule)] border-y border-[var(--color-rule)]">
           {orders.map((order) => (
             <li key={order.id}>
               <Link
@@ -156,18 +112,7 @@ async function AccountPageContents() {
           ))}
         </ul>
       )}
-
-      <section className="mt-16 border-t border-[var(--color-rule)] pt-8">
-        <h2>
-          <MicroLabel>Your data</MicroLabel>
-        </h2>
-        <p className="mt-3 max-w-prose text-sm text-content-muted">
-          Under the Digital Personal Data Protection Act you can take a copy of
-          everything we hold about you, or ask us to erase it.
-        </p>
-        <PrivacyControls />
-      </section>
-    </div>
+    </AccountShell>
   );
 }
 

@@ -16,6 +16,7 @@ import {
 import {
   isWellFormedAccessKey,
   majorToPaise,
+  ownsOrder,
   wireNumber,
 } from "../../../../../../modules/siumora-order/identity";
 
@@ -143,7 +144,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
   // same two grants the Fastify route honours. Everything else: 404.
   const actorId = (req as { auth_context?: { actor_id?: string } }).auth_context
     ?.actor_id;
-  const isOwner = Boolean(actorId && order.customer_id && actorId === order.customer_id);
+  const isOwner = ownsOrder(actorId, identity, order);
   const holdsKey = key !== undefined && key === identity.access_key;
   if (!isOwner && !holdsKey) {
     res.status(404).json({ error: "not_found" });

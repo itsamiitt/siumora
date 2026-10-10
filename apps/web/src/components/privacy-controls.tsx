@@ -6,6 +6,7 @@ import { useState, useTransition } from "react";
 import { MicroLabel } from "@siumora/ui";
 
 import { exportMyData, requestErasure } from "@/app/actions/privacy";
+import { useStepUp } from "@/components/auth/step-up";
 
 /**
  * Access and erasure, for the person they belong to.
@@ -17,7 +18,10 @@ import { exportMyData, requestErasure } from "@/app/actions/privacy";
  * Erasure asks twice. Not a dark pattern in reverse: it is irreversible, and
  * the second tap is the difference between a decision and a mis-tap on a phone.
  */
-export function PrivacyControls() {
+export function PrivacyControls({ maskedPhone }: { maskedPhone?: string } = {}) {
+  // Erasure sits behind the StepUpGate: a stolen session must not be able
+  // to delete someone's account (auth plan phase 2).
+  const { gate, sheet } = useStepUp(maskedPhone);
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState(false);
@@ -47,7 +51,7 @@ export function PrivacyControls() {
 
   function erase() {
     startTransition(async () => {
-      const result = await requestErasure();
+      const result = await gate(() => requestErasure());
       setConfirming(false);
 
       if (!result.ok) {
@@ -140,6 +144,7 @@ export function PrivacyControls() {
         section 36 of the CGST Act requires. Your name, phone and address are
         removed from them; the amounts, the tax and the invoice number are not.
       </p>
+      {sheet}
     </div>
   );
 }
