@@ -1,5 +1,5 @@
 // @ts-ignore -- TS1479 until @siumora/core ships require-condition types
-import { can, normalisePhone, parseAdminRoles, permissionsFor, roleFor, type Permission, type Role } from "@siumora/core";
+import { can, isRole, normalisePhone, parseAdminRoles, permissionsFor, roleFor, type Permission, type Role } from "@siumora/core";
 
 export type { Permission, Role };
 
@@ -77,12 +77,38 @@ export type RoleDecision =
  * a Fastify customer off the allow-list gets — a known person refused, not a
  * pretend-404.
  */
+/**
+ * Dashboard users' roles (auth plan phase 3): `ADMIN_USER_ROLES`, comma
+ * separated `email:role` (`ops@siumora.in:operator,help@siumora.in:support`).
+ *
+ * Unset, every dashboard user is an owner — Medusa OSS has no roles of its
+ * own, and a one-person shop must not lock itself out. Set, it is the list:
+ * a user not on it is a viewer, and an unrecognised role is dropped rather
+ * than guessed (the same rule as ADMIN_PHONES).
+ */
+export function parseUserRoles(raw: string | undefined): Map<string, Role> | undefined {
+  if (!raw || !raw.trim()) return undefined;
+  const roles = new Map<string, Role>();
+  for (const entry of raw.split(",")) {
+    const at = entry.lastIndexOf(":");
+    if (at <= 0) continue;
+    const email = entry.slice(0, at).trim().toLowerCase();
+    const role = entry.slice(at + 1).trim().toLowerCase();
+    if (email && isRole(role)) roles.set(email, role);
+  }
+  return roles;
+}
+
 export function decideRole(
   identity: ActorIdentity,
-  env: { ADMIN_PHONES?: string },
+  env: { ADMIN_PHONES?: string; ADMIN_USER_ROLES?: string },
 ): RoleDecision {
   if (identity.actorType === "user") {
-    return { ok: true, role: "owner", permissions: permissionsFor("owner") };
+    const listed = parseUserRoles(env.ADMIN_USER_ROLES);
+    const role: Role = listed
+      ? (listed.get((identity.contact ?? "").trim().toLowerCase()) ?? "viewer")
+      : "owner";
+    return { ok: true, role, permissions: permissionsFor(role) };
   }
 
   const phone = normalisePhone(identity.contact ?? "");
@@ -118,4 +144,32 @@ export function decidePermission(
     return { ok: false, refusal: insufficientRole(role, permission) };
   }
   return { ok: true };
+}
+
+export const MFA_REQUIRED: Refusal = {
+  code: 403,
+  body: {
+    error: "mfa_required",
+    message:
+      "Turn on two-step sign-in to use the Siumora pages: open your profile (bottom left), then Two-step authentication.",
+  },
+};
+
+/**
+ * Staff two-step sign-in (auth plan phase 3, closing track-m row 2's
+ * waiver). A dashboard user without an enabled authenticator is refused
+ * the Siumora ops surface while the setting requires it. Medusa itself
+ * already demands the code at sign-in once a factor is enabled
+ * (authenticate()'s requireMfa); this closes the "never enrolled" gap.
+ *
+ * Phone operators prove a second thing already — the OTP on a number on
+ * ADMIN_PHONES — and their sessions are 12 hours; they pass.
+ */
+export function decideStaffMfa(input: {
+  actorType: "user" | "customer";
+  mfaEnabled: boolean;
+  required: boolean;
+}): { ok: true } | { ok: false; refusal: Refusal } {
+  if (input.actorType !== "user" || !input.required || input.mfaEnabled) return { ok: true };
+  return { ok: false, refusal: MFA_REQUIRED };
 }

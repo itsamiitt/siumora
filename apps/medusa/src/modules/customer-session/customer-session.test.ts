@@ -9,6 +9,7 @@ import {
   revokeSessionById,
   type SqlClient,
 } from "./data.ts";
+import { healthWindow, summariseHealth } from "./health.ts";
 import { openPrivacyRequest } from "./privacy.ts";
 import {
   STEP_UP_WINDOW_SECONDS,
@@ -264,4 +265,36 @@ test("a new request gets the 30-day statutory deadline", async () => {
   const result = await openPrivacyRequest(pg, { customerId: "cus_1", kind: "erasure", now });
   assert.equal(result.existing, false);
   assert.equal(inserted[3], "2026-11-09T00:00:00.000Z");
+});
+
+// ── Sign-in health (phase 3) ────────────────────────────────────────────
+
+
+test("health turns event counts into the funnel and per-channel delivery", () => {
+  const health = summariseHealth([
+    { type: "otp_sent", channel: "whatsapp", count: "80" },
+    { type: "otp_send_failed", channel: "whatsapp", count: "20" },
+    { type: "otp_sent", channel: "sms", count: 20 },
+    { type: "otp_verified", channel: null, count: 90 },
+    { type: "otp_failed", channel: null, count: 12 },
+    { type: "otp_rate_limited", channel: null, count: 7 },
+    { type: "signin_completed", channel: null, count: 88 },
+  ]);
+  assert.equal(health.sent, 100);
+  assert.equal(health.requested, 120);
+  assert.equal(health.verifyRate, 0.9);
+  assert.equal(health.failedCodes, 12);
+  assert.equal(health.rateLimited, 7);
+  assert.deepEqual(health.channels, [
+    { channel: "sms", sent: 20, failed: 0, deliveryRate: 1 },
+    { channel: "whatsapp", sent: 80, failed: 20, deliveryRate: 0.8 },
+  ]);
+});
+
+test("no traffic is no rate, not zero", () => {
+  const health = summariseHealth([]);
+  assert.equal(health.verifyRate, null);
+  assert.deepEqual(health.channels, []);
+  assert.equal(healthWindow("7d"), "7d");
+  assert.equal(healthWindow("forever"), "24h");
 });

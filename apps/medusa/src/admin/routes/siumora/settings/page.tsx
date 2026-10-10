@@ -6,9 +6,9 @@ import { useEffect, useState } from "react";
 import { OpsError, inr, opsFetch } from "../../../lib/ops";
 
 /**
- * Siumora · Settings (plan/07 governance): the payments kill-switch, the
- * COD caps and the phone sign-in limits — owner-grade levers over
- * GET/PATCH /admin/siumora/settings.
+ * Siumora · Settings (plan/07 governance): the payments kill-switch and the
+ * COD caps — owner-grade levers over GET/PATCH /admin/siumora/settings.
+ * Sign-in levers live under Settings → Customer sign-in (auth plan phase 3).
  * Every write is audited by the route; the kill-switch flip asks for
  * confirmation because it stops revenue within the 30-second config TTL.
  */
@@ -18,29 +18,12 @@ interface Settings {
   codMaxOrder: number;
   codFee: number;
   codMinOrder: number;
-  otpTtlSeconds: number;
-  otpResendCooldownSeconds: number;
-  otpMaxSendsPerWindow: number;
-  otpSendWindowSeconds: number;
-  otpMaxAttempts: number;
 }
 
 const PAISE_KEYS = [
   { key: "cod_max_order", prop: "codMaxOrder", label: "COD cap (max order)" },
   { key: "cod_fee", prop: "codFee", label: "COD fee" },
   { key: "cod_min_order", prop: "codMinOrder", label: "COD floor (min order)" },
-] as const;
-
-/**
- * Phone sign-in limits — the levers to tighten during an OTP flood. The
- * route validates the ranges (settings.ts); the hint shows them up front.
- */
-const OTP_KEYS = [
-  { key: "otp_ttl_seconds", prop: "otpTtlSeconds", label: "Code lifetime (seconds)", hint: "60–600" },
-  { key: "otp_resend_cooldown_seconds", prop: "otpResendCooldownSeconds", label: "Resend cooldown (seconds)", hint: "15–600" },
-  { key: "otp_max_sends_per_window", prop: "otpMaxSendsPerWindow", label: "Codes per number per window", hint: "1–20" },
-  { key: "otp_send_window_seconds", prop: "otpSendWindowSeconds", label: "Send window (seconds)", hint: "600–86400" },
-  { key: "otp_max_attempts", prop: "otpMaxAttempts", label: "Wrong guesses before a code locks", hint: "1–10" },
 ] as const;
 
 const SettingsPage = () => {
@@ -143,43 +126,10 @@ const SettingsPage = () => {
       </Container>
 
       <Container className="p-6">
-        <Heading level="h2">Phone sign-in limits</Heading>
-        <Text size="small" className="mt-1 text-ui-fg-subtle">
-          Tighten these during an OTP flood. Changes reach sign-in within the
-          30s settings TTL and are audited.
+        <Text size="small" className="text-ui-fg-subtle">
+          Sign-in limits, abuse caps and the COD phone check are under Settings → Customer
+          sign-in.
         </Text>
-        {OTP_KEYS.map(({ key, prop, label, hint }) => (
-          <div key={key} className="mt-3 flex items-end gap-2">
-            <div className="flex-1">
-              <Text size="small" weight="plus">
-                {label} — currently {settings[prop]} ({hint})
-              </Text>
-              <Input
-                value={drafts[key] ?? ""}
-                placeholder={String(settings[prop])}
-                inputMode="numeric"
-                onChange={(event) =>
-                  setDrafts((prev) => ({ ...prev, [key]: event.target.value }))
-                }
-              />
-            </div>
-            <Button
-              size="small"
-              variant="secondary"
-              disabled={busy || !(drafts[key] ?? "").trim()}
-              onClick={() => {
-                const value = Number((drafts[key] ?? "").trim());
-                if (!Number.isInteger(value)) {
-                  toast.error("Expected a whole number.");
-                  return;
-                }
-                patch(key, value);
-              }}
-            >
-              Save
-            </Button>
-          </div>
-        ))}
       </Container>
 
       <Prompt open={confirmKill} onOpenChange={setConfirmKill}>

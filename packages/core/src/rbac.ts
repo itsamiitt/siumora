@@ -17,7 +17,17 @@ import { normalisePhone } from "./auth.ts";
 export type Role =
   /** Can see the dashboard and nothing else. A new hire, an accountant. */
   | "viewer"
-  /** The everyday job: move parcels, work the NDR queue, reconcile COD. */
+  /**
+   * Customer support (auth plan phase 3): looks customers up with their
+   * phone masked and signs a lost phone's sessions out — nothing that
+   * moves money or reveals a whole number.
+   */
+  | "support"
+  /**
+   * The everyday job: move parcels, work the NDR queue, reconcile COD — and,
+   * as the ops lead, block, re-verify and merge customer accounts with full
+   * contact details in view.
+   */
   | "operator"
   /** Everything, including the statutory desks and erasing a person. */
   | "owner";
@@ -36,7 +46,15 @@ export type Permission =
   /** Read the audit log. */
   | "audit:read"
   /** Flip the payments kill-switch and move the COD caps. */
-  | "settings:write";
+  | "settings:write"
+  /** Look a customer up — identity, devices, sign-in log — phone masked. */
+  | "customers:read"
+  /** Sign a customer's devices out (the lost-phone call). */
+  | "customers:sessions"
+  /** Block, unblock, force re-verify, merge; see full contact details. */
+  | "customers:admin"
+  /** Sign-in limits, messaging and staff security settings. */
+  | "auth:settings";
 
 /**
  * The grants, written out per role rather than as a hierarchy.
@@ -47,11 +65,24 @@ export type Permission =
  */
 const GRANTS: Record<Role, readonly Permission[]> = {
   viewer: ["metrics:read"],
-  operator: ["metrics:read", "orders:write", "remittance:write"],
+  support: ["metrics:read", "customers:read", "customers:sessions"],
+  operator: [
+    "metrics:read",
+    "orders:write",
+    "remittance:write",
+    "customers:read",
+    "customers:sessions",
+    "customers:admin",
+  ],
   owner: [
     "metrics:read",
     "orders:write",
     "remittance:write",
+    "customers:read",
+    "customers:sessions",
+    "customers:admin",
+    // Who can sign in, how hard, and how staff prove who they are.
+    "auth:settings",
     // The statutory desks. A GSTR-1 export is every customer's state and every
     // registered buyer's GSTIN in one file.
     "gst:read",
@@ -65,7 +96,7 @@ const GRANTS: Record<Role, readonly Permission[]> = {
   ],
 };
 
-export const ROLES: readonly Role[] = ["viewer", "operator", "owner"];
+export const ROLES: readonly Role[] = ["viewer", "support", "operator", "owner"];
 
 export function isRole(value: string): value is Role {
   return (ROLES as readonly string[]).includes(value);
@@ -143,7 +174,13 @@ export type AuditAction =
   | "gst.export"
   | "auth.admin_signin"
   | "settings.update"
-  | "return.payout";
+  | "return.payout"
+  | "customer.block"
+  | "customer.unblock"
+  | "customer.revoke_sessions"
+  | "customer.reverify"
+  | "customer.merge"
+  | "customer.view_pii";
 
 export const AUDIT_ACTIONS: readonly AuditAction[] = [
   "order.status",
@@ -155,6 +192,12 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   "auth.admin_signin",
   "settings.update",
   "return.payout",
+  "customer.block",
+  "customer.unblock",
+  "customer.revoke_sessions",
+  "customer.reverify",
+  "customer.merge",
+  "customer.view_pii",
 ];
 
 export function isAuditAction(value: string): value is AuditAction {
@@ -173,4 +216,11 @@ export const ACTION_PERMISSION: Record<AuditAction, Permission> = {
   // Money out by hand rides the money desk, same as remittance in.
   "return.payout": "remittance:write",
   "auth.admin_signin": "metrics:read",
+  "customer.block": "customers:admin",
+  "customer.unblock": "customers:admin",
+  "customer.revoke_sessions": "customers:sessions",
+  "customer.reverify": "customers:admin",
+  "customer.merge": "customers:admin",
+  // Seeing a whole phone number is itself recorded.
+  "customer.view_pii": "customers:admin",
 };

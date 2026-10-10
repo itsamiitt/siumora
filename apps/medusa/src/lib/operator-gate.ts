@@ -2,10 +2,13 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
 import { recordAudit, type SqlClient } from "../modules/audit/data";
+import { settingsCache } from "../modules/settings/cache";
+import { readSettings, type SqlClient as SettingsSqlClient } from "../modules/settings/read";
 import {
   NOT_SIGNED_IN,
   decidePermission,
   decideRole,
+  decideStaffMfa,
   operatorContact,
   type Permission,
   type Role,
@@ -37,6 +40,25 @@ export interface Operator {
 interface AuthContext {
   actor_id?: string;
   actor_type?: string;
+  /** Set by Medusa when the identity has an enabled MFA factor. */
+  mfa_enabled?: boolean;
+}
+
+/**
+ * Whether staff must have two-step sign-in. The setting (owner-controlled,
+ * default on) unless SIUMORA_STAFF_MFA=off — the break-glass for an owner
+ * who lost their authenticator, set on the server and audited by its absence
+ * from every other path.
+ */
+async function staffMfaRequired(req: MedusaRequest): Promise<boolean> {
+  if (process.env.SIUMORA_STAFF_MFA === "off") return false;
+  const pg = req.scope.resolve(ContainerRegistrationKeys.PG_CONNECTION) as unknown as SettingsSqlClient;
+  try {
+    return (await settingsCache(() => readSettings(pg)).get()).staffMfaRequired;
+  } catch {
+    // Unreadable settings fail closed for staff: the default is on.
+    return true;
+  }
 }
 
 async function loadContact(
@@ -72,6 +94,16 @@ export async function requireOperator(
   const decision = decideRole({ actorType, contact }, process.env);
   if (!decision.ok) {
     res.status(decision.refusal.code).json(decision.refusal.body);
+    return undefined;
+  }
+
+  const mfa = decideStaffMfa({
+    actorType,
+    mfaEnabled: auth?.mfa_enabled === true,
+    required: actorType === "user" ? await staffMfaRequired(req) : false,
+  });
+  if (!mfa.ok) {
+    res.status(mfa.refusal.code).json(mfa.refusal.body);
     return undefined;
   }
 

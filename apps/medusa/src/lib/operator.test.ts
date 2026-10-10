@@ -6,7 +6,9 @@ import {
   NOT_SIGNED_IN,
   decidePermission,
   decideRole,
+  decideStaffMfa,
   insufficientRole,
+  parseUserRoles,
 } from "./operator.ts";
 
 // The gate's decisions, pinned against the Fastify requirePermission ladder
@@ -107,4 +109,39 @@ test("the carried contact normalises a +91 phone so the audit mask works", async
   assert.equal(operatorContact("customer", "+919000000001"), "9000000001");
   assert.equal(operatorContact("customer", null), "");
   assert.equal(operatorContact("user", "admin@siumora.dev"), "admin@siumora.dev");
+});
+
+// ── Dashboard roles and staff two-step sign-in (auth plan phase 3) ──
+
+test("dashboard users are owners until ADMIN_USER_ROLES lists them", () => {
+  const unset = decideRole({ actorType: "user", contact: "a@siumora.in" }, {});
+  assert.equal(unset.ok && unset.role, "owner");
+
+  const env = { ADMIN_USER_ROLES: "Ops@Siumora.in:operator, help@siumora.in:support,typo@siumora.in:oprator" };
+  const ops = decideRole({ actorType: "user", contact: "ops@siumora.in" }, env);
+  assert.equal(ops.ok && ops.role, "operator");
+  const help = decideRole({ actorType: "user", contact: "HELP@siumora.in" }, env);
+  assert.equal(help.ok && help.role, "support");
+  // Not on a list that exists: the least privilege, not the most.
+  const stranger = decideRole({ actorType: "user", contact: "new@siumora.in" }, env);
+  assert.equal(stranger.ok && stranger.role, "viewer");
+  // A typo is dropped, never guessed.
+  const typo = decideRole({ actorType: "user", contact: "typo@siumora.in" }, env);
+  assert.equal(typo.ok && typo.role, "viewer");
+});
+
+test("the user-role parser ignores blanks and malformed entries", () => {
+  assert.equal(parseUserRoles(""), undefined);
+  assert.equal(parseUserRoles("  "), undefined);
+  assert.deepEqual([...(parseUserRoles("x,:owner,a@b.c:owner") ?? new Map())], [["a@b.c", "owner"]]);
+});
+
+test("staff without an authenticator are refused while the setting requires one", () => {
+  const refused = decideStaffMfa({ actorType: "user", mfaEnabled: false, required: true });
+  assert.equal(refused.ok, false);
+  assert.equal(!refused.ok && refused.refusal.body.error, "mfa_required");
+  assert.deepEqual(decideStaffMfa({ actorType: "user", mfaEnabled: true, required: true }), { ok: true });
+  assert.deepEqual(decideStaffMfa({ actorType: "user", mfaEnabled: false, required: false }), { ok: true });
+  // Phone operators already prove their phone with an OTP.
+  assert.deepEqual(decideStaffMfa({ actorType: "customer", mfaEnabled: false, required: true }), { ok: true });
 });

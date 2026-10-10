@@ -108,3 +108,22 @@ test("refuses a role name that is not one", () => {
   assert.equal(isRole("admin"), false);
   assert.equal(isRole(""), false);
 });
+
+test("support looks customers up and signs devices out, nothing more", () => {
+  assert.equal(can("support", "customers:read"), true);
+  assert.equal(can("support", "customers:sessions"), true);
+  assert.equal(can("support", "customers:admin"), false, "no blocking, no full numbers");
+  assert.equal(can("support", "orders:write"), false);
+});
+
+test("the ops lead (operator) blocks and merges; only the owner touches auth settings", () => {
+  assert.equal(can("operator", "customers:admin"), true);
+  assert.equal(can("operator", "auth:settings"), false);
+  assert.equal(can("owner", "auth:settings"), true);
+  assert.equal(parseAdminRoles("9812345678:support").get("9812345678"), "support");
+});
+
+test("seeing a whole phone number is an audited, ops-lead action", () => {
+  assert.equal(ACTION_PERMISSION["customer.view_pii"], "customers:admin");
+  assert.equal(ACTION_PERMISSION["customer.revoke_sessions"], "customers:sessions");
+});
