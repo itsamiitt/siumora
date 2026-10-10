@@ -26,7 +26,13 @@ import {
 } from "@siumora/core";
 
 import { ApiError, SiumoraClient } from "./index.ts";
-import type { AccountCustomer } from "./index.ts";
+import type {
+  AccountCustomer,
+  DeviceSession,
+  OtpIssued,
+  OtpRequestOptions,
+  SessionInfo,
+} from "./index.ts";
 
 /**
  * Medusa transport for the commerce surface (design doc M1).
@@ -192,16 +198,6 @@ function metadataPaise(value: unknown): number | undefined {
     : undefined;
 }
 
-/** The payload of a Medusa JWT, without verifying — the server verified it. */
-function decodeJwtPayload(token: string): Record<string, unknown> {
-  const part = token.split(".")[1] ?? "";
-  const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
-  return JSON.parse(Buffer.from(b64, "base64").toString("utf8")) as Record<
-    string,
-    unknown
-  >;
-}
-
 /** Guest checkout needs a cart email; this one is derived and recognizable. */
 const GUEST_EMAIL_DOMAIN = "guest.siumora.in";
 
@@ -349,7 +345,7 @@ export interface MedusaClientOptions {
   publishableKey: string;
   timeoutMs?: number;
   fetch?: typeof globalThis.fetch;
-  /** Session token — unused until the phone-OTP auth provider ports (M1). */
+  /** The opaque session token from verifyOtp, sent as a bearer. */
   token?: string;
 }
 
@@ -692,29 +688,24 @@ export class MedusaClient implements PublicSurface {
   // ── Sign-in ─────────────────────────────────────────────────
 
   /**
-   * Ask for a code — the custom request route, because Medusa's built-in
-   * auth endpoint can only answer {location} for a non-token outcome and the
-   * storefront needs maskedPhone/expiresAt/delivery (and the echo code in
-   * development). Same envelope as the Fastify /auth/otp.
+   * Ask for a code. The Fastify /auth/otp envelope plus `channel` (which
+   * one delivered) and `channels` (what the backend can send on), so the
+   * storefront can offer "Send by SMS instead". The Turnstile token rides
+   * along when the challenge is on.
    */
-  async requestOtp(phone: string): Promise<{
-    ok: boolean;
-    maskedPhone: string;
-    expiresAt: string;
-    delivery: "sent" | "not_configured";
-    code?: string;
-  }> {
-    return this.request("POST", "/store/siumora-auth/otp", { phone });
+  async requestOtp(phone: string, options: OtpRequestOptions = {}): Promise<OtpIssued> {
+    return this.request("POST", "/store/siumora-auth/otp", {
+      phone,
+      ...(options.channel ? { channel: options.channel } : {}),
+      ...(options.turnstileToken ? { turnstileToken: options.turnstileToken } : {}),
+    });
   }
 
   /**
-   * Verify the code and build the Fastify-shaped session envelope.
-   *
-   * Medusa's route mints a bare {token}; first sign-in gets an actorless
-   * token, so the transport runs the standard dance — create the customer
-   * under that bearer, refresh to an actor token — then reads the customer
-   * card. Returning customers skip straight to the card. claimedOrders is
-   * honestly 0: guest-order claiming belongs to the M2 order-ownership port.
+   * Verify the code. One call: the route judges the code, finds or creates
+   * the customer and opens a revocable session; `token` is the opaque
+   * session token the storefront keeps in its HTTP-only cookie (auth plan
+   * phase 1). Same envelope as the Fastify /auth/verify.
    */
   async verifyOtp(
     phone: string,
@@ -725,89 +716,44 @@ export class MedusaClient implements PublicSurface {
     expiresAt: string;
     isAdmin: boolean;
     claimedOrders: number;
-    customer: {
-      id: string;
-      phone: string;
-      maskedPhone: string;
-      name: string;
-      email: string | null;
-    };
+    customer: AccountCustomer;
   }> {
-    const normalized = normalisePhone(phone) ?? phone;
-    const { token } = await this.request<{ token: string }>(
-      "POST",
-      "/auth/customer/phone-otp",
-      { phone, code },
-    );
-
-    let finalToken = token;
-    if (!decodeJwtPayload(token).actor_id) {
-      // Medusa requires an email to create a customer; phone sign-in has
-      // none, so a derived placeholder goes in and the card maps it to null.
-      await this.request(
-        "POST",
-        "/store/customers",
-        { phone: normalized, email: guestEmail(normalized) },
-        { bearer: token },
-      );
-      const refreshed = await this.request<{ token: string }>(
-        "POST",
-        "/auth/token/refresh",
-        undefined,
-        { bearer: token },
-      );
-      finalToken = refreshed.token;
-    }
-
-    const me = await this.request<{ customer: MedusaCustomer }>(
-      "GET",
-      "/store/customers/me",
-      undefined,
-      { bearer: finalToken },
-    );
-    const exp = decodeJwtPayload(finalToken).exp;
-    return {
-      ok: true,
-      token: finalToken,
-      expiresAt: new Date(
-        typeof exp === "number" ? exp * 1000 : Date.now(),
-      ).toISOString(),
-      isAdmin: false,
-      claimedOrders: 0,
-      customer: customerCard(me.customer, normalized),
-    };
+    return this.request("POST", "/store/siumora-auth/verify", { phone, code });
   }
 
   async getSession(): Promise<
     | { signedIn: false }
-    | {
-        signedIn: true;
-        isAdmin: boolean;
-        customer: {
-          id: string;
-          phone: string;
-          maskedPhone: string;
-          name: string;
-          email: string | null;
-        };
-      }
+    | { signedIn: true; isAdmin: boolean; customer: AccountCustomer; session?: SessionInfo }
   > {
     if (!this.token) return { signedIn: false };
-    try {
-      const me = await this.request<{ customer: MedusaCustomer }>(
-        "GET",
-        "/store/customers/me",
-      );
-      const phone =
-        normalisePhone(me.customer.phone ?? "") ?? me.customer.phone ?? "";
-      return { signedIn: true, isAdmin: false, customer: customerCard(me.customer, phone) };
-    } catch (error) {
-      // A dead or expired token is an anonymous session, not a fault.
-      if (error instanceof ApiError && error.status === 401) {
-        return { signedIn: false };
-      }
-      throw error;
-    }
+    // A dead or revoked token is simply anonymous here: the session door
+    // drops it and the route answers signedIn:false.
+    return this.request("GET", "/store/siumora-auth/session");
+  }
+
+  async signOut(): Promise<void> {
+    await this.request("POST", "/store/siumora-auth/signout", {});
+  }
+
+  async signOutEverywhere(): Promise<{ ok: boolean; revoked: number }> {
+    return this.request("POST", "/store/siumora-auth/signout-everywhere", {});
+  }
+
+  async listSessions(): Promise<DeviceSession[]> {
+    const data = await this.request<{ sessions: DeviceSession[] }>(
+      "GET",
+      "/store/siumora-auth/sessions",
+    );
+    return data.sessions;
+  }
+
+  async revokeSession(id: string): Promise<{ ok: boolean; current: boolean }> {
+    return this.request("DELETE", `/store/siumora-auth/sessions/${encodeURIComponent(id)}`);
+  }
+
+  /** Re-prove the phone for a sensitive action (StepUpGate). */
+  async stepUp(code: string): Promise<{ ok: boolean; stepUpExpiresAt: string }> {
+    return this.request("POST", "/store/siumora-auth/step-up", { code });
   }
 
   // ── Checkout and orders ─────────────────────────────────────
@@ -1072,12 +1018,6 @@ export class MedusaClient implements PublicSurface {
 
   // ── Not yet ported — each names the phase that delivers it ──
 
-  async signOut(): Promise<never> {
-    throw new NotPortedError("signOut", "the M2 session port");
-  }
-  async signOutEverywhere(): Promise<never> {
-    throw new NotPortedError("signOutEverywhere", "the M2 session port");
-  }
   async updateProfile(input: {
     name?: string;
     email?: string;

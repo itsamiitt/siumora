@@ -80,7 +80,7 @@ import type {
 import { DEFAULT_OTP_POLICY, maskPhone, normalisePhone, type OtpPolicy } from "@siumora/core";
 // prettier-ignore -- single line so @ts-ignore reaches the specifier
 // @ts-ignore -- TS1479 until @siumora/messaging ships require-condition types
-import { createOtpSender, type OtpSender, type TransportEnv } from "@siumora/messaging";
+import { createOtpSender, type OtpChannel, type OtpSender, type TransportEnv } from "@siumora/messaging";
 
 import { readSettings, type SqlClient } from "../settings/read.ts";
 import {
@@ -119,6 +119,11 @@ export interface PhoneOtpChallengeDetails {
   readonly maskedPhone: string;
   readonly expiresAt: string;
   readonly delivery: "sent" | "send_failed" | "not_configured";
+  /** The channel that delivered (or was last tried); absent when nothing sent. */
+  readonly channel?: OtpChannel;
+  /** Every channel this environment can send on — the storefront offers
+   *  "Send by SMS instead" only when SMS is one of them. */
+  readonly channels: readonly OtpChannel[];
   /** Present only under the explicit development echo flag. */
   readonly code?: string;
 }
@@ -208,8 +213,14 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
     }
 
     const code = typeof body.code === "string" ? body.code : "";
+    // Delivery hints from the store route (src/api/store/siumora-auth/otp):
+    // the customer's channel choice, and whether the day's SMS budget
+    // still has room. Only that route reaches this provider's request step —
+    // the built-in /auth/customer/phone-otp route is closed in middlewares.ts.
+    const prefer = body.channel === "sms" || body.channel === "whatsapp" ? body.channel : undefined;
+    const allowSms = body.allowSms !== false && body.allowSms !== "false";
     return code === ""
-      ? this.requestCode_(phone, authIdentityProviderService)
+      ? this.requestCode_(phone, authIdentityProviderService, { prefer, allowSms })
       : this.verifyCode_(phone, code, authIdentityProviderService);
   }
 
@@ -229,6 +240,7 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
   protected async requestCode_(
     phone: string,
     authIdentityProviderService: AuthIdentityProviderService,
+    delivery_: { prefer?: OtpChannel; allowSms?: boolean } = {},
   ): Promise<AuthenticationResponse> {
     if (!this.sender_ && this.options_.otpEcho !== true) {
       // No approved messaging channel and no explicit development echo.
@@ -291,13 +303,18 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
     // outbox poll. A failed send is loud in the log (a failing OTP channel
     // is every sign-in on the site) but the code stays valid for a retry.
     let delivery: PhoneOtpChallengeDetails["delivery"] = "not_configured";
+    let channel: OtpChannel | undefined;
     if (this.sender_) {
-      const outcome = await this.sender_.send(phone, issued.code);
+      const outcome = await this.sender_.send(phone, issued.code, {
+        ...(delivery_.prefer ? { prefer: delivery_.prefer } : {}),
+        allowSms: delivery_.allowSms !== false,
+      });
       delivery = outcome.ok ? "sent" : "send_failed";
+      channel = outcome.channel;
       if (!outcome.ok) {
-        this.logger_?.error?.(
-          `phone-otp send failed on ${this.sender_.channel}: ${outcome.error ?? "unknown"}`,
-        );
+        this.logger_?.error?.(`phone-otp send failed: ${outcome.error ?? "unknown"}`);
+      } else if (outcome.fellBack) {
+        this.logger_?.warn?.(`phone-otp fell back to ${outcome.channel}`);
       }
     }
 
@@ -311,6 +328,8 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
         maskedPhone: maskPhone(phone),
         expiresAt: issued.expiresAt.toISOString(),
         delivery,
+        ...(channel ? { channel } : {}),
+        channels: this.sender_?.channels ?? [],
         // Echoed only under the explicit development flag, never merely
         // because a provider happens to be missing.
         ...(this.options_.otpEcho === true ? { code: issued.code } : {}),

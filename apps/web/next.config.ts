@@ -22,8 +22,10 @@ const CSP = [
   // 'unsafe-eval' is absent: nothing here compiles code at runtime, and its
   // absence is what stops a JSON payload becoming an execution path.
   // checkout.razorpay.com serves Checkout.js; connect.facebook.net serves the
-  // Pixel base (consent- and idle-gated) — per-host, never a wildcard (OV-1).
-  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://checkout.razorpay.com https://connect.facebook.net",
+  // Pixel base (consent- and idle-gated); challenges.cloudflare.com serves the
+  // Turnstile bot check on "Send code" (auth plan phase 1, only rendered when
+  // NEXT_PUBLIC_TURNSTILE_SITE_KEY is set) — per-host, never a wildcard (OV-1).
+  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://checkout.razorpay.com https://connect.facebook.net https://challenges.cloudflare.com",
   // Tailwind v4 emits a stylesheet, but React inlines style attributes for
   // view transitions and the same nonce problem applies.
   "style-src 'self' 'unsafe-inline'",
@@ -33,8 +35,9 @@ const CSP = [
   // attempt logs a console error that reads like a failure.
   "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://api.razorpay.com https://lumberjack.razorpay.com https://www.facebook.com",
   // The payment modal is an iframe to the provider; default-src 'self' would
-  // refuse it and the Pay button would open nothing.
-  "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com",
+  // refuse it and the Pay button would open nothing. Turnstile renders its
+  // challenge in an iframe too.
+  "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com https://challenges.cloudflare.com",
   "frame-ancestors 'none'",
   "form-action 'self'",
   "base-uri 'none'",

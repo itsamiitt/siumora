@@ -53,6 +53,44 @@ export interface AccountCustomer {
   email: string | null;
 }
 
+export type OtpChannel = "whatsapp" | "sms";
+
+export interface OtpRequestOptions {
+  /** "Send by SMS instead" — the channel to try first. */
+  channel?: OtpChannel;
+  /** The Cloudflare Turnstile token, when the challenge is switched on. */
+  turnstileToken?: string;
+}
+
+export interface OtpIssued {
+  ok: boolean;
+  maskedPhone: string;
+  expiresAt: string;
+  delivery: "sent" | "send_failed" | "not_configured";
+  /** Which channel delivered (Medusa only). */
+  channel?: OtpChannel;
+  /** Every channel the backend can send on (Medusa only). */
+  channels?: OtpChannel[];
+  code?: string;
+}
+
+/** The current session, for the StepUpGate (Medusa only). */
+export interface SessionInfo {
+  id: string;
+  stepUpFresh: boolean;
+  stepUpExpiresAt: string | null;
+}
+
+/** One signed-in device on the account security page. */
+export interface DeviceSession {
+  id: string;
+  device: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  current: boolean;
+}
+
 export interface RequestOptions {
   /** Sent as Idempotency-Key so a retry cannot place a second order. */
   idempotencyKey?: string;
@@ -183,13 +221,9 @@ export class SiumoraClient {
    * `code` comes back only in an environment with no WhatsApp/DLT sender wired
    * up, and `delivery` says which situation you are in.
    */
-  async requestOtp(phone: string): Promise<{
-    ok: boolean;
-    maskedPhone: string;
-    expiresAt: string;
-    delivery: "sent" | "not_configured";
-    code?: string;
-  }> {
+  async requestOtp(phone: string, _options: OtpRequestOptions = {}): Promise<OtpIssued> {
+    // The Fastify route has one channel and no challenge; the options are
+    // Medusa-only and deliberately not sent.
     return this.request("POST", "/auth/otp", { phone }, { cache: "no-store" });
   }
 
@@ -209,9 +243,23 @@ export class SiumoraClient {
 
   async getSession(): Promise<
     | { signedIn: false }
-    | { signedIn: true; isAdmin: boolean; customer: AccountCustomer }
+    | { signedIn: true; isAdmin: boolean; customer: AccountCustomer; session?: SessionInfo }
   > {
     return this.request("GET", "/auth/session", undefined, { cache: "no-store" });
+  }
+
+  // Device sessions and step-up exist only on the Medusa transport; the
+  // Fastify stack is archived at cutover and never grew them.
+  async listSessions(): Promise<DeviceSession[]> {
+    throw new ApiError(501, "not_supported", "Device sessions need the Medusa backend.");
+  }
+
+  async revokeSession(_id: string): Promise<{ ok: boolean; current: boolean }> {
+    throw new ApiError(501, "not_supported", "Device sessions need the Medusa backend.");
+  }
+
+  async stepUp(_code: string): Promise<{ ok: boolean; stepUpExpiresAt: string }> {
+    throw new ApiError(501, "not_supported", "Step-up needs the Medusa backend.");
   }
 
   async signOut(): Promise<void> {

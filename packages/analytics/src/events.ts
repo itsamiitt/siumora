@@ -104,6 +104,30 @@ export const webVitalsSchema = base.extend({
   navigation_type: z.string().optional(),
 });
 
+/**
+ * The sign-in funnel (auth plan phase 1): requested → delivered → verified,
+ * with failures beside it and the finish line after. Every step carries the
+ * channel so WhatsApp and SMS delivery can be compared, and `variant` names
+ * the sign-in A/B arm the shopper saw (phase 4), so a new sign-in method is
+ * judged by checkout completion rather than by clicks on its button.
+ */
+const signinBase = base.extend({
+  channel: z.enum(["whatsapp", "sms", "google", "unknown"]),
+  /** Where sign-in was opened from — the header, checkout, the wishlist… */
+  surface: z.string().optional(),
+  variant: z.string().optional(),
+});
+export const otpRequestedSchema = signinBase.extend({ resend: z.boolean().optional() });
+export const otpDeliveredSchema = signinBase.extend({ fell_back: z.boolean().optional() });
+export const otpVerifiedSchema = signinBase;
+export const otpFailedSchema = signinBase.extend({
+  reason: z.enum(["wrong_code", "code_unusable", "rate_limited", "send_failed", "challenge_failed", "blocked", "error"]),
+});
+export const signinCompletedSchema = signinBase.extend({
+  method: z.enum(["phone", "google"]),
+  claimed_orders: z.number().int().nonnegative().optional(),
+});
+
 export const EVENT_SCHEMAS = {
   view_item: viewItemSchema,
   view_item_list: viewItemListSchema,
@@ -121,6 +145,11 @@ export const EVENT_SCHEMAS = {
   sign_up: signUpSchema,
   cod_delivered: codDeliveredSchema,
   web_vitals: webVitalsSchema,
+  otp_requested: otpRequestedSchema,
+  otp_delivered: otpDeliveredSchema,
+  otp_verified: otpVerifiedSchema,
+  otp_failed: otpFailedSchema,
+  signin_completed: signinCompletedSchema,
 } as const;
 
 export type EventName = keyof typeof EVENT_SCHEMAS;

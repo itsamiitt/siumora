@@ -45,6 +45,31 @@ export interface Settings {
   readonly otpMaxSendsPerWindow: number;
   readonly otpSendWindowSeconds: number;
   readonly otpMaxAttempts: number;
+  /**
+   * Abuse caps above the per-number policy (auth plan phase 1): codes one
+   * origin may request per hour across all numbers (the Fastify
+   * OTP_MAX_SENDS_PER_IP), codes one number may receive per day, and the
+   * day's SMS budget across the whole site — past it, WhatsApp still
+   * sends and SMS stops (0 = SMS off).
+   */
+  readonly otpMaxSendsPerIpHour: number;
+  readonly otpMaxSendsPerDay: number;
+  readonly otpDailySmsCap: number;
+  /** WhatsApp a customer when their account signs in on a new device. */
+  readonly newDeviceAlerts: boolean;
+  /** COD needs the order phone verified by OTP at checkout (phase 2). */
+  readonly codRequiresOtp: boolean;
+  /**
+   * A COD order above this (paise) to an address the customer has not
+   * ordered to before needs a fresh OTP (StepUpGate), not just a session.
+   */
+  readonly codStepUpAbove: number;
+  /** Dashboard users must have two-step sign-in to use the Siumora ops pages. */
+  readonly staffMfaRequired: boolean;
+  /** Google sign-in offered at all (phase 4), and to what share of shoppers
+   *  — the A/B arm against phone-only. */
+  readonly googleSignInEnabled: boolean;
+  readonly googleSignInPercent: number;
 }
 
 /**
@@ -63,6 +88,15 @@ export const SETTING_DEFAULTS: Settings = {
   otpMaxSendsPerWindow: DEFAULT_OTP_POLICY.maxSendsPerWindow,
   otpSendWindowSeconds: DEFAULT_OTP_POLICY.sendWindowSeconds,
   otpMaxAttempts: DEFAULT_OTP_POLICY.maxAttempts,
+  otpMaxSendsPerIpHour: 20,
+  otpMaxSendsPerDay: 10,
+  otpDailySmsCap: 1000,
+  newDeviceAlerts: true,
+  codRequiresOtp: true,
+  codStepUpAbove: 300000,
+  staffMfaRequired: true,
+  googleSignInEnabled: false,
+  googleSignInPercent: 50,
 };
 
 export type SettingKey =
@@ -74,7 +108,16 @@ export type SettingKey =
   | "otp_resend_cooldown_seconds"
   | "otp_max_sends_per_window"
   | "otp_send_window_seconds"
-  | "otp_max_attempts";
+  | "otp_max_attempts"
+  | "otp_max_sends_per_ip_hour"
+  | "otp_max_sends_per_day"
+  | "otp_daily_sms_cap"
+  | "new_device_alerts"
+  | "cod_requires_otp"
+  | "cod_step_up_above"
+  | "staff_mfa_required"
+  | "google_signin_enabled"
+  | "google_signin_percent";
 
 interface SettingDefinition {
   readonly prop: keyof Settings;
@@ -112,12 +155,12 @@ function intBetween(prop: keyof Settings, min: number, max: number): SettingDefi
   };
 }
 
+function bool(prop: keyof Settings): SettingDefinition {
+  return { prop, validate: (value) => typeof value === "boolean", expected: "expected a boolean" };
+}
+
 const DEFINITIONS: Record<SettingKey, SettingDefinition> = {
-  payments_enabled: {
-    prop: "paymentsEnabled",
-    validate: (value) => typeof value === "boolean",
-    expected: "expected a boolean",
-  },
+  payments_enabled: bool("paymentsEnabled"),
   cod_max_order: { prop: "codMaxOrder", validate: isPaise, expected: PAISE_EXPECTED },
   cod_fee: { prop: "codFee", validate: isPaise, expected: PAISE_EXPECTED },
   cod_min_order: { prop: "codMinOrder", validate: isPaise, expected: PAISE_EXPECTED },
@@ -126,6 +169,15 @@ const DEFINITIONS: Record<SettingKey, SettingDefinition> = {
   otp_max_sends_per_window: intBetween("otpMaxSendsPerWindow", 1, 20),
   otp_send_window_seconds: intBetween("otpSendWindowSeconds", 600, 86_400),
   otp_max_attempts: intBetween("otpMaxAttempts", 1, 10),
+  otp_max_sends_per_ip_hour: intBetween("otpMaxSendsPerIpHour", 1, 500),
+  otp_max_sends_per_day: intBetween("otpMaxSendsPerDay", 1, 50),
+  otp_daily_sms_cap: intBetween("otpDailySmsCap", 0, 100_000),
+  new_device_alerts: bool("newDeviceAlerts"),
+  cod_requires_otp: bool("codRequiresOtp"),
+  cod_step_up_above: { prop: "codStepUpAbove", validate: isPaise, expected: PAISE_EXPECTED },
+  staff_mfa_required: bool("staffMfaRequired"),
+  google_signin_enabled: bool("googleSignInEnabled"),
+  google_signin_percent: intBetween("googleSignInPercent", 0, 100),
 };
 
 export function isSettingKey(value: string): value is SettingKey {

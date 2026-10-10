@@ -31,6 +31,12 @@ export default defineConfig({
         "http://localhost:3000,http://localhost:9000,http://localhost:9101",
       jwtSecret,
       cookieSecret,
+      // Customer JWTs are now only ever minted per request from a revocable
+      // session (src/lib/session-auth.ts, 5 minutes) and the built-in doors
+      // that would mint longer ones are closed (src/api/middlewares.ts). This
+      // bounds what is left — a dashboard bearer, a Google callback token —
+      // to 15 minutes (auth plan phase 0).
+      jwtExpiresIn: "15m",
       // Operators sign in with emailpass; customers only ever with the
       // phone-OTP provider. Absent, every provider serves every actor.
       authMethodsPerActor: {
@@ -104,6 +110,9 @@ export default defineConfig({
     // write testifies to, and the COD remittance ledger.
     { resolve: "./src/modules/audit" },
     { resolve: "./src/modules/remittance" },
+    // Customer sessions, security state and the auth event log (auth plan
+    // phase 1): revocable sessions behind the storefront cookie.
+    { resolve: "./src/modules/customer-session" },
     {
       // Phone-OTP sign-in (design doc M1): the Fastify OTP contract as a
       // Medusa auth provider, reusing packages/messaging's ordered channel

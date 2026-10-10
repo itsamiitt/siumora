@@ -21,34 +21,13 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http";
 
-import Redis from "ioredis";
-
 import { limiterFromEnv, rateLimitMiddleware } from "../lib/rate-limit";
-
-/** One Redis complaint a minute is a signal; one per request is a flood. */
-const REDIS_ERROR_LOG_INTERVAL_MS = 60_000;
-let lastRedisErrorLoggedAt = 0;
-
-function logRedisError(error: unknown): void {
-  const now = Date.now();
-  if (now - lastRedisErrorLoggedAt < REDIS_ERROR_LOG_INTERVAL_MS) return;
-  lastRedisErrorLoggedAt = now;
-  console.error(
-    "rate-limit: Redis unreachable, using per-instance limits:",
-    error instanceof Error ? error.message : error,
-  );
-}
-
-function connectRedis(url: string): Redis {
-  // No offline queue and one retry: while Redis is unreachable a check
-  // fails fast and the limiter falls back to its in-process twin, rather
-  // than holding the request until Redis returns.
-  const client = new Redis(url, { maxRetriesPerRequest: 1, enableOfflineQueue: false });
-  // Without a listener ioredis reports every failed reconnect as an
-  // unhandled error event; the throttled log is the one signal we want.
-  client.on("error", logRedisError);
-  return client;
-}
+import { connectRedis, logRedisError } from "../lib/redis";
+import {
+  closedCustomerAuthRoute,
+  refuseCustomerTokenMinting,
+  sessionAuth,
+} from "../lib/session-auth";
 
 // Built once at module load — Medusa loads this file at boot, before the
 // server listens, so a refused DISABLE_RATE_LIMITS fails the boot rather than
@@ -67,8 +46,20 @@ function rateLimit(
 
 export default defineMiddlewares({
   routes: [
-    // Medusa auth (the OTP verify step lives here) — the strictest class.
+    // Customer sessions (auth plan phase 1): an `sst_` bearer becomes the
+    // signed-in customer for the rest of the request, or is dropped if the
+    // session is dead — see src/lib/session-auth.ts. A single-segment global
+    // matcher sorts ahead of every route-level authenticate() below it.
+    { matcher: "/store", middlewares: [sessionAuth] },
+    // Medusa auth — the strictest rate class.
     { matcher: "/auth", middlewares: [rateLimit] },
+    // Doors that would mint a customer credential outside the session
+    // table: the built-in route for our provider (sign-in goes through
+    // /store/siumora-auth/verify), and refresh/session exchange for a
+    // customer JWT. Dashboard users pass the latter two untouched.
+    { matcher: "/auth/customer/phone-otp", middlewares: [closedCustomerAuthRoute] },
+    { matcher: "/auth/token/refresh", middlewares: [refuseCustomerTokenMinting] },
+    { matcher: "/auth/session", middlewares: [refuseCustomerTokenMinting] },
     // The OTP send step. Its own mount: "/store/siumora" below does not
     // cover "/store/siumora-auth" (express mounts match whole segments).
     { matcher: "/store/siumora-auth", middlewares: [rateLimit] },
@@ -83,6 +74,7 @@ export default defineMiddlewares({
       matcher: "/admin/siumora/*",
       middlewares: [
         rateLimit,
+        sessionAuth,
         authenticate(["user", "customer"], ["session", "bearer"]),
       ],
     },

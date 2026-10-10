@@ -35,15 +35,15 @@ test("script-src names its hosts exactly — no wildcards", async () => {
   const policy = await csp();
   assert.equal(
     directive(policy, "script-src"),
-    "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://checkout.razorpay.com https://connect.facebook.net",
+    "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://checkout.razorpay.com https://connect.facebook.net https://challenges.cloudflare.com",
   );
 });
 
-test("the payment modal's iframe hosts are allowed, per-host", async () => {
+test("the payment modal's and the Turnstile iframe hosts are allowed, per-host", async () => {
   const policy = await csp();
   assert.equal(
     directive(policy, "frame-src"),
-    "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com",
+    "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com https://challenges.cloudflare.com",
   );
 });
 

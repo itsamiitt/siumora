@@ -165,7 +165,7 @@ test("issues a six-digit code with the core TTL and echoes it under OTP_ECHO", a
 test("does not echo the code without the explicit development flag", async () => {
   const { service: ids } = fakeIdentityStore();
   const service = new PhoneOtpAuthService({}, { otpEcho: false, transport: {} });
-  plugSender(service, { channel: "sms", send: async () => ({ ok: true }) });
+  plugSender(service, { channel: "sms", channels: ["sms"], send: async () => ({ ok: true, channel: "sms" }) });
 
   const response = await requestCode(service, ids, "9812345678");
 
@@ -191,7 +191,8 @@ test("a failing send is reported and the code stays valid", async () => {
   const service = echoService();
   plugSender(service, {
     channel: "sms",
-    send: async () => ({ ok: false, error: "provider down" }),
+    channels: ["sms"],
+    send: async () => ({ ok: false, channel: "sms", error: "provider down" }),
   });
 
   const issued = await requestCode(service, ids, "9812345678");
@@ -514,4 +515,27 @@ test("an unreadable settings table means the shipped limits, not a refused sign-
   assert.ok(Math.abs(ttlMs - OTP_TTL_SECONDS * 1000) < 5000);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0]!, /using defaults/);
+});
+
+test("the store route's delivery hints reach the sender, and the reply names the channel", async () => {
+  const { service: ids } = fakeIdentityStore();
+  const service = new PhoneOtpAuthService({}, { otpEcho: false, transport: {} });
+  const seen: unknown[] = [];
+  plugSender(service, {
+    channel: "whatsapp",
+    channels: ["whatsapp", "sms"],
+    send: async (_phone: string, _code: string, options?: unknown) => {
+      seen.push(options);
+      return { ok: true, channel: "sms" };
+    },
+  });
+
+  const response = (await service.authenticate(
+    { body: { phone: "9812345678", channel: "sms", allowSms: "false" } },
+    ids,
+  )) as Response;
+
+  assert.deepEqual(seen, [{ prefer: "sms", allowSms: false }]);
+  assert.equal(response.otp?.channel, "sms");
+  assert.deepEqual(response.otp?.channels, ["whatsapp", "sms"]);
 });

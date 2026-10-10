@@ -3111,6 +3111,7 @@ apiTest("the sign-in code goes out synchronously on the resolved channel", async
     settingsTtlMs: 0,
     otp: {
       channel: "whatsapp",
+      channels: ["whatsapp"],
       async send(phone, code) {
         sends.push({ phone, code });
         return { ok: true };
@@ -3144,6 +3145,7 @@ apiTest("a failing OTP channel is reported, not hidden", async () => {
     settingsTtlMs: 0,
     otp: {
       channel: "sms",
+      channels: ["sms"],
       async send() {
         return { ok: false, error: "HTTP 500: provider down" };
       },

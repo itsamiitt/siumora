@@ -32,4 +32,10 @@ export {
   type BuiltClients,
   type TransportEnv,
 } from "./transport.ts";
-export { createOtpSender, type OtpSender } from "./otp.ts";
+export {
+  createOtpSender,
+  type OtpChannel,
+  type OtpSendOptions,
+  type OtpSendResult,
+  type OtpSender,
+} from "./otp.ts";

@@ -2,7 +2,7 @@ import "server-only";
 
 import { cookies } from "next/headers";
 
-import type { AccountCustomer } from "@siumora/sdk";
+import type { AccountCustomer, SessionInfo } from "@siumora/sdk";
 
 import type { CommerceClient } from "./commerce-backend";
 
@@ -38,6 +38,8 @@ export async function apiAs(): Promise<CommerceClient> {
 export interface Viewer {
   readonly customer: AccountCustomer;
   readonly isAdmin: boolean;
+  /** The session behind the cookie (Medusa only) — step-up freshness. */
+  readonly session?: SessionInfo;
 }
 
 /**
@@ -53,19 +55,37 @@ export async function currentViewer(): Promise<Viewer | undefined> {
   try {
     const session = await api().withToken(token).getSession();
     if (!session.signedIn) return undefined;
-    return { customer: session.customer, isAdmin: session.isAdmin };
+    return {
+      customer: session.customer,
+      isAdmin: session.isAdmin,
+      ...(session.session ? { session: session.session } : {}),
+    };
   } catch {
     return undefined;
   }
 }
 
+/**
+ * How long the cookie outlives a rolling session's first expiry. Customer
+ * sessions slide 30 days from the last visit on the server, so a cookie
+ * pinned to the first expiry would sign out an active shopper on day 30.
+ * The server stays the judge — a dead token in a live cookie is simply
+ * anonymous — and 90 days bounds how long a forgotten cookie lingers.
+ */
+const ROLLING_COOKIE_SECONDS = 60 * 60 * 24 * 90;
+
 /** Only callable from a Server Action or Route Handler. */
-export async function startSession(token: string, expiresAt: string) {
+export async function startSession(
+  token: string,
+  expiresAt: string,
+  options: { rolling?: boolean } = {},
+) {
   const store = await cookies();
-  const maxAge = Math.max(
+  const untilExpiry = Math.max(
     60,
     Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000),
   );
+  const maxAge = options.rolling ? Math.max(untilExpiry, ROLLING_COOKIE_SECONDS) : untilExpiry;
 
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,

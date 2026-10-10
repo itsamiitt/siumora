@@ -42,13 +42,10 @@ import { SETTING_DEFAULTS } from "../../../../../modules/settings/settings";
  * phoneVerified: false unless the signed-in customer's stored phone equals
  * the submitted one — the same strict comparison as Fastify's
  * customerSignals (an unverified number must not launder an address into
- * the lower risk band). The customer arrives via req.auth_context when
- * Medusa's authenticate() middleware populates it; store routes get no
- * authenticate() by default, and middlewares.ts is owned elsewhere — until
- * an `authenticate("customer", ["bearer", "session"], { allowUnauthenticated:
- * true })` entry covers this route, every caller is honestly anonymous
- * (phoneVerified:false, isNewCustomer:true, successfulOrders:0), which is
- * also the correct answer for every guest.
+ * the lower risk band). The customer arrives via req.auth_context, which
+ * the session door (src/lib/session-auth.ts, mounted on /store) sets for a
+ * live storefront session — closing track-m row 9. A guest is honestly
+ * anonymous (phoneVerified:false, isNewCustomer:true, successfulOrders:0).
  */
 
 interface CartWire {

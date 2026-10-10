@@ -65,6 +65,9 @@ export const DEFAULT_RULES: readonly RateRule[] = [
   // costlier half: every hit is a paid WhatsApp/SMS message. Same bucket as
   // the verify step, exactly as the Fastify /auth/* rule covers both.
   { prefix: "/store/siumora-auth/", method: "POST", limit: 10, windowMs: 60_000, bucket: "auth" },
+  // Session reads (who am I, my devices) — browse tier, so a page render
+  // that asks twice never trips the sign-in ceiling above.
+  { prefix: "/store/siumora-auth/", limit: 120, windowMs: 60_000, bucket: "auth-read" },
   // Each checkout allocates an invoice number under a table lock, so a flood
   // here is contention on the hottest lock in the system.
   { prefix: "/store/siumora/checkout", method: "POST", limit: 12, windowMs: 60_000, bucket: "checkout" },

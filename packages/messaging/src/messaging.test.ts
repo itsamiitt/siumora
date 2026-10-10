@@ -147,7 +147,7 @@ test("the OTP send carries the code as the template's one parameter", async () =
   const sender = createOtpSender({ ...WA_ENV }, fetch);
 
   const result = await sender!.send("9876543210", "482913");
-  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(result, { ok: true, channel: "whatsapp" });
 
   const body = JSON.parse(String(requests[0]!.init.body));
   assert.equal(body.template.name, "siumora_otp");
@@ -161,4 +161,53 @@ test("an OTP provider failure is an outcome the route can route on", async () =>
   const result = await sender!.send("9876543210", "482913");
   assert.equal(result.ok, false);
   assert.match(result.error ?? "", /HTTP 500/);
+});
+
+test("a WhatsApp failure falls over to SMS and says so", async () => {
+  const { fetch, requests } = fakeFetch([
+    { status: 500, body: { error: "down" } },
+    { status: 200, body: { type: "success" } },
+  ]);
+  const sender = createOtpSender({ ...WA_ENV, ...SMS_ENV }, fetch);
+  assert.deepEqual(sender!.channels, ["whatsapp", "sms"]);
+
+  const result = await sender!.send("9876543210", "482913");
+  assert.deepEqual(result, { ok: true, channel: "sms", fellBack: true });
+  assert.equal(requests.length, 2);
+  assert.match(requests[1]!.url, /msg91/);
+});
+
+test("asking for SMS sends SMS first", async () => {
+  const { fetch, requests } = fakeFetch([{ status: 200, body: { type: "success" } }]);
+  const sender = createOtpSender({ ...WA_ENV, ...SMS_ENV }, fetch);
+
+  const result = await sender!.send("9876543210", "482913", { prefer: "sms" });
+  assert.deepEqual(result, { ok: true, channel: "sms" });
+  assert.equal(requests.length, 1);
+  assert.match(requests[0]!.url, /msg91/);
+});
+
+test("a spent SMS budget keeps WhatsApp and drops SMS entirely", async () => {
+  const { fetch, requests } = fakeFetch([{ status: 500, body: { error: "down" } }]);
+  const both = createOtpSender({ ...WA_ENV, ...SMS_ENV }, fetch);
+  const failed = await both!.send("9876543210", "482913", { allowSms: false });
+  assert.equal(failed.ok, false);
+  assert.equal(requests.length, 1, "no SMS attempted after WhatsApp failed");
+
+  const smsOnly = createOtpSender(SMS_ENV, fetch);
+  const refused = await smsOnly!.send("9876543210", "482913", { allowSms: false });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error ?? "", /SMS budget/);
+});
+
+test("a hung provider is cut off and the fallback still runs", async () => {
+  let call = 0;
+  const fetch = (async () => {
+    call += 1;
+    if (call === 1) return new Promise(() => {});
+    return { ok: true, status: 200, text: async () => "{}" };
+  }) as unknown as typeof globalThis.fetch;
+  const sender = createOtpSender({ ...WA_ENV, ...SMS_ENV }, fetch, { attemptTimeoutMs: 20 });
+  const result = await sender!.send("9876543210", "482913");
+  assert.deepEqual(result, { ok: true, channel: "sms", fellBack: true });
 });

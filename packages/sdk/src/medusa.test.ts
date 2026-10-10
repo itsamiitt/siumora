@@ -272,11 +272,6 @@ test("not-yet-ported surface refuses with 501 not_ported, never a wrong answer",
     assert.match(error.message, /listOrders .* M2/);
     return true;
   });
-  // getMetrics and the other admin reads went live with the M2 ops routes;
-  // the session trio is the surface still naming its phase.
-  await assert.rejects(client.signOut(), (error: unknown) =>
-    error instanceof NotPortedError,
-  );
   // Prepaid checkout refuses too — only the COD path is ported.
   await assert.rejects(
     client.checkout({
@@ -385,4 +380,74 @@ liveTest("live: an unknown variant is refused, structured", async () => {
     (error: unknown) =>
       error instanceof ApiError && error.status === 409 && error.code === "unavailable",
   );
+});
+
+// ── Sessions (auth plan phase 1) ──────────────────────────────────────────
+
+function scripted(answers: Record<string, unknown>) {
+  const calls: Array<{ method: string; url: string; body: unknown; auth: string | undefined }> = [];
+  const impl = (async (url: string, init: RequestInit) => {
+    const headers = init.headers as Record<string, string>;
+    calls.push({
+      method: String(init.method),
+      url: String(url),
+      body: init.body ? JSON.parse(String(init.body)) : undefined,
+      auth: headers.authorization,
+    });
+    const key = `${init.method} ${new URL(String(url)).pathname}`;
+    const body = answers[key];
+    if (body === undefined) return { ok: false, status: 404, json: async () => ({ error: "not_found" }) };
+    return { ok: true, status: 200, json: async () => body };
+  }) as unknown as typeof fetch;
+  return { impl, calls };
+}
+
+test("sign-in is one call to the verify route, and the session token is what comes back", async () => {
+  const envelope = {
+    ok: true,
+    token: "sst_" + "a".repeat(43),
+    expiresAt: "2026-11-09T00:00:00.000Z",
+    isAdmin: false,
+    claimedOrders: 0,
+    customer: { id: "cus_1", phone: "9812345678", maskedPhone: "98••••5678", name: "", email: null },
+  };
+  const { impl, calls } = scripted({ "POST /store/siumora-auth/verify": envelope });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  assert.deepEqual(await client.verifyOtp("98123 45678", "123456"), envelope);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0]!.body, { phone: "98123 45678", code: "123456" });
+});
+
+test("a code request carries the channel and the challenge token only when given", async () => {
+  const issued = { ok: true, maskedPhone: "98••••5678", expiresAt: "x", delivery: "sent", channel: "sms", channels: ["whatsapp", "sms"] };
+  const { impl, calls } = scripted({ "POST /store/siumora-auth/otp": issued });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  await client.requestOtp("9812345678");
+  await client.requestOtp("9812345678", { channel: "sms", turnstileToken: "tt" });
+  assert.deepEqual(calls[0]!.body, { phone: "9812345678" });
+  assert.deepEqual(calls[1]!.body, { phone: "9812345678", channel: "sms", turnstileToken: "tt" });
+});
+
+test("session reads, sign-out and device revocation ride the session bearer", async () => {
+  const token = "sst_" + "b".repeat(43);
+  const { impl, calls } = scripted({
+    "GET /store/siumora-auth/session": { signedIn: false },
+    "POST /store/siumora-auth/signout": { ok: true },
+    "POST /store/siumora-auth/signout-everywhere": { ok: true, revoked: 3 },
+    "GET /store/siumora-auth/sessions": { sessions: [] },
+    "DELETE /store/siumora-auth/sessions/sises_1": { ok: true, current: false },
+    "POST /store/siumora-auth/step-up": { ok: true, stepUpExpiresAt: "x" },
+  });
+  const anonymous = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  assert.deepEqual(await anonymous.getSession(), { signedIn: false });
+  assert.equal(calls.length, 0, "no token, no call");
+
+  const client = anonymous.withToken(token);
+  assert.deepEqual(await client.getSession(), { signedIn: false });
+  await client.signOut();
+  assert.deepEqual(await client.signOutEverywhere(), { ok: true, revoked: 3 });
+  assert.deepEqual(await client.listSessions(), []);
+  assert.deepEqual(await client.revokeSession("sises_1"), { ok: true, current: false });
+  assert.equal((await client.stepUp("123456")).ok, true);
+  assert.ok(calls.every((call) => call.auth === `Bearer ${token}`));
 });
