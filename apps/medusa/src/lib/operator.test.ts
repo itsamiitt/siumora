@@ -145,3 +145,16 @@ test("staff without an authenticator are refused while the setting requires one"
   // Phone operators already prove their phone with an OTP.
   assert.deepEqual(decideStaffMfa({ actorType: "customer", mfaEnabled: false, required: true }), { ok: true });
 });
+
+test("owners can change settings without MFA while other roles remain denied", () => {
+  for (const permission of ["settings:write", "auth:settings"] as const) {
+    assert.ok(decidePermission("owner", permission).ok);
+    assert.ok(decideStaffMfa({ actorType: "user", mfaEnabled: false, required: true, permission }).ok);
+    for (const role of ["viewer", "support", "operator"] as const) {
+      assert.equal(decidePermission(role, permission).ok, false);
+    }
+  }
+  for (const permission of ["orders:write", "metrics:read", "audit:read"] as const) {
+    assert.equal(decideStaffMfa({ actorType: "user", mfaEnabled: false, required: true, permission }).ok, false);
+  }
+});

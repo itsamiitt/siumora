@@ -169,7 +169,10 @@ export function decideStaffMfa(input: {
   actorType: "user" | "customer";
   mfaEnabled: boolean;
   required: boolean;
+  /** Settings remain accessible to permission-checked owners without enrollment. */
+  permission?: Permission;
 }): { ok: true } | { ok: false; refusal: Refusal } {
+  if (input.permission === "settings:write" || input.permission === "auth:settings") return { ok: true };
   if (input.actorType !== "user" || !input.required || input.mfaEnabled) return { ok: true };
   return { ok: false, refusal: MFA_REQUIRED };
 }

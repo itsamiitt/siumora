@@ -46,7 +46,7 @@ const StaffSecurityPage = () => {
         {settings && (
           <ToggleSetting
             label="Require two-step sign-in for staff"
-            hint="Dashboard users without an authenticator are refused the Siumora pages until they turn it on in their profile."
+            hint="Require an authenticator for Siumora operations. Owners can still view and change settings without enrolling. Existing two-step sign-in stays enabled on enrolled accounts."
             checked={settings.staffMfaRequired === true}
             disabled={busy}
             onChange={(next) => write("staff_mfa_required", next)}

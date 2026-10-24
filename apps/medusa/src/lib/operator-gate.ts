@@ -101,19 +101,21 @@ export async function requireOperator(
     return undefined;
   }
 
+  // Settings may be used without MFA, but only after the same role check.
+  const allowed = decidePermission(decision.role, permission);
+  if (!allowed.ok) {
+    res.status(allowed.refusal.code).json(allowed.refusal.body);
+    return undefined;
+  }
+
   const mfa = decideStaffMfa({
     actorType,
+    permission,
     mfaEnabled: auth?.mfa_enabled === true,
     required: actorType === "user" ? await staffMfaRequired(req) : false,
   });
   if (!mfa.ok) {
     res.status(mfa.refusal.code).json(mfa.refusal.body);
-    return undefined;
-  }
-
-  const allowed = decidePermission(decision.role, permission);
-  if (!allowed.ok) {
-    res.status(allowed.refusal.code).json(allowed.refusal.body);
     return undefined;
   }
 
