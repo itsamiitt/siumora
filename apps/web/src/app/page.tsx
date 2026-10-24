@@ -1,3 +1,4 @@
+import { getStorefrontContent } from "@/lib/storefront";
 import Image from "next/image";
 import Link from "next/link";
 import { SiumoraMark } from "@siumora/ui";
@@ -7,21 +8,21 @@ import { listCollections, listProducts } from "@/lib/catalog";
 
 
 export default async function HomePage() {
-  const [catalog, collections] = await Promise.all([listProducts(), listCollections()]);
+  const [catalog, collections, content] = await Promise.all([listProducts(), listCollections(), getStorefrontContent()]);
   const products = catalog.slice(0, 4);
   return (
     <div className="store-home">
       <section className="store-hero" aria-labelledby="hero-title">
         <div className="store-hero-copy">
-          <p className="store-eyebrow"><span className="store-small-rule" />The everyday, made a little special</p>
-          <h1 id="hero-title">Something given.<br /><span>Something kept.</span></h1>
-          <p className="store-hero-description">Little pieces. Lasting meaning.<br />Demi-fine jewellery for the moments that are yours.</p>
-          <Link href="/shop" className="store-button">Discover the collection <StoreIcon name="arrow" width="19" /></Link>
-          <Link href="/shop" className="store-text-link">Find a little something to give</Link>
-          <p className="store-hero-note">925 STERLING SILVER <span>·</span> 18K GOLD PVD</p>
+          <p className="store-eyebrow"><span className="store-small-rule" />{content.eyebrow}</p>
+          <h1 id="hero-title">{content.title}<br /><span>{content.subtitle}</span></h1>
+          <p className="store-hero-description">{content.description}</p>
+          <Link href={content.buttonHref} className="store-button">{content.buttonLabel} <StoreIcon name="arrow" width="19" /></Link>
+          <Link href={content.secondaryHref} className="store-text-link">{content.secondaryLabel}</Link>
+          <p className="store-hero-note">{content.note}</p>
         </div>
         <div className="store-hero-photo">
-          <Image src="/storefront/everyday-hero.webp" alt="Sunlit portrait with delicate gold jewellery and an ivory linen shirt" fill priority sizes="(min-width: 1024px) 56vw, 100vw" className="store-hero-image" />
+          <Image src={content.image} alt={content.imageAlt} unoptimized fill priority sizes="(min-width: 1024px) 56vw, 100vw" className="store-hero-image" />
           <div className="store-photo-label"><span>THE ART OF EVERYDAY</span><span>01 / SIUMORA</span></div>
         </div>
       </section>

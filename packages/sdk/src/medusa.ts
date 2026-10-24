@@ -1,3 +1,4 @@
+import { isStorefrontContent, type StorefrontContent } from "@siumora/core/storefront";
 import {
   calculateTotals,
   collectionSchema,
@@ -1173,6 +1174,12 @@ export class MedusaClient implements PublicSurface {
       "DELETE",
       `/store/siumora/wishlists/${encodeURIComponent(wishlistId)}/items/${encodeURIComponent(handle)}`,
     );
+  }
+
+  async getStorefrontContent(): Promise<StorefrontContent> {
+    const data = await this.request<{ content: unknown }>("GET", "/store/siumora/storefront", undefined, { revalidate: 5 });
+    if (!isStorefrontContent(data.content)) throw new Error("Invalid storefront content from backend");
+    return data.content;
   }
 
   async getStoreConfig(): Promise<{ paymentsEnabled: boolean; razorpayConfigured: boolean }> {

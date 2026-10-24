@@ -114,6 +114,18 @@ function plugSender(
 
 type Response = PhoneOtpAuthenticationResponse;
 
+test("unreadable saved channel credentials refuse OTP without issuing a challenge", async () => {
+  const { service: ids, identities } = fakeIdentityStore();
+  const service = new PhoneOtpAuthService({ __pg_connection__: { raw: async () => ({ rows: [
+    { key: "integration_whatsapp", value: "corrupted" },
+    { key: "integration_sms", value: "corrupted" },
+  ] }) } });
+  const response = await requestCode(service, ids, "9812345678");
+  assert.equal(response.success, false);
+  assert.equal(response.errorCode, "sign_in_unavailable");
+  assert.equal(identities.size, 0);
+});
+
 async function requestCode(
   service: PhoneOtpAuthService,
   ids: AuthIdentityProviderService,

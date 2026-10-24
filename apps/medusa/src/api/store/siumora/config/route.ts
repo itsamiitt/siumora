@@ -34,5 +34,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
 
   const settings = await cache.get();
   res.setHeader("Cache-Control", "no-store");
-  res.json(configEnvelope(settings, process.env));
+  // Credentials alone do not make Medusa prepaid checkout operational.
+  // The SDK currently refuses prepaid checkout until the payment provider is ported.
+  res.json({ ...configEnvelope(settings, process.env), razorpayConfigured: false });
 }

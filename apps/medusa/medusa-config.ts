@@ -153,17 +153,7 @@ export default defineConfig({
               // the Fastify app.ts enforces).
               otpEcho: process.env.OTP_ECHO === "true",
               appEnv: process.env.APP_ENV,
-              // Explicit rather than process.env wholesale, so the wiring
-              // is readable off the config. Missing credentials mean no
-              // sender; sign-in then refuses unless otpEcho covers dev.
-              transport: {
-                WHATSAPP_BSP_URL: process.env.WHATSAPP_BSP_URL,
-                WHATSAPP_BSP_KEY: process.env.WHATSAPP_BSP_KEY,
-                WHATSAPP_TEXT_TEMPLATE: process.env.WHATSAPP_TEXT_TEMPLATE,
-                WHATSAPP_OTP_TEMPLATE: process.env.WHATSAPP_OTP_TEMPLATE,
-                MSG91_AUTH_KEY: process.env.MSG91_AUTH_KEY,
-                MSG91_OTP_TEMPLATE_ID: process.env.MSG91_OTP_TEMPLATE_ID,
-              },
+              // Provider credentials and channel controls are resolved from encrypted runtime settings.
             },
           },
         ],

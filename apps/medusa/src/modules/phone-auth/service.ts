@@ -1,3 +1,4 @@
+import { providerConfiguration } from "../settings/providers.ts";
 /**
  * Phone-OTP as a Medusa auth module provider (design doc M1: "Phone-OTP auth
  * as a Medusa auth provider reusing packages/messaging's OTP sender").
@@ -190,8 +191,7 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
     this.options_ = options;
     this.container_ = container ?? {};
     this.logger_ = container?.logger;
-    // Channel resolution happens once, here — WhatsApp when its template is
-    // approved, else DLT SMS, else undefined (refuse or echo, below).
+    // Environment fallback and injected test transport; production resolves saved settings per send.
     this.sender_ = createOtpSender(
       options.transport ?? (process.env as TransportEnv),
     );
@@ -253,7 +253,13 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
     authIdentityProviderService: AuthIdentityProviderService,
     delivery_: { prefer?: OtpChannel; allowSms?: boolean } = {},
   ): Promise<AuthenticationResponse> {
-    if (!this.sender_ && this.options_.otpEcho !== true) {
+    let sender = this.sender_;
+    const pg = this.container_.__pg_connection__;
+    if (pg && !this.options_.transport) {
+      try { sender = createOtpSender((await providerConfiguration(pg)).effective); }
+      catch { return this.fail_({ errorCode: "sign_in_unavailable", error: "Sign-in settings are temporarily unavailable." }); }
+    }
+    if (!sender && this.options_.otpEcho !== true) {
       // No approved messaging channel and no explicit development echo.
       // Refusing is the honest answer: issuing a code nobody can receive
       // would look like sign-in working and fail at the second step forever.
@@ -315,8 +321,8 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
     // is every sign-in on the site) but the code stays valid for a retry.
     let delivery: PhoneOtpChallengeDetails["delivery"] = "not_configured";
     let channel: OtpChannel | undefined;
-    if (this.sender_) {
-      const outcome = await this.sender_.send(phone, issued.code, {
+    if (sender) {
+      const outcome = await sender.send(phone, issued.code, {
         ...(delivery_.prefer ? { prefer: delivery_.prefer } : {}),
         allowSms: delivery_.allowSms !== false,
       });
@@ -340,7 +346,7 @@ export class PhoneOtpAuthService extends AbstractAuthModuleProvider {
         expiresAt: issued.expiresAt.toISOString(),
         delivery,
         ...(channel ? { channel } : {}),
-        channels: this.sender_?.channels ?? [],
+        channels: sender?.channels ?? [],
         // Echoed only under the explicit development flag, never merely
         // because a provider happens to be missing.
         ...(this.options_.otpEcho === true ? { code: issued.code } : {}),

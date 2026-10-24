@@ -4,12 +4,7 @@ import { useEffect, useState } from "react";
 
 import { OpsError, opsFetch } from "../../../lib/ops";
 
-/**
- * Settings → Messaging (auth plan phase 3): which channels this server can
- * send sign-in codes and alerts on. Read-only by design — credentials live
- * in the server environment (/etc/siumora/medusa.env) and change with a
- * redeploy, never through a form an admin session could rewrite.
- */
+/** Messaging readiness from effective encrypted settings and environment fallback. */
 
 interface MessagingStatus {
   otp: { whatsapp: boolean; sms: boolean; echo: boolean };
@@ -27,7 +22,7 @@ const Row = ({ label, on, detail }: { label: string; on: boolean; detail: string
         {detail}
       </Text>
     </div>
-    <Badge color={on ? "green" : "grey"}>{on ? "Connected" : "Not set"}</Badge>
+    <Badge color={on ? "green" : "grey"}>{on ? "Configured" : "Not set"}</Badge>
   </div>
 );
 
@@ -45,8 +40,7 @@ const MessagingPage = () => {
     <Container className="p-6">
       <Heading level="h1">Messaging</Heading>
       <Text size="small" className="mt-1 text-ui-fg-subtle">
-        Codes go on WhatsApp first and fall back to SMS. To change a provider or template, update
-        the server environment and redeploy.
+        Codes go on WhatsApp first and fall back to SMS. Edit providers and templates in the Siumora Store control center.
       </Text>
       {refusal && <Text className="mt-4 text-ui-fg-subtle">{refusal}</Text>}
       {status && (

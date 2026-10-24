@@ -1,3 +1,5 @@
+import { providerConfiguration } from "../../../../../../modules/settings/providers";
+import { pgOf } from "../../../../../../lib/customer-signin";
 /**
  * POST /store/siumora/me/email/request — send a verification link to the
  * account's email (auth plan phase 4). Three a day per account, and only
@@ -39,7 +41,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     return;
   }
 
-  const transport = createTransport(process.env as TransportEnv);
+  const transport = createTransport((await providerConfiguration(pgOf(req))).effective as TransportEnv);
   if (!transport.channels.includes("email")) {
     res.status(503).json({ error: "email_unavailable", message: "Email is not connected yet. Try again later." });
     return;

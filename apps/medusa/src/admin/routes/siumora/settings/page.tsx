@@ -1,3 +1,6 @@
+import { StorefrontSettings } from "../../../lib/storefront-settings";
+import { ProviderSettings } from "../../../lib/provider-settings";
+import { ToggleSetting, useSiumoraSettings } from "../../../lib/settings-controls";
 import { defineRouteConfig } from "@medusajs/admin-sdk";
 import { CogSixTooth } from "@medusajs/icons";
 import { Button, Container, Heading, Input, Prompt, Switch, Text, toast } from "@medusajs/ui";
@@ -70,8 +73,12 @@ const SettingsPage = () => {
 
   return (
     <div className="flex flex-col gap-4">
+      <Container className="p-6"><Heading level="h1">Siumora control center</Heading><Text className="mt-2">Manage your storefront, checkout, providers, and account notifications.</Text><div className="mt-4 flex flex-wrap gap-4">{[["/products", "Products"], ["/categories", "Categories"], ["/collections", "Collections"], ["/orders", "Orders"], ["/inventory", "Inventory"], ["/promotions", "Promotions"], ["/settings/regions", "Regions & tax"], ["/settings/shipping-profiles", "Shipping"], ["/settings/customer-sign-in", "Customer sign-in"], ["/settings/staff-security", "Staff security"]].map(([to, label]) => <a key={to} href={`${window.location.pathname.split("/siumora/settings")[0]}${to}`} className="text-ui-fg-interactive">{label}</a>)}</div></Container>
+      <StorefrontSettings />
+      <ProviderSettings />
+      <NotificationSettings />
       <Container className="p-6">
-        <Heading level="h1">Runtime settings</Heading>
+        <Heading level="h1">Store control center</Heading>
         <div className="mt-4 flex items-center justify-between">
           <div>
             <Text weight="plus">Payments (kill-switch)</Text>
@@ -154,8 +161,13 @@ const SettingsPage = () => {
 };
 
 export const config = defineRouteConfig({
-  label: "Ops settings",
+  label: "Store control center",
   icon: CogSixTooth,
 });
 
 export default SettingsPage;
+
+function NotificationSettings() {
+  const { settings, refusal, busy, write } = useSiumoraSettings();
+  return <Container className="p-6"><Heading level="h2">Account notifications</Heading>{refusal ? <Text>{refusal}</Text> : settings ? <ToggleSetting label="New-device alerts" hint="Send WhatsApp alerts when a customer signs in on a new device. Requires an enabled, configured WhatsApp channel." checked={settings.newDeviceAlerts === true} disabled={busy} onChange={next => void write("new_device_alerts", next)} /> : <Text>Loading?</Text>}<Text size="small" className="mt-3 text-ui-fg-subtle">Phone-change alerts follow the WhatsApp channel setting. Verification emails follow the Resend channel setting.</Text></Container>;
+}

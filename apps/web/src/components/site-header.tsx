@@ -1,3 +1,4 @@
+import { getStorefrontContent } from "@/lib/storefront";
 import Link from "next/link";
 import { Suspense } from "react";
 import { SiumoraLockupHorizontal } from "@siumora/ui";
@@ -8,13 +9,13 @@ import { listCategories, listCollections } from "@/lib/catalog";
 import { StoreIcon } from "./store-icon";
 
 export async function SiteHeader() {
-  const [categories, collections] = await Promise.all([listCategories(), listCollections()]);
+  const [categories, collections, content] = await Promise.all([listCategories(), listCollections(), getStorefrontContent()]);
   const shopLinks = shopNavigation(categories);
   const collectionLinks = collectionNavigation(collections);
   return (
     <>
       <a href="#main-content" className="store-skip-link">Skip to content</a>
-      <div className="store-announcement"><Link href="/shipping">A little closer to you. Complimentary shipping on orders ₹999+ <span aria-hidden="true">↗</span></Link></div>
+      <div className="store-announcement"><Link href="/shipping">{content.announcement} <span aria-hidden="true">↗</span></Link></div>
       <header className="store-header">
         <div className="store-header-main store-container">
           <div className="store-header-left">

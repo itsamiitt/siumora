@@ -1,3 +1,5 @@
+// @ts-ignore -- workspace ESM types with CJS runtime
+import { DEFAULT_STOREFRONT, isStorefrontContent, type StorefrontContent } from "@siumora/core/storefront";
 /**
  * Pure settings logic — no Medusa imports, so node --test can strip-type it
  * (same convention as siumora-order/identity.ts). Everything the config
@@ -24,6 +26,7 @@
 import { DEFAULT_OTP_POLICY, type OtpPolicy } from "@siumora/core";
 
 export interface Settings {
+  readonly storefrontContent: StorefrontContent;
   /**
    * The kill-switch. False = checkout refuses and the storefront renders the
    * paused state; everything else keeps serving.
@@ -79,6 +82,7 @@ export interface Settings {
  * migration therefore seeds nothing.
  */
 export const SETTING_DEFAULTS: Settings = {
+  storefrontContent: DEFAULT_STOREFRONT,
   paymentsEnabled: true,
   codMaxOrder: 500000,
   codFee: 4900,
@@ -100,6 +104,7 @@ export const SETTING_DEFAULTS: Settings = {
 };
 
 export type SettingKey =
+  | "storefront_content"
   | "payments_enabled"
   | "cod_max_order"
   | "cod_fee"
@@ -160,6 +165,7 @@ function bool(prop: keyof Settings): SettingDefinition {
 }
 
 const DEFINITIONS: Record<SettingKey, SettingDefinition> = {
+  storefront_content: { prop: "storefrontContent", validate: isStorefrontContent, expected: "expected complete content, HTTPS or local image, and local button links" },
   payments_enabled: bool("paymentsEnabled"),
   cod_max_order: { prop: "codMaxOrder", validate: isPaise, expected: PAISE_EXPECTED },
   cod_fee: { prop: "codFee", validate: isPaise, expected: PAISE_EXPECTED },
@@ -181,7 +187,7 @@ const DEFINITIONS: Record<SettingKey, SettingDefinition> = {
 };
 
 export function isSettingKey(value: string): value is SettingKey {
-  return value in DEFINITIONS;
+  return Object.prototype.hasOwnProperty.call(DEFINITIONS, value);
 }
 
 /**

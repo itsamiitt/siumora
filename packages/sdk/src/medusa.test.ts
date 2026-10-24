@@ -1,5 +1,18 @@
 import assert from "node:assert/strict";
+import { DEFAULT_STOREFRONT } from "@siumora/core/storefront";
 import { test } from "node:test";
+
+test("storefront content uses the backend, short revalidation, and rejects malformed payloads", async () => {
+  let content: unknown = { ...DEFAULT_STOREFRONT, title: "Published in admin" };
+  const client = new MedusaClient({ baseUrl: "https://example.test", publishableKey: "pk_test", fetch: (async (url: URL | RequestInfo, init?: RequestInit) => {
+    assert.equal(String(url), "https://example.test/store/siumora/storefront");
+    assert.equal((init as RequestInit & { next: { revalidate: number } }).next.revalidate, 5);
+    return Response.json({ content });
+  }) as typeof fetch });
+  assert.equal((await client.getStorefrontContent()).title, "Published in admin");
+  content = { ...DEFAULT_STOREFRONT, buttonHref: "javascript:alert(1)" };
+  await assert.rejects(client.getStorefrontContent(), /Invalid storefront/);
+});
 
 import { calculateTotals, productSchema } from "@siumora/core";
 

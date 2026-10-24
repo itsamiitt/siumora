@@ -1,3 +1,4 @@
+import { providerConfiguration } from "../modules/settings/providers.ts";
 import type { MedusaRequest } from "@medusajs/framework/http";
 
 // prettier-ignore -- single line so @ts-ignore reaches the specifier
@@ -39,13 +40,16 @@ export function phoneChangedMessage(maskedNewPhone: string, at: Date): string {
   );
 }
 
-export function sendSecurityAlert(
+export async function sendSecurityAlert(
   req: MedusaRequest,
   phone: string,
   body: string,
   templateKey: "security_new_device" | "security_phone_changed",
 ): Promise<boolean> {
-  const transport = createTransport(process.env as TransportEnv);
+  let env: TransportEnv;
+  try { env = (await providerConfiguration(req.scope.resolve("__pg_connection__"))).effective; }
+  catch { return false; }
+  const transport = createTransport(env);
   if (!transport.channels.includes("whatsapp")) return Promise.resolve(false);
 
   const logger = req.scope.resolve("logger") as { warn(message: string): void };
