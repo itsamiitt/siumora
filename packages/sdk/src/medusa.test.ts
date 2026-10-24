@@ -29,6 +29,7 @@ import {
 const PRODUCT_FIXTURE = {
   id: "prod_01KYVRRM4N3K8AA0MXJHFF44K3",
   handle: "petal-studs",
+  collection: { id: "pcol_everyday", handle: "everyday" },
   title: "Petal Studs",
   subtitle: "The four-circle mark, worn small.",
   description:
@@ -114,19 +115,42 @@ test("mapProduct: the fixture lands as a schema-valid core Product", () => {
   assert.equal(product.hsn, "7113");
   assert.equal(product.gstSlab, 5);
   assert.equal(product.piercedJewellery, true);
-  assert.deepEqual(product.collections, ["everyday", "gifting"]);
-  // Paise come from metadata, lossless — never through the ×100 fallback.
+  assert.deepEqual(product.collections, ["everyday"]);
+  // Native contextual prices are converted to integer paise.
   assert.deepEqual(product.variants[0]!.price, { mrp: 249000, selling: 199000 });
   assert.equal(product.variants[0]!.inventory, 24);
   assert.equal(product.images[0]!.width, 1200);
 });
 
-test("mapProduct: falls back to calculated_price × 100 when metadata is absent", () => {
+test("mapProduct: uses calculated_price with no price metadata", () => {
   const stripped = structuredClone(PRODUCT_FIXTURE);
   stripped.variants[0]!.metadata = {} as (typeof stripped.variants)[0]["metadata"];
   const product = mapProduct(stripped);
   // MRP collapses to selling when the lossless channel is gone.
   assert.deepEqual(product.variants[0]!.price, { mrp: 199000, selling: 199000 });
+});
+
+test("native price edits win over stale selling metadata", () => {
+  const edited = structuredClone(PRODUCT_FIXTURE);
+  edited.variants[0]!.calculated_price.calculated_amount = 1790.50;
+  assert.deepEqual(mapProduct(edited).variants[0]!.price, {
+    mrp: 249000, selling: 179050,
+  });
+});
+
+test("missing contextual price cannot silently fall back to stale metadata", () => {
+  const broken = structuredClone(PRODUCT_FIXTURE);
+  broken.variants[0]!.calculated_price = { calculated_amount: null } as never;
+  assert.throws(() => mapProduct(broken), /no usable price/);
+});
+
+test("cart line price wins over stale variant metadata and later catalog changes", () => {
+  const item = structuredClone(CART_ITEM_FIXTURE);
+  item.unit_price = 1790.50;
+  item.variant.metadata.price_paise = 229000;
+  const line = mapCartLine(item);
+  assert.equal(line.unitPrice, 179050);
+  assert.equal(calculateTotals([line], { interState: false, shipping: 0 }).subtotal, 358100);
 });
 
 test("mapProduct: a product without a gst_slab is a loud error, not a guess", () => {
@@ -143,6 +167,79 @@ test("mapCollection: description rides metadata", () => {
     metadata: { description: "Pieces for every day." },
   });
   assert.equal(collection.description, "Pieces for every day.");
+});
+
+test("native thumbnail and material edits override old gallery order and seed metadata", () => {
+  const product = mapProduct({ ...PRODUCT_FIXTURE, thumbnail: "/uploads/new-photo.webp", material: "Gold vermeil",
+    images: [...PRODUCT_FIXTURE.images, { url: "/uploads/new-photo.webp", metadata: { alt: "New photo", width: 800, height: 1000 } }],
+  });
+  assert.equal(product.material, "Gold vermeil");
+  assert.equal(product.images[0]!.url, "/uploads/new-photo.webp");
+  assert.equal(product.images[0]!.alt, "New photo");
+  assert.equal(product.images.length, 2);
+  assert.equal(mapProduct({ ...PRODUCT_FIXTURE, material: "" }).material, "");
+});
+
+test("a thumbnail-only product retains its backend image", () => {
+  const product = mapProduct({ ...PRODUCT_FIXTURE, images: [], thumbnail: "/uploads/only-photo.webp" });
+  assert.equal(product.images[0]!.url, "/uploads/only-photo.webp");
+});
+
+test("removing native collection membership does not resurrect stale seed metadata", () => {
+  const product = { ...PRODUCT_FIXTURE, collection: null };
+  assert.deepEqual(mapProduct(product).collections, []);
+});
+
+test("catalog reads all pages and filters categories by backend ID, not product title", async () => {
+  const offsets: number[] = [];
+  const client = new MedusaClient({ baseUrl: "http://example.test", publishableKey: "pk_test",
+    fetch: (async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/store/regions") return Response.json({ regions: [{ id: "in", currency_code: "inr" }] });
+      assert.equal(url.searchParams.get("category_id[]"), "pcat_bracelets");
+      assert.ok(url.searchParams.get("fields")?.includes("*collection"));
+      const offset = Number(url.searchParams.get("offset"));
+      offsets.push(offset);
+      const size = offset === 0 ? 100 : 1;
+      return Response.json({ count: 101, products: Array.from({ length: size }, (_, i) => ({
+        ...PRODUCT_FIXTURE, id: `product_${offset + i}`, title: "A name with no category keyword",
+      })) });
+    }) as typeof fetch,
+  });
+  assert.equal((await client.listProductsInCategory("pcat_bracelets")).length, 101);
+  assert.deepEqual(offsets, [0, 100]);
+});
+
+test("collection filtering uses the current native collection ID", async () => {
+  const client = new MedusaClient({ baseUrl: "http://example.test", publishableKey: "pk_test",
+    fetch: (async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/store/regions") return Response.json({ regions: [{ id: "in", currency_code: "inr" }] });
+      if (url.pathname === "/store/collections") return Response.json({ count: 1,
+        collections: [{ id: "pcol_new", handle: "new-edit", title: "New edit" }],
+      });
+      assert.equal(url.searchParams.get("collection_id[]"), "pcol_new");
+      return Response.json({ count: 1, products: [{ ...PRODUCT_FIXTURE,
+        collection: { id: "pcol_new", handle: "new-edit" },
+      }] });
+    }) as typeof fetch,
+  });
+  const products = await client.listProducts({ collection: "new-edit" });
+  assert.deepEqual(products[0]!.collections, ["new-edit"]);
+  assert.deepEqual(await client.listProducts({ collection: "deleted-edit" }), []);
+});
+
+test("category and collection lists follow server pagination even with a smaller page cap", async () => {
+  const client = new MedusaClient({ baseUrl: "http://example.test", publishableKey: "pk_test",
+    fetch: (async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      const offset = Number(url.searchParams.get("offset"));
+      const item = { id: `id_${offset}`, name: `Category ${offset}`, title: `Collection ${offset}`, handle: `handle-${offset}`, parent_category_id: null };
+      return Response.json({ count: 2, [url.pathname === "/store/product-categories" ? "product_categories" : "collections"]: [item] });
+    }) as typeof fetch,
+  });
+  assert.deepEqual((await client.listCategories()).map(c => c.name), ["Category 0", "Category 1"]);
+  assert.deepEqual((await client.listCollections()).map(c => c.title), ["Collection 0", "Collection 1"]);
 });
 
 test("mapCartLine: paise, slab and hygiene flag survive the trip", () => {
@@ -308,9 +405,10 @@ liveTest("live: listProducts serves the seeded catalogue, schema-valid", async (
   }
 });
 
-liveTest("live: collection filter uses full membership, not just the primary", async () => {
+liveTest("live: collection filter follows native collection assignment", async () => {
   const gifting = await liveClient().listProducts({ collection: "gifting" });
-  assert.ok(gifting.some((product) => product.handle === "petal-studs"));
+  const all = await liveClient().listProducts();
+  assert.deepEqual(gifting.map(p => p.id).sort(), all.filter(p => p.collections.includes("gifting")).map(p => p.id).sort());
 });
 
 liveTest("live: search rides core's scorer", async () => {

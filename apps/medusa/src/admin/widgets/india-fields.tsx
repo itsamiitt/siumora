@@ -7,15 +7,13 @@ import {
   missingFields,
   paiseToRupees,
   parseProductFields,
-  parseVariantFields,
+  parseMrp,
 } from "../lib/india-fields";
 import { opsFetch } from "../lib/ops";
 
 /**
- * India fields (design doc M4): HSN, GST slab, and integer-paise MRP/price
- * on the product page — the statutory truth invoicing and GSTR-1 read
- * (product.metadata.hsn / gst_slab, variant.metadata.mrp_paise /
- * price_paise, exactly as the seed writes them).
+ * India fields: HSN, GST slab and MRP. Selling prices are edited in native
+ * Medusa pricing so this widget cannot create an independent selling price.
  *
  * The widget refuses an invalid save (validation in ../lib/india-fields.ts,
  * pure and tested) and banners a product still missing any statutory field —
@@ -38,7 +36,6 @@ interface ProductPayload {
 
 interface VariantDraft {
   mrp: string;
-  price: string;
 }
 
 const IndiaFieldsWidget = ({ data }: { data: { id: string } }) => {
@@ -68,10 +65,6 @@ const IndiaFieldsWidget = ({ data }: { data: { id: string } }) => {
             typeof meta.mrp_paise === "number"
               ? paiseToRupees(meta.mrp_paise)
               : "",
-          price:
-            typeof meta.price_paise === "number"
-              ? paiseToRupees(meta.price_paise)
-              : "",
         };
       }
       setVariantDrafts(drafts);
@@ -94,16 +87,16 @@ const IndiaFieldsWidget = ({ data }: { data: { id: string } }) => {
       toast.error(parsedProduct.message);
       return;
     }
-    const variantUpdates: Array<{ id: string; mrpPaise: number; pricePaise: number }> = [];
+    const variantUpdates: Array<{ id: string; mrpPaise: number }> = [];
     for (const variant of product.variants ?? []) {
       const draft = variantDrafts[variant.id];
       if (!draft) continue;
-      const parsed = parseVariantFields(draft);
+      const parsed = parseMrp(draft.mrp);
       if (!parsed.ok) {
         toast.error(`${variant.title ?? variant.id}: ${parsed.message}`);
         return;
       }
-      variantUpdates.push({ id: variant.id, ...parsed.value });
+      variantUpdates.push({ id: variant.id, mrpPaise: parsed.value });
     }
 
     setSaving(true);
@@ -118,7 +111,7 @@ const IndiaFieldsWidget = ({ data }: { data: { id: string } }) => {
         await opsFetch(`/admin/products/${product.id}/variants/${update.id}`, {
           method: "POST",
           body: JSON.stringify({
-            metadata: { mrp_paise: update.mrpPaise, price_paise: update.pricePaise },
+            metadata: { mrp_paise: update.mrpPaise },
           }),
         });
       }
@@ -138,7 +131,6 @@ const IndiaFieldsWidget = ({ data }: { data: { id: string } }) => {
                 metadata: {
                   ...variant.metadata,
                   mrp_paise: update.mrpPaise,
-                  price_paise: update.pricePaise,
                 },
               }
             : variant;
@@ -188,10 +180,13 @@ const IndiaFieldsWidget = ({ data }: { data: { id: string } }) => {
       </div>
       <div className="px-6 py-4">
         <Text size="small" weight="plus" className="mb-2">
-          Variant pricing (rupees — stored as integer paise)
+          Variant MRP (rupees)
+        </Text>
+        <Text size="small" className="mb-2">
+          Set selling prices in the variant Pricing section. MRP must cover the selling price.
         </Text>
         {(product.variants ?? []).map((variant) => (
-          <div key={variant.id} className="mb-2 grid grid-cols-3 items-center gap-4">
+          <div key={variant.id} className="mb-2 grid grid-cols-2 items-center gap-4">
             <Text size="small">{variant.title ?? variant.id}</Text>
             <Input
               value={variantDrafts[variant.id]?.mrp ?? ""}
@@ -200,24 +195,10 @@ const IndiaFieldsWidget = ({ data }: { data: { id: string } }) => {
                   ...drafts,
                   [variant.id]: {
                     mrp: event.target.value,
-                    price: drafts[variant.id]?.price ?? "",
                   },
                 }))
               }
               placeholder="MRP ₹"
-            />
-            <Input
-              value={variantDrafts[variant.id]?.price ?? ""}
-              onChange={(event) =>
-                setVariantDrafts((drafts) => ({
-                  ...drafts,
-                  [variant.id]: {
-                    mrp: drafts[variant.id]?.mrp ?? "",
-                    price: event.target.value,
-                  },
-                }))
-              }
-              placeholder="Price ₹"
             />
           </div>
         ))}

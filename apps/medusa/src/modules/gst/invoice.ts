@@ -92,8 +92,8 @@ export interface InvoiceLineWire extends OrderLineWire {
  * STRICT where the order-read card is lenient: an invoice line without a
  * valid GST slab or an HSN code cannot go on a statutory document, so the
  * issue is refused (thrown) rather than issued with a hole where the tax
- * treatment belongs. Money reads the same lossless channel as everywhere
- * else (variant metadata paise first — linePaise).
+ * treatment belongs. Selling prices come from the persisted order line
+ * through linePaise, never from current catalog selling metadata.
  */
 export function toInvoiceLines(items: ReadonlyArray<InvoiceLineWire>): CartLine[] {
   if (items.length === 0) {

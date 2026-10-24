@@ -6,7 +6,7 @@ import { Display, MicroLabel } from "@siumora/ui";
 
 import { ProductCard } from "@/components/product-card";
 import { SearchInput } from "@/components/search-input";
-import { listProducts } from "@/lib/catalog";
+import { listProducts, listCollections } from "@/lib/catalog";
 
 export const metadata: Metadata = {
   title: "Search",
@@ -23,7 +23,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
   const { q = "" } = await searchParams;
   const query = q.trim();
 
-  const products = await listProducts();
+  const [products, collections] = await Promise.all([listProducts(), listCollections()]);
   const hits = query ? searchProducts(products, query) : [];
 
   return (
@@ -63,13 +63,13 @@ export default async function SearchPage({ searchParams }: PageProps) {
             Try a different word, or start here.
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
-            {["Everyday", "Gifting", "The Petal Edit"].map((name) => (
+            {collections.map((collection) => (
               <Link
-                key={name}
-                href={`/collections/${name.toLowerCase().replace(/\s+/g, "-")}`}
+                key={collection.id}
+                href={`/collections/${encodeURIComponent(collection.handle)}`}
                 className="border border-content/20 px-4 py-2 transition-colors hover:border-accent-ink hover:text-accent-ink"
               >
-                <MicroLabel>{name}</MicroLabel>
+                <MicroLabel>{collection.title}</MicroLabel>
               </Link>
             ))}
           </div>

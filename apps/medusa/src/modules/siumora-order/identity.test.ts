@@ -97,13 +97,21 @@ test("majorToPaise refuses an amount that is not integer paise", () => {
   assert.throws(() => majorToPaise(Number.POSITIVE_INFINITY), /does not convert/);
 });
 
-test("linePaise prefers the lossless metadata channel", () => {
+test("linePaise preserves purchased price after catalog metadata changes", () => {
   const line = {
     quantity: 2,
     unit_price: 1990,
-    variant: { metadata: { price_paise: 199000, mrp_paise: 249000 } },
+    variant: { metadata: { price_paise: 229000, mrp_paise: 249000 } },
   };
   assert.deepEqual(linePaise(line), { unitPrice: 199000, mrp: 249000 });
+});
+
+test("linePaise refuses a missing saved price instead of guessing from metadata", () => {
+  for (const unit_price of [null, undefined]) {
+    assert.throws(() => linePaise({ quantity: 1, unit_price,
+      variant: { metadata: { price_paise: 199000 } },
+    }), /unit_price is missing/);
+  }
 });
 
 test("linePaise falls back to majors x 100, and prices MRP at selling when absent", () => {

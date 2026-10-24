@@ -82,7 +82,7 @@ const goldStuds = {
   },
 };
 
-test("toInvoiceLines reads the lossless paise channel and the product's tax fields", () => {
+test("toInvoiceLines reads saved line prices and the product's tax fields", () => {
   const [line] = toInvoiceLines([goldStuds]);
   assert.deepEqual(line, {
     variantId: "variant_studs",
@@ -98,6 +98,12 @@ test("toInvoiceLines reads the lossless paise channel and the product's tax fiel
     hsn: "7113",
     piercedJewellery: true,
   });
+});
+
+test("later catalog selling-price edits do not change invoice line amounts", () => {
+  const edited = structuredClone(goldStuds);
+  edited.variant.metadata.price_paise = 229000;
+  assert.equal(toInvoiceLines([edited])[0]!.unitPrice, 199000);
 });
 
 test("toInvoiceLines refuses a line that cannot go on a statutory document", () => {

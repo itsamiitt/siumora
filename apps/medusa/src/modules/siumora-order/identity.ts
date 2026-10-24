@@ -99,16 +99,17 @@ export interface OrderLineWire {
 }
 
 /**
- * Integer paise for an order line, the same way the transport reads them
- * (packages/sdk/src/medusa.ts variantPrice): the seed's lossless
- * `price_paise`/`mrp_paise` metadata first, Medusa's major-unit amount × 100
- * only as the fallback, and a variant without an MRP is priced at MRP.
+ * Persisted line prices converted to integer paise. Live variant selling
+ * metadata cannot change an order or its invoice after purchase.
+ * MRP remains metadata-backed until transaction metadata is snapshotted.
  */
 export function linePaise(line: OrderLineWire): { unitPrice: number; mrp: number } {
   const metadata = line.variant?.metadata ?? {};
-  const unitPrice =
-    metadataPaise(metadata.price_paise) ??
-    majorToPaise(wireNumber(line.unit_price, "unit_price"));
+  // Persisted cart/order prices are authoritative, including after catalog edits.
+  if (line.unit_price === null || line.unit_price === undefined) {
+    throw new Error("unit_price is missing on the wire");
+  }
+  const unitPrice = majorToPaise(wireNumber(line.unit_price, "unit_price"));
   const mrp = metadataPaise(metadata.mrp_paise) ?? unitPrice;
   return { unitPrice, mrp };
 }

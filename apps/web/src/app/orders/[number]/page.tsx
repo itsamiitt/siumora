@@ -280,7 +280,7 @@ export default async function OrderPage({ params }: PageProps) {
 
       <div className="mt-10 text-center">
         <Link
-          href="/collections/everyday"
+          href="/shop"
           className="border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
         >
           <MicroLabel>Keep looking</MicroLabel>

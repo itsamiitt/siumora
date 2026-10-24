@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { cacheLife } from "next/cache";
 import { notFound } from "next/navigation";
 
-import { lowestPrice } from "@siumora/core";
+import { lowestPrice, type Product, type Review } from "@siumora/core";
 import { breadcrumbJsonLd, productJsonLd, productMetadata } from "@siumora/seo";
 import { CollectionTitle, Display, Price, TrustRow } from "@siumora/ui";
 
@@ -48,24 +48,12 @@ export async function generateMetadata({
   return productMetadata(product);
 }
 
-export default async function ProductPage({ params }: PageProps) {
-  // The whole page is cacheable: nothing on it is per-visitor. Saying so
-  // explicitly is what lets the product JSON-LD read the clock for
-  // priceValidUntil — an uncached read would pin it to the build.
+/** Only the clock-dependent JSON-LD is cached, keyed by the current product. */
+async function ProductStructuredData({ product, reviews }: { product: Product; reviews: Review[] }) {
   "use cache";
   cacheLife("days");
-
-  const { handle } = await params;
-  const product = await getProduct(handle);
-  if (!product) notFound();
-
-  const price = lowestPrice(product);
-  const reviews = await listReviews(product.handle);
-
   const collectionHandle = product.collections[0];
-
   return (
-    <div className="mx-auto max-w-6xl px-5 py-12">
       <JsonLdScript
         data={[
           productJsonLd(product, { reviews }),
@@ -83,6 +71,19 @@ export default async function ProductPage({ params }: PageProps) {
           ]),
         ]}
       />
+  );
+}
+
+export default async function ProductPage({ params }: PageProps) {
+  const { handle } = await params;
+  const product = await getProduct(handle);
+  if (!product) notFound();
+  const price = lowestPrice(product);
+  const reviews = await listReviews(product.handle);
+
+  return (
+    <div className="mx-auto max-w-6xl px-5 py-12">
+      <ProductStructuredData product={product} reviews={reviews} />
 
       <TrackViewItem
         item={itemFromProduct(product)}
@@ -91,6 +92,7 @@ export default async function ProductPage({ params }: PageProps) {
 
       <div className="grid gap-12 lg:grid-cols-2">
         <ProductGallery
+          key={`${product.id}:${product.images.map((image) => image.url).join("|")}`}
           images={product.images}
           title={product.title}
           handle={product.handle}

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   missingFields,
+  parseMrp,
   parseProductFields,
   parseVariantFields,
   paiseToRupees,
@@ -49,7 +50,7 @@ test("MRP below the selling price is refused — that is a strike-through lie", 
 test("the incomplete banner names what is missing", () => {
   assert.deepEqual(
     missingFields({ metadata: {}, variants: [{ metadata: {} }] }),
-    ["HSN", "GST slab", "variant MRP/price paise"],
+    ["HSN", "GST slab", "variant MRP"],
   );
   assert.deepEqual(
     missingFields({
@@ -58,4 +59,14 @@ test("the incomplete banner names what is missing", () => {
     }),
     [],
   );
+});
+
+test("MRP can be saved without a second selling-price field", () => {
+  assert.deepEqual(parseMrp("2490.50"), { ok: true, value: 249050 });
+  for (const value of ["", "0", "-1", "1.005", "999999999999999999"]) {
+    assert.equal(parseMrp(value).ok, false);
+  }
+  assert.deepEqual(missingFields({ metadata: { hsn: "7113", gst_slab: 5 },
+    variants: [{ metadata: { mrp_paise: 249000 } }],
+  }), []);
 });

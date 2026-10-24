@@ -114,8 +114,12 @@ test("mobile menu exposes collections and utilities, then closes on Escape and n
   const nav = page.getByRole("navigation", { name: "Mobile navigation" });
   const menu = page.getByRole("dialog", { name: "Shop menu" });
   await expect(nav).toBeVisible();
-  for (const label of ["All jewellery", "Earrings", "Necklaces", "Rings", "Everyday", "Gifting", "The Petal Edit", "Saved pieces", "Your account"]) {
+  for (const label of ["All jewellery", "Everyday", "Gifting", "The Petal Edit", "Saved pieces", "Your account"]) {
     await expect(nav.getByRole("link", { name: label })).toBeVisible();
+  }
+  // Fastify has no category API: do not invent categories from product titles.
+  for (const label of ["Earrings", "Necklaces", "Rings"]) {
+    await expect(nav.getByRole("link", { name: label, exact: true })).toHaveCount(0);
   }
   await expect(menu.getByRole("searchbox", { name: "Search jewellery" })).toBeVisible();
   await expect(menu.getByRole("button", { name: /Deliver to/ })).toBeVisible();

@@ -55,7 +55,7 @@ async function WishlistPageContents() {
           Save a piece and it waits here for you.
         </p>
         <Link
-          href="/collections/everyday"
+          href="/shop"
           className="mt-8 border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
         >
           <MicroLabel>Shop everyday</MicroLabel>

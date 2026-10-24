@@ -15,7 +15,7 @@ import { api } from "./api";
  * short interval rather than fetched fresh on every render.
  */
 
-const CATALOG_REVALIDATE_SECONDS = 60;
+const CATALOG_REVALIDATE_SECONDS = 5;
 
 export async function listProducts(): Promise<Product[]> {
   return api().listProducts({}, { revalidate: CATALOG_REVALIDATE_SECONDS });
@@ -73,4 +73,17 @@ export async function findVariant(
     if (variant) return { product, variant };
   }
   return undefined;
+}
+
+/** Only expose categories actually supported by the selected backend. */
+export async function listCategories() {
+  const client = api();
+  return "listCategories" in client
+    ? client.listCategories({ revalidate: CATALOG_REVALIDATE_SECONDS }) : [];
+}
+
+export async function listProductsInCategory(categoryId: string): Promise<Product[]> {
+  const client = api();
+  return "listProductsInCategory" in client
+    ? client.listProductsInCategory(categoryId, { revalidate: CATALOG_REVALIDATE_SECONDS }) : [];
 }

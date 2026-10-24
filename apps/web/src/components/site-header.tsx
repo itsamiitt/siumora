@@ -3,10 +3,14 @@ import { Suspense } from "react";
 import { SiumoraLockupHorizontal } from "@siumora/ui";
 import { CartBadge } from "./cart-badge";
 import { MobileMenu, MobileMenuFallback } from "./mobile-menu";
-import { SHOP_NAV } from "./site-navigation";
+import { shopNavigation, collectionNavigation } from "./site-navigation";
+import { listCategories, listCollections } from "@/lib/catalog";
 import { StoreIcon } from "./store-icon";
 
-export function SiteHeader() {
+export async function SiteHeader() {
+  const [categories, collections] = await Promise.all([listCategories(), listCollections()]);
+  const shopLinks = shopNavigation(categories);
+  const collectionLinks = collectionNavigation(collections);
   return (
     <>
       <a href="#main-content" className="store-skip-link">Skip to content</a>
@@ -14,7 +18,7 @@ export function SiteHeader() {
       <header className="store-header">
         <div className="store-header-main store-container">
           <div className="store-header-left">
-            <Suspense fallback={<MobileMenuFallback />}><MobileMenu /></Suspense>
+            <Suspense fallback={<MobileMenuFallback />}><MobileMenu shopLinks={shopLinks} collectionLinks={collectionLinks} /></Suspense>
             <span className="store-header-note">JEWELLERY FOR THE EVERYDAY</span>
           </div>
           <Link href="/" aria-label="Siumora — home" className="store-logo"><SiumoraLockupHorizontal size={36} /></Link>
@@ -26,10 +30,9 @@ export function SiteHeader() {
           </div>
         </div>
         <nav aria-label="Shop jewellery" className="store-desktop-nav">
-          {SHOP_NAV.map((item) => <Link key={item.href} href={item.href}>{item.label}</Link>)}
+          {shopLinks.map((item) => <Link key={item.href} href={item.href}>{item.label}</Link>)}
           <span className="store-nav-divider" aria-hidden="true" />
-          <Link href="/collections/the-petal-edit">The Petal Edit</Link>
-          <Link href="/collections/gifting">Gifting</Link>
+          {collectionLinks.map((item) => <Link key={item.href} href={item.href}>{item.label}</Link>)}
           <Link href="/#our-story">Our story</Link>
         </nav>
       </header>

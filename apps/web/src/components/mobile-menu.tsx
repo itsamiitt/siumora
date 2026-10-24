@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { SiumoraLockupHorizontal } from "@siumora/ui";
 import { PincodeChecker } from "./pincode-checker";
-import { COLLECTION_NAV, SHOP_NAV } from "./site-navigation";
+import type { NavigationLink } from "./site-navigation";
 import { ThemeToggle } from "./theme-toggle";
 import { StoreIcon } from "./store-icon";
 
@@ -14,7 +14,7 @@ export function MobileMenuFallback() {
   return <button type="button" aria-label="Menu" aria-expanded={false} className="store-icon-button store-menu-trigger" disabled><StoreIcon name="menu" /></button>;
 }
 
-export function MobileMenu() {
+export function MobileMenu({ shopLinks, collectionLinks }: { shopLinks: NavigationLink[]; collectionLinks: NavigationLink[] }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const panel = useRef<HTMLDialogElement>(null);
@@ -45,8 +45,8 @@ export function MobileMenu() {
           <form action="/search" className="store-menu-search" onSubmit={close} role="search"><label htmlFor="menu-search" className="sr-only">Search jewellery</label><input id="menu-search" type="search" name="q" placeholder="Find your everyday piece" /><button type="submit" aria-label="Search"><StoreIcon name="search" /></button></form>
           <nav aria-label="Mobile navigation">
             <p className="store-eyebrow">Find something to keep</p>
-            {SHOP_NAV.map((item) => <Link key={item.href} href={item.href} onClick={close} className="store-mobile-category">{item.label}<StoreIcon name="arrow" width="18" /></Link>)}
-            <div className="store-mobile-collections">{COLLECTION_NAV.map((item) => <Link key={item.href} href={item.href} onClick={close}>{item.label}</Link>)}<Link href="/#our-story" onClick={close}>Our story</Link></div>
+            {shopLinks.map((item) => <Link key={item.href} href={item.href} onClick={close} className="store-mobile-category">{item.label}<StoreIcon name="arrow" width="18" /></Link>)}
+            <div className="store-mobile-collections">{collectionLinks.map((item) => <Link key={item.href} href={item.href} onClick={close}>{item.label}</Link>)}<Link href="/#our-story" onClick={close}>Our story</Link></div>
             <div className="store-mobile-utilities"><Link href="/account" onClick={close}><StoreIcon name="user" />Your account</Link><Link href="/wishlist" onClick={close}><StoreIcon name="heart" />Saved pieces</Link><Link href="/shipping" onClick={close}><StoreIcon name="truck" />Shipping & delivery</Link></div>
           </nav>
           <div className="store-mobile-settings"><PincodeChecker inline /><ThemeToggle /></div>

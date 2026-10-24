@@ -52,11 +52,10 @@ import type {
  *    shape, revalidated through core's own zod schemas so a Medusa-side drift
  *    is a loud parse error, not a quiet storefront bug.
  *
- * 2. **Money crosses back to paise immediately.** The seed wrote canonical
- *    integer paise onto variant metadata (`mrp_paise` / `price_paise`);
- *    the transport prefers that lossless channel and only falls back to
- *    Medusa's major-unit amounts × 100, refusing any amount that does not
- *    round-trip to an integer paise value.
+ * 2. **Money crosses back to paise immediately.** Catalog selling prices
+ *    come from native contextual pricing; carts use persisted line prices.
+ *    Only MRP comes from metadata. Legacy price_paise must never override
+ *    commerce pricing. Conversion refuses sub-paise amounts.
  *
  * Methods whose Medusa backing has not been built yet throw NotPortedError
  * (501 `not_ported`) naming the phase that delivers them — the same
@@ -97,6 +96,9 @@ interface MedusaProduct {
   title: string;
   subtitle: string | null;
   description: string | null;
+  thumbnail?: string | null;
+  material?: string | null;
+  collection?: { id: string; handle: string } | null;
   metadata?: {
     hsn?: unknown;
     gst_slab?: unknown;
@@ -113,6 +115,13 @@ interface MedusaCollection {
   handle: string;
   title: string;
   metadata?: { description?: unknown } | null;
+}
+
+export interface CatalogCategory {
+  id: string;
+  handle: string;
+  name: string;
+  parent_category_id: string | null;
 }
 
 interface MedusaCartItem {
@@ -227,7 +236,6 @@ function customerCard(customer: MedusaCustomer, phone: string) {
 
 function variantPrice(variant: MedusaVariant): { mrp: number; selling: number } {
   const selling =
-    metadataPaise(variant.metadata?.price_paise) ??
     (typeof variant.calculated_price?.calculated_amount === "number"
       ? majorToPaise(variant.calculated_price.calculated_amount)
       : undefined);
@@ -275,6 +283,13 @@ export function mapProduct(product: MedusaProduct): Product {
     throw new Error(`product ${product.handle} has no valid gst_slab in metadata`);
   }
 
+  const images = product.images ?? [];
+  // Admin's selected thumbnail is the lead image, even if its gallery rank differs.
+  const orderedImages = product.thumbnail
+    ? [images.find((image) => image.url === product.thumbnail) ?? { url: product.thumbnail },
+      ...images.filter((image) => image.url !== product.thumbnail)]
+    : images;
+
   return productSchema.parse({
     id: product.id,
     handle: product.handle,
@@ -283,9 +298,9 @@ export function mapProduct(product: MedusaProduct): Product {
     description: product.description ?? "",
     hsn: metadata.hsn,
     gstSlab: slab,
-    material: typeof metadata.material === "string" ? metadata.material : "",
+    material: product.material ?? (typeof metadata.material === "string" ? metadata.material : ""),
     piercedJewellery: metadata.pierced_jewellery === true,
-    images: (product.images ?? []).map((image) => mapImage(image, product.title)),
+    images: orderedImages.map((image) => mapImage(image, product.title)),
     variants: (product.variants ?? []).map((variant) => ({
       id: variant.id,
       sku: variant.sku,
@@ -293,7 +308,7 @@ export function mapProduct(product: MedusaProduct): Product {
       price: variantPrice(variant),
       inventory: variant.inventory_quantity ?? 0,
     })),
-    collections: Array.isArray(metadata.collections) ? metadata.collections : [],
+    collections: product.collection ? [product.collection.handle] : [],
   });
 }
 
@@ -319,9 +334,9 @@ export function mapCartLine(item: MedusaCartItem): CartLine {
   if (!isGstSlab(slab)) {
     throw new Error(`cart line ${item.id} has no valid gst_slab on its product`);
   }
-  const price = variant
-    ? variantPrice(variant)
-    : { mrp: majorToPaise(item.unit_price), selling: majorToPaise(item.unit_price) };
+  // A cart line owns its price. Current catalog metadata must never reprice it.
+  const unitPrice = majorToPaise(item.unit_price);
+  const mrp = metadataPaise(variant?.metadata?.mrp_paise) ?? unitPrice;
   const firstImage = variant?.product?.images?.[0]?.url;
 
   return {
@@ -331,8 +346,8 @@ export function mapCartLine(item: MedusaCartItem): CartLine {
     title: item.product_title ?? "",
     variantTitle: item.variant_title ?? variant?.title ?? "",
     imageUrl: firstImage ?? item.thumbnail ?? "",
-    mrp: price.mrp,
-    unitPrice: price.selling,
+    mrp,
+    unitPrice,
     quantity: item.quantity,
     gstSlab: slab,
     hsn: typeof productMetadata.hsn === "string" ? productMetadata.hsn : "",
@@ -355,14 +370,14 @@ export interface MedusaClientOptions {
 
 /**
  * Everything expandable the product mapping needs, in one fields clause.
- * region_id rides along so calculated_price is present as the fallback.
+ * region_id rides along so native contextual pricing is available.
  *
  * Medusa 2.21+ refuses a store `fields` path that is not on the route's
  * allow-list (400). Any path here or in CART_FIELDS outside Medusa's defaults
  * must also be added to allowFields() in apps/medusa/src/api/middlewares.ts.
  */
 const PRODUCT_FIELDS =
-  "id,handle,title,subtitle,description,metadata," +
+  "id,handle,title,subtitle,description,thumbnail,material,metadata,*collection," +
   "*images,*variants,*variants.metadata,+variants.inventory_quantity," +
   "*variants.calculated_price";
 
@@ -370,8 +385,7 @@ const CART_FIELDS =
   "id,*items,*items.variant,*items.variant.metadata," +
   "*items.variant.product.metadata,*items.variant.product.images";
 
-/** The catalogue is 4 products; every read is one page. The Meilisearch row
- * in TODOS.md owns the day this stops being true. */
+/** Bound each request, not the size of the visible catalog. */
 const CATALOG_PAGE = 100;
 
 type PublicSurface = Omit<
@@ -483,18 +497,28 @@ export class MedusaClient implements PublicSurface {
   }
 
   private async fetchCatalog(
-    options?: { revalidate?: number; limit?: number },
+    options?: { revalidate?: number; limit?: number; categoryId?: string; collectionId?: string },
   ): Promise<Product[]> {
     const regionId = await this.region();
-    const data = await this.request<{ products: MedusaProduct[] }>(
-      "GET",
-      `/store/products?fields=${encodeURIComponent(PRODUCT_FIELDS)}` +
-        `&region_id=${encodeURIComponent(regionId)}&limit=${options?.limit ?? CATALOG_PAGE}` +
-        (options?.limit ? "&order=-created_at" : ""),
-      undefined,
-      options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
-    );
-    return data.products.map(mapProduct);
+    const products: Product[] = [];
+    let offset = 0;
+    while (true) {
+      const limit = Math.min(CATALOG_PAGE, options?.limit ? options.limit - products.length : CATALOG_PAGE);
+      const data = await this.request<{ products: MedusaProduct[]; count?: number }>(
+        "GET",
+        `/store/products?fields=${encodeURIComponent(PRODUCT_FIELDS)}` +
+          `&region_id=${encodeURIComponent(regionId)}&limit=${limit}&offset=${offset}&order=-created_at` +
+          (options?.categoryId ? `&category_id[]=${encodeURIComponent(options.categoryId)}` : "") +
+          (options?.collectionId ? `&collection_id[]=${encodeURIComponent(options.collectionId)}` : ""),
+        undefined,
+        options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
+      );
+      products.push(...data.products.map(mapProduct));
+      offset += data.products.length;
+      if (!data.products.length || (options?.limit && products.length >= options.limit) ||
+        (data.count !== undefined ? offset >= data.count : data.products.length < limit)) break;
+    }
+    return products;
   }
 
   // ── Catalogue ───────────────────────────────────────────────
@@ -503,17 +527,15 @@ export class MedusaClient implements PublicSurface {
     query: { collection?: string; q?: string; limit?: number } = {},
     options?: { revalidate?: number },
   ): Promise<Product[]> {
+    const collection = query.collection
+      ? (await this.listCollections(options)).find((entry) => entry.handle === query.collection)
+      : undefined;
+    if (query.collection && !collection) return [];
     let products = await this.fetchCatalog({
       ...options,
+      ...(collection ? { collectionId: collection.id } : {}),
       ...(query.limit && !query.collection && !query.q ? { limit: query.limit } : {}),
     });
-    if (query.collection) {
-      // Full membership lives on metadata; Medusa's collection_id only knows
-      // the primary. Filtering here keeps multi-collection products visible.
-      products = products.filter((product) =>
-        product.collections.includes(query.collection!),
-      );
-    }
     if (query.q) {
       // The same Hinglish-aware scorer the Fastify API runs — parity by
       // construction, not by re-implementation.
@@ -547,13 +569,38 @@ export class MedusaClient implements PublicSurface {
   }
 
   async listCollections(options?: { revalidate?: number }): Promise<Collection[]> {
-    const data = await this.request<{ collections: MedusaCollection[] }>(
-      "GET",
-      "/store/collections",
-      undefined,
-      options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
-    );
-    return data.collections.map(mapCollection);
+    const collections: Collection[] = [];
+    while (true) {
+      const data = await this.request<{ collections: MedusaCollection[]; count?: number }>(
+        "GET",
+        `/store/collections?limit=${CATALOG_PAGE}&offset=${collections.length}&order=created_at`,
+        undefined,
+        options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
+      );
+      collections.push(...data.collections.map(mapCollection));
+      if (!data.collections.length || (data.count !== undefined
+        ? collections.length >= data.count : data.collections.length < CATALOG_PAGE)) break;
+    }
+    return collections;
+  }
+
+  async listCategories(options?: { revalidate?: number }): Promise<CatalogCategory[]> {
+    const categories: CatalogCategory[] = [];
+    while (true) {
+      // Store API enforces active, public categories; never query admin data here.
+      const data = await this.request<{ product_categories: CatalogCategory[]; count?: number }>(
+        "GET", `/store/product-categories?fields=id,name,handle,parent_category_id&limit=${CATALOG_PAGE}&offset=${categories.length}&order=rank`,
+        undefined, options ?? {},
+      );
+      categories.push(...data.product_categories);
+      if (!data.product_categories.length || (data.count !== undefined
+        ? categories.length >= data.count : data.product_categories.length < CATALOG_PAGE)) break;
+    }
+    return categories;
+  }
+
+  async listProductsInCategory(categoryId: string, options?: { revalidate?: number }): Promise<Product[]> {
+    return this.fetchCatalog({ ...options, categoryId });
   }
 
   // ── Cart ────────────────────────────────────────────────────

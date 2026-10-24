@@ -69,7 +69,7 @@ async function AccountPageContents() {
         <div className="mt-12 text-center">
           <p className="text-content-muted">No orders yet.</p>
           <Link
-            href="/collections/everyday"
+            href="/shop"
             className="mt-6 inline-block border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
           >
             <MicroLabel>Start here</MicroLabel>

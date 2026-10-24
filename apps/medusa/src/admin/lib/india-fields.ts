@@ -7,8 +7,8 @@
  * rather than imported because the admin bundle must not pull @siumora/core
  * into the browser build. The seed writes hsn/gst_slab on PRODUCT metadata
  * and mrp_paise/price_paise on VARIANT metadata (src/scripts/seed.ts), and
- * the invoice path reads exactly those keys — this widget edits the same
- * truth.
+ * price_paise is legacy seed data. The widget now edits only MRP; native
+ * Medusa pricing owns selling prices.
  */
 
 export const GST_SLABS = [0, 5, 18, 40] as const;
@@ -55,6 +55,16 @@ export function paiseToRupees(paise: number): string {
   return (paise / 100).toFixed(2).replace(/\.00$/, "");
 }
 
+/** Selling prices are managed in native Medusa pricing, never in metadata. */
+export function parseMrp(raw: string):
+  { ok: true; value: number } | { ok: false; message: string } {
+  const value = rupeesToPaise(raw);
+  if (value === undefined || !Number.isSafeInteger(value) || value <= 0) {
+    return { ok: false, message: "MRP must be a positive rupee amount." };
+  }
+  return { ok: true, value };
+}
+
 export function parseVariantFields(input: {
   mrp: string;
   price: string;
@@ -84,8 +94,8 @@ export function missingFields(product: {
   if (typeof meta.gst_slab !== "number") missing.push("GST slab");
   for (const variant of product.variants ?? []) {
     const vm = variant.metadata ?? {};
-    if (typeof vm.mrp_paise !== "number" || typeof vm.price_paise !== "number") {
-      missing.push("variant MRP/price paise");
+    if (typeof vm.mrp_paise !== "number" || !Number.isSafeInteger(vm.mrp_paise) || vm.mrp_paise <= 0) {
+      missing.push("variant MRP");
       break;
     }
   }
