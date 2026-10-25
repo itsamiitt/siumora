@@ -101,3 +101,15 @@ test("reports how far the cart is from free shipping", () => {
   assert.equal(amountToFreeShipping(99900), 0);
   assert.equal(amountToFreeShipping(150000), 0);
 });
+
+test("a line discount comes off the total and off the taxable value, not the subtotal", () => {
+  const discounted = calculateTotals([line({ discount: 19900 })], { interState: false, shipping: 7900 });
+  const repriced = calculateTotals([line({ unitPrice: 179100 })], { interState: false, shipping: 7900 });
+  assert.equal(discounted.subtotal, 199000);
+  assert.equal(discounted.discount, 19900);
+  assert.equal(discounted.savings, 50000);
+  assert.equal(discounted.total, 199000 - 19900 + 7900);
+  // GST is extracted from what the line actually sold for.
+  assert.deepEqual(discounted.gst, repriced.gst);
+  assert.equal(calculateTotals([line()], { interState: false }).discount, 0);
+});

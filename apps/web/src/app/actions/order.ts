@@ -4,8 +4,13 @@ import { revalidatePath } from "next/cache";
 
 import type { PaymentMethod, ShippingAddress } from "@siumora/core";
 
-import { clearCart } from "@/lib/cart-store";
-import { confirmOrder, placeOrder, type RazorpayHandoff } from "@/lib/order-store";
+import { forgetCart } from "@/lib/cart-store";
+import {
+  confirmOrder,
+  finishPayment,
+  placeOrder,
+  type RazorpayHandoff,
+} from "@/lib/order-store";
 
 export interface PlaceOrderResult {
   ok: boolean;
@@ -13,8 +18,15 @@ export interface PlaceOrderResult {
   message?: string;
   /** Machine-readable refusal: verify_phone, step_up_required, … */
   error?: string;
-  /** Present when the browser should open the payment modal for this order. */
+  /** Field-keyed problems with the address, when the backend names them. */
+  fields?: Record<string, string>;
+  /** Present when the browser should open the payment modal. */
   razorpay?: RazorpayHandoff;
+  /**
+   * Payment-first (Medusa): no order exists yet. Open the modal with
+   * `razorpay`, then call completePayment with Checkout.js's proof.
+   */
+  payFirst?: boolean;
 }
 
 /**
@@ -41,6 +53,10 @@ export async function submitOrder(input: {
   gaClientId?: string;
   /** A registered buyer GSTIN, for a B2B invoice. */
   buyerGstin?: string;
+  /** The shopper's consent choice, recorded on the order for the server conversion. */
+  consent?: "full" | "default";
+  /** For the card in the parcel (plan 16 B21); the server tidies and bounds it. */
+  giftMessage?: string;
 }): Promise<PlaceOrderResult> {
   // The event id doubles as the idempotency key: it is already unique per
   // checkout attempt and already travels with the order, so a resubmitted form
@@ -52,22 +68,63 @@ export async function submitOrder(input: {
     idempotencyKey: input.eventId,
     ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
     ...(input.buyerGstin ? { buyerGstin: input.buyerGstin } : {}),
+    ...(input.consent ? { consent: input.consent } : {}),
+    ...(input.giftMessage?.trim() ? { giftMessage: input.giftMessage.trim() } : {}),
   });
   if (!result.ok) {
-    return { ok: false, message: result.message, ...(result.error ? { error: result.error } : {}) };
+    return {
+      ok: false,
+      message: result.message,
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.fields ? { fields: result.fields } : {}),
+    };
   }
 
-  // The cart is emptied only after the order exists, so a failure mid-flight
-  // leaves the customer their bag rather than losing both.
-  await clearCart();
-  revalidatePath("/cart");
-  revalidatePath("/", "layout");
+  // Payment-first: nothing is placed yet, and the bag stays exactly as it
+  // is until the payment becomes an order — a closed modal loses nothing.
+  if ("payFirst" in result) {
+    return { ok: true, payFirst: true, razorpay: result.razorpay };
+  }
 
+  await letGoOfBag();
   return {
     ok: true,
     orderNumber: result.orderNumber,
     ...(result.razorpay ? { razorpay: result.razorpay } : {}),
   };
+}
+
+/**
+ * The bag is let go only after the order exists, so a failure mid-flight
+ * leaves the customer their bag rather than losing both. The backend has
+ * already closed the cart; mutating it again would fail on Medusa.
+ */
+async function letGoOfBag(): Promise<void> {
+  await forgetCart();
+  revalidatePath("/cart");
+  revalidatePath("/", "layout");
+}
+
+/**
+ * Place the order for a payment the shopper just made in Checkout.js
+ * (payment-first). The same event id as the attempt rides as the
+ * idempotency key, so a double-tap or a retry returns the one order.
+ */
+export async function completePayment(input: {
+  paymentMethod: PaymentMethod;
+  razorpay: { orderId: string; paymentId: string; signature: string };
+  eventId: string;
+}): Promise<PlaceOrderResult> {
+  const result = await finishPayment({
+    paymentMethod: input.paymentMethod,
+    razorpay: input.razorpay,
+    idempotencyKey: input.eventId,
+  });
+  if (!result.ok) {
+    return { ok: false, message: result.message, ...(result.error ? { error: result.error } : {}) };
+  }
+  await letGoOfBag();
+  return { ok: true, orderNumber: result.orderNumber };
 }
 
 /**

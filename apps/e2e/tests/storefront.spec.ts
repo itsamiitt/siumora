@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-import { API_URL } from "../playwright.config.ts";
+import { API_URL, BACKEND, MEDUSA_URL } from "../playwright.config.ts";
+import { medusaPublishableKey } from "../setup/backend.ts";
 
 /**
  * Browser truth (plan 6A). The API integration suite already proves the
@@ -76,13 +77,32 @@ async function addToBag(page: Page, productTitle: string) {
  * mint seconds after the first is exactly what it exists to refuse.
  */
 let cachedToken: string | undefined;
+/** Where the operator calls go, per backend (plan 16 Phase J). */
+const OPS =
+  BACKEND === "medusa"
+    ? {
+        otp: `${MEDUSA_URL}/store/siumora-auth/otp`,
+        verify: `${MEDUSA_URL}/store/siumora-auth/verify`,
+        settings: `${MEDUSA_URL}/admin/siumora/settings`,
+        // Medusa's store routes need the publishable key.
+        headers: (): Record<string, string> => ({ "x-publishable-api-key": medusaPublishableKey() }),
+      }
+    : {
+        otp: `${API_URL}/auth/otp`,
+        verify: `${API_URL}/auth/verify`,
+        settings: `${API_URL}/admin/settings`,
+        headers: (): Record<string, string> => ({}),
+      };
+
 async function operatorToken(request: APIRequestContext): Promise<string> {
   if (cachedToken) return cachedToken;
-  const issued = await request.post(`${API_URL}/auth/otp`, {
+  const issued = await request.post(OPS.otp, {
+    headers: OPS.headers(),
     data: { phone: "9000000001" },
   });
   const { code } = (await issued.json()) as { code: string };
-  const verified = await request.post(`${API_URL}/auth/verify`, {
+  const verified = await request.post(OPS.verify, {
+    headers: OPS.headers(),
     data: { phone: "9000000001", code },
   });
   const { token } = (await verified.json()) as { token: string };
@@ -92,8 +112,8 @@ async function operatorToken(request: APIRequestContext): Promise<string> {
 
 async function setPaymentsEnabled(request: APIRequestContext, value: boolean) {
   const token = await operatorToken(request);
-  const response = await request.patch(`${API_URL}/admin/settings`, {
-    headers: { authorization: `Bearer ${token}` },
+  const response = await request.patch(OPS.settings, {
+    headers: { ...OPS.headers(), authorization: `Bearer ${token}` },
     data: { key: "payments_enabled", value },
   });
   expect(response.ok()).toBe(true);
@@ -221,6 +241,23 @@ test("cookie choice can be reopened and withdrawn from the footer", async ({ pag
   await expect(banner).toBeVisible();
 });
 
+/**
+ * Walk the three checkout steps (plan 16 Phase C): the phone, then the
+ * address — city and state fill from the pincode, the test types them
+ * anyway, as a person might — then on to payment.
+ */
+async function fillCheckout(page: Page, pincode: string) {
+  await page.locator("#phone").fill("9876543210");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+
+  await page.locator("#pincode").fill(pincode);
+  await page.locator("#city").fill(pincode === "400001" ? "Mumbai" : "Guwahati");
+  await page.locator("#state").selectOption(pincode === "400001" ? "27" : "18");
+  await page.locator("#name").fill("Asha Menon");
+  await page.locator("#address").fill("Flat 3B, Sunrise Apartments, Linking Road");
+  await page.getByRole("button", { name: "Continue to payment" }).click();
+}
+
 test("a person can buy the Petal Studs cash on delivery, end to end", async ({
   page,
 }) => {
@@ -231,18 +268,15 @@ test("a person can buy the Petal Studs cash on delivery, end to end", async ({
   await page.goto("/cart");
   await page.getByRole("link", { name: "Checkout" }).click();
 
-  await page.locator("#name").fill("Asha Menon");
-  await page.locator("#phone").fill("9876543210");
-  await page.locator("#pincode").fill("400001");
-  await page.locator("#city").fill("Mumbai");
-  await page.locator("#state").selectOption("27");
-  await page.locator("#address").fill("Flat 3B, Sunrise Apartments, Linking Road");
+  await fillCheckout(page, "400001");
 
   // The quote decides the terms before the method is picked — wait for it.
-  await expect(page.getByText("Cash on delivery")).toBeVisible();
-  await page.getByText("Cash on delivery").click();
+  const cod = page.getByRole("radio", { name: /Cash on delivery/ });
+  await expect(cod).toBeEnabled({ timeout: 15_000 });
+  await cod.check();
 
-  await page.getByRole("button", { name: /Place order/ }).click();
+  // The total on the button includes whatever the server says COD costs.
+  await page.getByRole("button", { name: /Place order · ₹/ }).click();
   await page.waitForURL(/\/orders\/SIU-\d{5}/, { timeout: 30_000 });
 
   const orderNumber = page.url().match(/SIU-\d{5}/)![0];
@@ -277,9 +311,8 @@ test("COD is withheld where the pincode does not serve it", async ({ page }) => 
   await expect(page.getByText("Kernel Pendant").first()).toBeVisible();
   await page.getByRole("link", { name: "Checkout" }).click();
 
-  await page.locator("#phone").fill("9876543210");
   // Guwahati: serviceable, but the pincode table says no COD.
-  await page.locator("#pincode").fill("781001");
+  await fillCheckout(page, "781001");
 
   // The option exists, says so, and cannot be picked — a money decision made
   // server-side and rendered honestly.

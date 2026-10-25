@@ -33,6 +33,21 @@ Single-vendor e-commerce platform for the Indian market. Demi-fine jewellery,
 ₹1,500–10,000, built to the architecture in [`plan/`](plan/) and the identity in
 [`brand-kit/`](brand-kit/).
 
+## Backend policy
+
+Siumora launches on **Medusa** (`apps/medusa`). The Fastify API (`apps/api`) is
+**frozen** as of 2026-10-25: no new features, only fixes needed to keep it
+running until it is deleted at the launch gate. New commerce work goes into
+`apps/medusa`. See `plan/16-cart-checkout-experience.md` (rule R7) and
+`plan/17-one-backend.md` for why.
+
+Medusa is the default everywhere (plan 16 Phase J): the storefront
+(`COMMERCE_BACKEND`), the worker (`OUTBOX_BACKEND`) and the browser suite
+(`E2E_BACKEND`) use it unless `fastify` is named. The steps to delete Fastify,
+and the launch checks that must pass first, are in
+[`docs/fastify-retirement.md`](docs/fastify-retirement.md);
+`node scripts/retire-fastify.mjs` reports what still depends on it.
+
 ## Status
 
 | Area | State |
@@ -52,7 +67,8 @@ Single-vendor e-commerce platform for the Indian market. Demi-fine jewellery,
 
 ```
 apps/
-  api/            Fastify commerce API over Postgres
+  api/            Fastify commerce API over Postgres (frozen; retired at launch)
+  medusa/         Medusa 2.x commerce backend + admin (the launch backend)
   web/            Next.js 16 storefront
 packages/
   core/           Domain logic — GST, RTO, NDR, returns, search, metrics

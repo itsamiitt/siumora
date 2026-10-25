@@ -48,6 +48,8 @@ import {
   createTaxRegionsWorkflow,
   linkSalesChannelsToApiKeyWorkflow,
   linkSalesChannelsToStockLocationWorkflow,
+  updateRegionsWorkflow,
+  updateShippingOptionsWorkflow,
   updateStoresWorkflow,
 } from "@medusajs/medusa/core-flows";
 
@@ -67,8 +69,12 @@ const STOCK_LOCATION_NAME = "Siumora Warehouse";
 const PUBLISHABLE_KEY_TITLE = "Siumora Storefront";
 const FULFILLMENT_SET_NAME = "Siumora Delivery";
 const SHIPPING_OPTION_NAME = "Standard Delivery";
+/** COD runs on the system provider; prepaid on Razorpay (plan 16 Phase B). */
+const PAYMENT_PROVIDERS = ["pp_system_default", "pp_razorpay_razorpay"] as const;
 /** Medusa's built-in manual provider (module id "manual" → "manual_manual"). */
 const MANUAL_PROVIDER = "manual_manual";
+/** Shiprocket (plan 16 Phase F; module id "shiprocket" → "shiprocket_shiprocket"). */
+const SHIPROCKET_PROVIDER = "shiprocket_shiprocket";
 
 export default async function seed({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
@@ -107,7 +113,7 @@ export default async function seed({ container }: ExecArgs) {
             name: REGION_NAME,
             currency_code: CURRENCY,
             countries: [COUNTRY],
-            payment_providers: ["pp_system_default"],
+            payment_providers: [...PAYMENT_PROVIDERS],
           },
         ],
       },
@@ -116,6 +122,28 @@ export default async function seed({ container }: ExecArgs) {
     ({ data: regions } = await findRegion());
   }
   const region = regions[0]!;
+
+  // ── Razorpay on the region (plan 16 Phase B). Convergent: a region seeded
+  // before the provider existed gains it; one that has it is left alone.
+  const { data: regionProviders } = await query.graph({
+    entity: "region",
+    fields: ["id", "payment_providers.id"],
+    filters: { id: (region as { id: string }).id },
+  });
+  const enabled = new Set(
+    ((regionProviders[0] as { payment_providers?: Array<{ id: string } | null> })?.payment_providers ?? [])
+      .filter((provider): provider is { id: string } => Boolean(provider))
+      .map((provider) => provider.id),
+  );
+  if (PAYMENT_PROVIDERS.some((id) => !enabled.has(id))) {
+    await updateRegionsWorkflow(container).run({
+      input: {
+        selector: { id: (region as { id: string }).id },
+        update: { payment_providers: [...new Set([...enabled, ...PAYMENT_PROVIDERS])] },
+      },
+    });
+    logger.info(`seed: enabled ${PAYMENT_PROVIDERS.join(", ")} on "${REGION_NAME}"`);
+  }
 
   // ── Tax region for IN (base rate; GST proper is the M2 module) ────────
   const { data: taxRegions } = await query.graph({
@@ -232,26 +260,36 @@ export default async function seed({ container }: ExecArgs) {
   const linkedProviderIds = (locationLinks.fulfillment_providers ?? []).map(
     (provider: { id: string } | null) => provider?.id,
   );
-  if (!linkedProviderIds.includes(MANUAL_PROVIDER)) {
+  for (const providerId of [MANUAL_PROVIDER, SHIPROCKET_PROVIDER]) {
+    if (linkedProviderIds.includes(providerId)) continue;
     await link.create({
       [Modules.STOCK_LOCATION]: { stock_location_id: stockLocation.id },
-      [Modules.FULFILLMENT]: { fulfillment_provider_id: MANUAL_PROVIDER },
+      [Modules.FULFILLMENT]: { fulfillment_provider_id: providerId },
     });
-    logger.info("seed: linked stock location to manual fulfillment provider");
+    logger.info(`seed: linked stock location to fulfillment provider ${providerId}`);
   }
 
   const { data: shippingOptions } = await query.graph({
     entity: "shipping_option",
-    fields: ["id", "name"],
+    fields: ["id", "name", "provider_id"],
     filters: { name: SHIPPING_OPTION_NAME },
   });
+  // Convergent (plan 16 Phase F): an option seeded on the manual provider
+  // moves to Shiprocket, so "Create fulfillment" books the courier.
+  const existingOption = shippingOptions[0] as { id: string; provider_id?: string } | undefined;
+  if (existingOption && existingOption.provider_id !== SHIPROCKET_PROVIDER) {
+    await updateShippingOptionsWorkflow(container).run({
+      input: [{ id: existingOption.id, provider_id: SHIPROCKET_PROVIDER }],
+    });
+    logger.info(`seed: moved "${SHIPPING_OPTION_NAME}" to ${SHIPROCKET_PROVIDER}`);
+  }
   if (shippingOptions.length === 0) {
     await createShippingOptionsWorkflow(container).run({
       input: [
         {
           name: SHIPPING_OPTION_NAME,
           price_type: "flat" as const,
-          provider_id: MANUAL_PROVIDER,
+          provider_id: SHIPROCKET_PROVIDER,
           service_zone_id: fulfillmentSet.service_zones[0]!.id,
           shipping_profile_id: shippingProfile.id,
           type: {

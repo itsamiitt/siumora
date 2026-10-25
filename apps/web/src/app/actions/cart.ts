@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 
+import type { CartLine } from "@siumora/core";
+
 import {
   addLine,
   clearCart,
@@ -64,6 +66,20 @@ export async function removeFromCart(
   await removeLine(variantId);
   revalidateCartSurfaces();
   return { ok: true, count: await currentCount() };
+}
+
+/**
+ * The bag for the drawer (plan 16 Phase D) — read on open rather than at
+ * render, so the header can stay static (the LCP budget the badge already
+ * protects) and the drawer always shows the server's lines.
+ */
+export async function readBag(): Promise<{ lines: CartLine[]; subtotal: number; count: number }> {
+  const lines = await getCartLines();
+  return {
+    lines,
+    subtotal: lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0),
+    count: lines.reduce((sum, line) => sum + line.quantity, 0),
+  };
 }
 
 export async function emptyCart(): Promise<CartActionResult> {

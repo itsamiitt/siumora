@@ -68,6 +68,10 @@ const MEDUSA_PORTED = new Set<string>([
   // module's stored invoice + PDF, settings kill-switch, wishlist.
   "getPincode: the serviceability card",
   "quoteCheckout: the risk card",
+  // Plan 16 Phase A: completion validates the address server-side.
+  "checkout: an address the courier cannot use is refused field by field",
+  // Plan 16 Phase B: payment-first prepaid.
+  "preparePayment: payment-first, refused honestly without Razorpay keys",
   "confirmOrder and advanceOrder ride the simulation",
   "requestReturn on a delivered order",
   "wishlist toggle and read",
@@ -414,13 +418,77 @@ contract("quoteCheckout: the risk card", async () => {
     stateCode: ADDRESS.stateCode,
     phone: CUSTOMER_PHONE,
   });
+  const riskCard = ["serviceable", "estimatedDays", "addressQuality", "rto", "cod", "phoneVerified"];
+  // Plan 16 B8: Medusa also quotes the totals the order will carry. Fastify
+  // is frozen (plan 16 R7) and keeps the bare risk card.
   assertExactKeys(
     quote,
-    ["serviceable", "estimatedDays", "addressQuality", "rto", "cod", "phoneVerified"],
+    usingFastify ? riskCard : [...riskCard, "totals", "cartVersion", "codNeedsVerification"],
     "quoteCheckout",
   );
   assertExactKeys(quote.addressQuality, ["score", "issues", "needsReview"], "addressQuality");
   assertExactKeys(quote.rto, ["risk", "score"], "rto");
+  if (!usingFastify) {
+    assert.ok(quote.totals, "a seeded cart quotes totals");
+    assertExactKeys(quote.totals, ["prepaid", "cod", "interState"], "totals");
+    assertExactKeys(
+      quote.totals.prepaid,
+      ["subtotal", "shipping", "codFee", "total", "gst"],
+      "totals.prepaid",
+    );
+    if (quote.totals.cod) {
+      assert.equal(quote.totals.cod.total - quote.totals.prepaid.total, quote.cod.fee);
+    }
+    assert.match(quote.cartVersion ?? "", /^[0-9a-f]{16}$/);
+  }
+});
+
+contract("checkout: an address the courier cannot use is refused field by field", async () => {
+  const { cartId } = await cartWithItem();
+  await assert.rejects(
+    client.checkout({
+      cartId,
+      address: { ...ADDRESS, line1: "", city: "" },
+      paymentMethod: "cod",
+      eventId: crypto.randomUUID(),
+    }),
+    (error: unknown) => {
+      const apiError = error as { status: number; code: string; fields?: Record<string, string> };
+      // Fastify refuses through its zod schema (400 invalid_request); Medusa
+      // names the fields so the storefront can mark each one.
+      assert.equal(apiError.status, 400);
+      if (!usingFastify) {
+        assert.equal(apiError.code, "invalid_address");
+        assert.deepEqual(Object.keys(apiError.fields ?? {}).sort(), ["city", "line1"]);
+      }
+      return true;
+    },
+  );
+});
+
+contract("preparePayment: payment-first, refused honestly without Razorpay keys", async () => {
+  // Plan 16 Phase B. Fastify places orders first and never reaches this
+  // call; Medusa opens the payment before any order exists. The suite runs
+  // without Razorpay credentials, so the honest answer is a refusal that
+  // leaves the bag untouched — the live-keys path is pinned by the
+  // provider's own tests (apps/medusa/src/modules/razorpay-payment).
+  assert.equal(client.paymentFlow, usingFastify ? "order-first" : "payment-first");
+  const { cartId } = await cartWithItem();
+  await assert.rejects(
+    client.preparePayment({ cartId, address: ADDRESS, paymentMethod: "upi" }),
+    (error: unknown) => {
+      const apiError = error as { status: number; code: string };
+      if (usingFastify) {
+        assert.equal(apiError.code, "not_supported");
+      } else {
+        assert.equal(apiError.status, 409);
+        assert.equal(apiError.code, "prepaid_unavailable");
+      }
+      return true;
+    },
+  );
+  const cart = await client.getCart(cartId);
+  assert.equal(cart.lines.length, 1, "a refused payment leaves the bag as it was");
 });
 
 contract("checkout: COD envelope, order number format, access key", async () => {

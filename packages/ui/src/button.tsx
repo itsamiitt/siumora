@@ -53,3 +53,21 @@ export function Button({
     />
   );
 }
+
+/**
+ * The button look for something that navigates — a link styled as the
+ * primary action ("Checkout"), so links never hand-copy the classes.
+ */
+export function buttonClassName({
+  variant = "primary",
+  size = "md",
+  className,
+}: { variant?: ButtonVariant; size?: ButtonSize; className?: string } = {}): string {
+  return cn(
+    "inline-flex items-center justify-center font-body font-medium uppercase tracking-[var(--tracking-caps)]",
+    "transition-colors duration-200 ease-[var(--ease-siumora)]",
+    VARIANTS[variant],
+    SIZES[size],
+    className,
+  );
+}

@@ -44,6 +44,7 @@ function toDomainOrder(row: typeof schema.orders.$inferSelect): Order {
     mrpTotal: row.subtotal,
     subtotal: row.subtotal,
     savings: 0,
+    discount: 0,
     shipping: row.shipping,
     codFee: row.codFee,
     total: row.total,

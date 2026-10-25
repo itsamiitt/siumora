@@ -74,6 +74,9 @@ export const DEFAULT_RULES: readonly RateRule[] = [
   // Guessing an order access key. The key is a uuid so guessing is hopeless,
   // but a hopeless attempt still costs a query each time.
   { prefix: "/store/siumora/orders/", limit: 60, windowMs: 60_000, bucket: "orders" },
+  // A coupon field is a guessing surface (plan 16 B19): a shopper tries a
+  // code or two, a script tries thousands.
+  { prefix: "/store/siumora/coupons", limit: 10, windowMs: 60_000, bucket: "coupons" },
   // Anything else in the custom namespace lands here: browse-tier ceiling for
   // routes that do not exist yet. Ordered after the specific rules above.
   { prefix: "/store/siumora/", limit: 120, windowMs: 60_000, bucket: "siumora" },

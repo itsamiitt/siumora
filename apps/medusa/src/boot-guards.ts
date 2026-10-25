@@ -17,6 +17,8 @@ export interface MedusaBootEnv {
   COOKIE_SECRET?: string;
   MEDUSA_DATABASE_URL?: string;
   MEDUSA_REDIS_URL?: string;
+  COURIER_SIMULATION?: string;
+  OTP_ECHO?: string;
 }
 
 export function resolveAppEnv(env: MedusaBootEnv): AppEnv {
@@ -48,6 +50,17 @@ export function assertMedusaBootSafety(env: MedusaBootEnv): {
     // forgets every window, and the OTP endpoint's ceiling multiplies.
     if (!env.MEDUSA_REDIS_URL) {
       throw new Error("production boot refused: MEDUSA_REDIS_URL is not set");
+    }
+    // Development switches that would be holes in production (plan 16 B30):
+    // the courier simulation lets a customer mark their own parcel
+    // delivered, and OTP_ECHO hands the sign-in code back in the response.
+    // Both are already inert there; a production env that sets them is a
+    // misconfiguration worth refusing loudly rather than ignoring.
+    if (env.COURIER_SIMULATION === "true") {
+      throw new Error("production boot refused: COURIER_SIMULATION must not be set");
+    }
+    if (env.OTP_ECHO === "true") {
+      throw new Error("production boot refused: OTP_ECHO must not be set");
     }
   }
 

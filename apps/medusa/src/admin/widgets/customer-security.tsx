@@ -1,18 +1,22 @@
 import { defineWidgetConfig } from "@medusajs/admin-sdk";
-import { Badge, Button, Container, Heading, Input, Prompt, Table, Text, Textarea, toast } from "@medusajs/ui";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowPath, Eye, SquareTwoStack, XCircle, CheckCircle, ArrowUturnLeft } from "@medusajs/icons";
+import { Badge, Button, Container, Input, Prompt, StatusBadge, Table, Text, Textarea, toast } from "@medusajs/ui";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
+import { CardSkeleton, SectionHeader, when, type Action } from "../components/kit";
 import { OpsError, opsFetch } from "../lib/ops";
 
 /**
- * Siumora · Customer security (auth plan phase 3), on the customer page.
+ * Siumora · Sign-in and security, on the customer page (auth plan phase 3;
+ * made native in plan 16 Phase E).
  *
  * Identity (phone masked — "Show number" reveals it, and that reveal is
- * audited), state (blocked, merged), signed-in devices, and the recent
- * sign-in log. Actions by role:
+ * audited), state, signed-in devices and the recent sign-in log, with every
+ * action in the header's "⋯" menu:
  *
  * - support: sign one device or every device out (the lost-phone call);
- * - ops lead / owner: block and unblock, force a fresh OTP, merge a
+ * - ops lead / owner: force a fresh code, block and unblock, merge a
  *   duplicate account into another, see the whole number.
  *
  * Every action asks first and lands in the audit log with the operator's
@@ -54,39 +58,54 @@ const EVENT_LABEL: Record<string, string> = {
   email_verified: "Email verified",
 };
 
-const when = (iso: string) =>
-  new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+const PROMPT: Record<Pending["kind"], { title: string; description: string }> = {
+  "revoke-all": { title: "Sign out every device?", description: "Every session ends now. Recorded in the audit log with your name." },
+  "revoke-one": { title: "Sign out this device?", description: "Recorded in the audit log with your name." },
+  block: {
+    title: "Block this customer?",
+    description: "Every device is signed out now and sign-in is refused until unblocked. Say why — it is kept in the audit log.",
+  },
+  unblock: { title: "Unblock this customer?", description: "They can sign in again. Recorded in the audit log." },
+  reverify: {
+    title: "Force a fresh code?",
+    description: "Every device is signed out; the customer signs back in with a code on their phone.",
+  },
+  merge: {
+    title: "Merge this account?",
+    description:
+      "Orders, wishlist and sign-in numbers move to the other account; this one is signed out and marked merged. It cannot be undone here.",
+  },
+};
 
 const CustomerSecurityWidget = ({ data }: { data: { id: string } }) => {
-  const [card, setCard] = useState<SecurityCard | null>(null);
-  const [hidden, setHidden] = useState(false);
+  const client = useQueryClient();
+  const base = `/admin/siumora/customers/${encodeURIComponent(data.id)}`;
+  const key = ["siumora", "customer-security", data.id];
+  const card = useQuery({
+    queryKey: key,
+    queryFn: () => opsFetch<SecurityCard>(`${base}/security`),
+    retry: false,
+  });
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
   const [reason, setReason] = useState("");
   const [mergeInto, setMergeInto] = useState("");
   const [phone, setPhone] = useState<string | null>(null);
 
-  const base = `/admin/siumora/customers/${encodeURIComponent(data.id)}`;
-
-  const load = useCallback(() => {
-    opsFetch<SecurityCard>(`${base}/security`)
-      .then(setCard)
-      .catch((error) => {
-        // Not an operator with customers:read, or two-step sign-in is
-        // missing: the widget simply stays out of the way.
-        if (error instanceof OpsError && (error.status === 403 || error.status === 401)) setHidden(true);
-        else toast.error(error instanceof Error ? error.message : "Could not load security details.");
-      });
-  }, [base]);
-
-  useEffect(load, [load]);
+  if (card.isLoading) return <CardSkeleton rows={3} />;
+  // Not an operator with customers:read, or two-step sign-in is missing:
+  // the card simply stays out of the way.
+  if (card.error instanceof OpsError && (card.error.status === 403 || card.error.status === 401)) return null;
+  if (!card.data) return null;
+  const c = card.data;
+  const { security } = c;
 
   const act = async (path: string, body: unknown, done: string) => {
     setBusy(true);
     try {
       await opsFetch(`${base}/${path}`, { method: "POST", body: JSON.stringify(body) });
       toast.success(done);
-      load();
+      await client.invalidateQueries({ queryKey: key });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Refused.");
     } finally {
@@ -115,45 +134,55 @@ const CustomerSecurityWidget = ({ data }: { data: { id: string } }) => {
     }
   };
 
-  if (hidden || !card) return null;
-  const { security } = card;
+  const reveal = () =>
+    opsFetch<{ phone: string | null }>(`${base}/reveal`, { method: "POST" })
+      .then((payload) => setPhone(payload.phone))
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Refused."));
+
+  const sessionsGroup: Action[] = c.can.revokeSessions
+    ? [{ label: "Sign out every device", icon: <ArrowUturnLeft />, disabled: busy || c.sessions.length === 0, onClick: () => setPending({ kind: "revoke-all" }) }]
+    : [];
+  const adminGroup: Action[] =
+    c.can.admin && !security.mergedInto
+      ? [
+          ...(c.customer.maskedPhone && !phone ? [{ label: "Show full number", icon: <Eye />, onClick: () => void reveal() }] : []),
+          { label: "Force a fresh code", icon: <ArrowPath />, disabled: busy, onClick: () => setPending({ kind: "reverify" }) },
+          { label: "Merge into another account", icon: <SquareTwoStack />, disabled: busy, onClick: () => setPending({ kind: "merge" }) },
+        ]
+      : [];
+  const blockGroup: Action[] =
+    c.can.admin && !security.mergedInto
+      ? [
+          security.blockedAt
+            ? { label: "Unblock", icon: <CheckCircle />, disabled: busy, onClick: () => setPending({ kind: "unblock" }) }
+            : { label: "Block", icon: <XCircle />, destructive: true, disabled: busy, onClick: () => setPending({ kind: "block" }) },
+        ]
+      : [];
 
   return (
     <Container className="divide-y p-0">
-      <div className="flex items-center justify-between px-6 py-4">
-        <div>
-          <Heading level="h2">Sign-in and security</Heading>
-          <Text size="small" className="text-ui-fg-subtle">
-            {phone ?? card.customer.maskedPhone ?? "No phone"}
-            {card.can.admin && !phone && card.customer.maskedPhone && (
-              <>
-                {" · "}
-                <button
-                  type="button"
-                  className="text-ui-fg-interactive"
-                  onClick={() =>
-                    opsFetch<{ phone: string | null }>(`${base}/reveal`, { method: "POST" })
-                      .then((payload) => setPhone(payload.phone))
-                      .catch((error) => toast.error(error instanceof Error ? error.message : "Refused."))
-                  }
-                >
-                  Show number (audited)
-                </button>
-              </>
-            )}
-          </Text>
-        </div>
-        {security.mergedInto ? (
-          <Badge color="grey">Merged</Badge>
-        ) : security.blockedAt ? (
-          <Badge color="red">Blocked</Badge>
-        ) : (
-          <Badge color="green">Active</Badge>
-        )}
-      </div>
+      <SectionHeader
+        title="Sign-in and security"
+        subtitle={
+          <>
+            {phone ?? c.customer.maskedPhone ?? "No phone"}
+            {phone && " · revealed (audited)"}
+          </>
+        }
+        badge={
+          security.mergedInto ? (
+            <StatusBadge color="grey">Merged</StatusBadge>
+          ) : security.blockedAt ? (
+            <StatusBadge color="red">Blocked</StatusBadge>
+          ) : (
+            <StatusBadge color="green">Active</StatusBadge>
+          )
+        }
+        actions={[sessionsGroup, adminGroup, blockGroup]}
+      />
 
       {security.blockedAt && (
-        <div className="px-6 py-3">
+        <div className="px-6 py-4">
           <Text size="small">
             Blocked {when(security.blockedAt)} by {security.blockedBy ?? "an operator"}: {security.blockedReason ?? "no reason recorded"}
             {security.mergedInto && ` — merged into ${security.mergedInto}`}
@@ -161,52 +190,41 @@ const CustomerSecurityWidget = ({ data }: { data: { id: string } }) => {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 px-6 py-4">
-        {card.can.revokeSessions && (
-          <Button size="small" variant="secondary" disabled={busy || card.sessions.length === 0} onClick={() => setPending({ kind: "revoke-all" })}>
-            Sign out every device
-          </Button>
-        )}
-        {card.can.admin && !security.mergedInto && (
-          <>
-            <Button size="small" variant="secondary" disabled={busy} onClick={() => setPending({ kind: "reverify" })}>
-              Force a fresh OTP
-            </Button>
-            {security.blockedAt ? (
-              <Button size="small" variant="secondary" disabled={busy} onClick={() => setPending({ kind: "unblock" })}>
-                Unblock
-              </Button>
-            ) : (
-              <Button size="small" variant="danger" disabled={busy} onClick={() => setPending({ kind: "block" })}>
-                Block
-              </Button>
-            )}
-            <Button size="small" variant="secondary" disabled={busy} onClick={() => setPending({ kind: "merge" })}>
-              Merge into…
-            </Button>
-          </>
-        )}
-      </div>
-
-      <div className="px-6 py-4">
-        <Text weight="plus">Signed-in devices</Text>
-        {card.sessions.length === 0 ? (
-          <Text size="small" className="mt-1 text-ui-fg-subtle">
+      <div>
+        <div className="px-6 py-4">
+          <Text size="small" weight="plus">
+            Signed-in devices
+          </Text>
+        </div>
+        {c.sessions.length === 0 ? (
+          <Text size="small" className="px-6 pb-4 text-ui-fg-subtle">
             None.
           </Text>
         ) : (
-          <Table className="mt-2">
+          <Table>
+            <Table.Header>
+              <Table.Row>
+                <Table.HeaderCell>Device</Table.HeaderCell>
+                <Table.HeaderCell>Network</Table.HeaderCell>
+                <Table.HeaderCell>Last seen</Table.HeaderCell>
+                <Table.HeaderCell />
+              </Table.Row>
+            </Table.Header>
             <Table.Body>
-              {card.sessions.map((session) => (
+              {c.sessions.map((session) => (
                 <Table.Row key={session.id}>
                   <Table.Cell>
                     {session.device ?? "Unknown"}
-                    {session.kind === "operator" && <Badge size="2xsmall" className="ml-2">operator</Badge>}
+                    {session.kind === "operator" && (
+                      <Badge size="2xsmall" className="ml-2">
+                        operator
+                      </Badge>
+                    )}
                   </Table.Cell>
                   <Table.Cell className="text-ui-fg-subtle">{session.network ?? "—"}</Table.Cell>
-                  <Table.Cell className="text-ui-fg-subtle">last {when(session.lastSeenAt)}</Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle">{when(session.lastSeenAt)}</Table.Cell>
                   <Table.Cell className="text-right">
-                    {card.can.revokeSessions && (
+                    {c.can.revokeSessions && (
                       <Button size="small" variant="transparent" disabled={busy} onClick={() => setPending({ kind: "revoke-one", sessionId: session.id })}>
                         Sign out
                       </Button>
@@ -219,60 +237,60 @@ const CustomerSecurityWidget = ({ data }: { data: { id: string } }) => {
         )}
       </div>
 
-      <div className="px-6 py-4">
-        <Text weight="plus">Recent sign-in activity</Text>
-        {card.events.length === 0 ? (
-          <Text size="small" className="mt-1 text-ui-fg-subtle">
+      <div>
+        <div className="px-6 py-4">
+          <Text size="small" weight="plus">
+            Recent sign-in activity
+          </Text>
+        </div>
+        {c.events.length === 0 ? (
+          <Text size="small" className="px-6 pb-4 text-ui-fg-subtle">
             Nothing recorded yet.
           </Text>
         ) : (
-          <ul className="mt-2 space-y-1">
-            {card.events.slice(0, 20).map((event) => (
-              <li key={event.id}>
-                <Text size="small">
-                  <span className="text-ui-fg-subtle">{when(event.at)}</span> · {EVENT_LABEL[event.type] ?? event.type}
-                  {event.channel ? ` (${event.channel})` : ""}
-                  {event.device ? ` · ${event.device}` : ""}
-                  {event.network ? ` · ${event.network}` : ""}
-                </Text>
-              </li>
-            ))}
-          </ul>
+          <Table>
+            <Table.Header>
+              <Table.Row>
+                <Table.HeaderCell>When</Table.HeaderCell>
+                <Table.HeaderCell>What</Table.HeaderCell>
+                <Table.HeaderCell>Where</Table.HeaderCell>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {c.events.slice(0, 20).map((event) => (
+                <Table.Row key={event.id}>
+                  <Table.Cell className="text-ui-fg-subtle">{when(event.at)}</Table.Cell>
+                  <Table.Cell>
+                    {EVENT_LABEL[event.type] ?? event.type}
+                    {event.channel ? ` (${event.channel})` : ""}
+                  </Table.Cell>
+                  <Table.Cell className="text-ui-fg-subtle">
+                    {[event.device, event.network].filter(Boolean).join(" · ") || "—"}
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table>
         )}
       </div>
 
       <Prompt open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
         <Prompt.Content>
           <Prompt.Header>
-            <Prompt.Title>
-              {pending?.kind === "block"
-                ? "Block this customer?"
-                : pending?.kind === "unblock"
-                  ? "Unblock this customer?"
-                  : pending?.kind === "reverify"
-                    ? "Force a fresh OTP?"
-                    : pending?.kind === "merge"
-                      ? "Merge this account?"
-                      : "Sign out?"}
-            </Prompt.Title>
-            <Prompt.Description>
-              {pending?.kind === "block"
-                ? "Every device is signed out now and sign-in is refused until unblocked. Say why — it is kept in the audit log."
-                : pending?.kind === "merge"
-                  ? "Orders, wishlist and sign-in numbers move to the other account; this one is signed out and marked merged. It cannot be undone here."
-                  : pending?.kind === "reverify"
-                    ? "Every device is signed out; the customer signs back in with a code on their phone."
-                    : "This is recorded in the audit log with your name."}
-            </Prompt.Description>
+            <Prompt.Title>{pending ? PROMPT[pending.kind].title : ""}</Prompt.Title>
+            <Prompt.Description>{pending ? PROMPT[pending.kind].description : ""}</Prompt.Description>
           </Prompt.Header>
           {pending?.kind === "block" && (
             <div className="px-6">
-              <Textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason" />
+              <Textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Why — at least a few words" />
             </div>
           )}
           {pending?.kind === "merge" && (
-            <div className="px-6">
-              <Input value={mergeInto} onChange={(event) => setMergeInto(event.target.value)} placeholder="cus_… (the account to keep)" />
+            <div className="flex flex-col gap-y-1 px-6">
+              <Input value={mergeInto} onChange={(event) => setMergeInto(event.target.value)} placeholder="cus_…" />
+              <Text size="xsmall" className="text-ui-fg-subtle">
+                The ID of the account to keep — copy it from that customer&apos;s page.
+              </Text>
             </div>
           )}
           <Prompt.Footer>

@@ -13,9 +13,8 @@ import { model } from "@medusajs/framework/utils";
  *
  * `seal_intact` is stored here where Fastify only evaluated it, so the
  * hygiene answer the customer gave survives for the quality check on
- * receipt. The reverse-pickup and payout columns are NOT here: reverse
- * pickup is the M3 Shiprocket port, and the payout-once rail (reference +
- * audit) is its own M2 work item that extends this table when it lands.
+ * receipt. The payout columns carry the COD payout-once rail (plan 16
+ * Phase H — reference + audit); reverse pickup is the Shiprocket port's.
  */
 export const SiumoraReturnRequest = model.define("siumora_return_requests", {
   id: model.id({ prefix: "siret" }).primaryKey(),
@@ -28,4 +27,7 @@ export const SiumoraReturnRequest = model.define("siumora_return_requests", {
   free_return_shipping: model.boolean().default(false),
   seal_intact: model.boolean().nullable(),
   note: model.text().nullable(),
+  // The manual COD payout (plan 16 B28): set once, never overwritten.
+  payout_reference: model.text().nullable(),
+  payout_recorded_at: model.dateTime().nullable(),
 });

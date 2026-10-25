@@ -14,7 +14,6 @@ import {
   summariseRatings,
   type CartLine,
   type CartTotals,
-  type CodDecision,
   type Collection,
   type HsnSummaryRow,
   type InvoiceTotals,
@@ -29,14 +28,23 @@ import {
 import { ApiError, SiumoraClient } from "./index.ts";
 import type {
   AccountCustomer,
+  CheckoutAnalytics,
+  CheckoutExtras,
+  CheckoutQuote,
   ClaimableOrder,
+  CouponState,
   DeviceSession,
   GoogleOutcome,
   SignInMethods,
   SavedAddress,
   OtpIssued,
   OtpRequestOptions,
+  PaymentFlow,
+  PaymentProof,
+  PlacedOrder,
+  RazorpayHandoff,
   SessionInfo,
+  StoreConfig,
 } from "./index.ts";
 
 /**
@@ -129,12 +137,15 @@ interface MedusaCartItem {
   id: string;
   quantity: number;
   unit_price: number;
+  product_id?: string | null;
   variant_id?: string | null;
   variant_sku?: string | null;
   variant_title?: string | null;
   product_title?: string | null;
   product_handle?: string | null;
   thumbnail?: string | null;
+  /** Promotion adjustments (plan 16 B19) — majors, like unit_price. */
+  adjustments?: Array<{ amount?: number | null; code?: string | null } | null> | null;
   variant?:
     | (MedusaVariant & {
         product?: (Pick<MedusaProduct, "metadata"> & { images?: MedusaImage[] | null }) | null;
@@ -145,6 +156,7 @@ interface MedusaCartItem {
 interface MedusaCart {
   id: string;
   items?: MedusaCartItem[] | null;
+  promotions?: Array<{ code?: string | null } | null> | null;
 }
 
 interface MedusaCustomer {
@@ -339,6 +351,12 @@ export function mapCartLine(item: MedusaCartItem): CartLine {
   const unitPrice = majorToPaise(item.unit_price);
   const mrp = metadataPaise(variant?.metadata?.mrp_paise) ?? unitPrice;
   const firstImage = variant?.product?.images?.[0]?.url;
+  // Promotion adjustments, rounded to the paisa (a promotion spread across
+  // lines can split into fractions; the server's quote rounds the same way).
+  const discount = Math.max(
+    0,
+    Math.round((item.adjustments ?? []).reduce((sum, adjustment) => sum + (adjustment?.amount ?? 0), 0) * 100),
+  );
 
   return {
     variantId: variant?.id ?? item.variant_id ?? "",
@@ -353,7 +371,18 @@ export function mapCartLine(item: MedusaCartItem): CartLine {
     gstSlab: slab,
     hsn: typeof productMetadata.hsn === "string" ? productMetadata.hsn : "",
     piercedJewellery: productMetadata.pierced_jewellery === true,
+    ...(discount > 0 ? { discount } : {}),
   };
+}
+
+/** A route's field-keyed error map, kept only if every value is a string. */
+function stringFields(value: unknown): Record<string, string> | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0 || entries.some(([, message]) => typeof message !== "string")) {
+    return undefined;
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
 }
 
 // ── The transport ─────────────────────────────────────────────────────────
@@ -384,7 +413,9 @@ const PRODUCT_FIELDS =
 
 const CART_FIELDS =
   "id,*items,*items.variant,*items.variant.metadata," +
-  "*items.variant.product.metadata,*items.variant.product.images";
+  "*items.variant.product.metadata,*items.variant.product.images," +
+  // Coupons (plan 16 B19): each line's adjustments and the codes applied.
+  "*items.adjustments,promotions.code";
 
 /** Bound each request, not the size of the visible catalog. */
 const CATALOG_PAGE = 100;
@@ -462,19 +493,22 @@ export class MedusaClient implements PublicSurface {
       // still tell "sold out" from "server is down" on either.
       let code = "request_failed";
       let message = `Request failed with ${response.status}.`;
+      let fields: Record<string, string> | undefined;
       try {
         const payload = (await response.json()) as {
           error?: string;
           type?: string;
           code?: string;
           message?: string;
+          fields?: unknown;
         };
         code = payload.error ?? payload.code ?? payload.type ?? code;
         message = payload.message ?? message;
+        fields = stringFields(payload.fields);
       } catch {
         // Non-JSON error body; the status is all we have.
       }
-      throw new ApiError(response.status, code, message);
+      throw new ApiError(response.status, code, message, fields);
     }
 
     return (await response.json()) as T;
@@ -626,13 +660,24 @@ export class MedusaClient implements PublicSurface {
 
   async getCart(
     cartId: string,
-  ): Promise<{ cartId: string; lines: CartLine[]; totals: CartTotals }> {
+  ): Promise<{ cartId: string; lines: CartLine[]; totals: CartTotals; coupons?: string[] }> {
     const cart = await this.fetchCart(cartId);
-    const lines = (cart.items ?? []).map(mapCartLine);
-    const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
+    const items = cart.items ?? [];
+    const onHand = await this.stockFor(items);
+    const lines = items.map((item) => {
+      const line = mapCartLine(item);
+      const available = onHand.get(line.variantId);
+      return available === undefined ? line : { ...line, available };
+    });
+    // Free shipping is judged after any coupon, as Medusa's item_total is.
+    const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity - (l.discount ?? 0), 0);
+    const coupons = (cart.promotions ?? [])
+      .map((promotion) => promotion?.code)
+      .filter((code): code is string => typeof code === "string" && code.length > 0);
     return {
       cartId,
       lines,
+      coupons,
       // Same recipe as the Fastify cart read: intra-state until checkout
       // knows the delivery state; the order recomputes.
       totals: calculateTotals(lines, {
@@ -640,6 +685,39 @@ export class MedusaClient implements PublicSurface {
         shipping: shippingFor(subtotal),
       }),
     };
+  }
+
+  /**
+   * Units on hand per variant for the cart's products (plan 16 B7), so the
+   * bag can cap "+" where the stock guard below would refuse. One small read
+   * of just those products — not the catalogue, since the header count reads
+   * the cart on every page. A failed read leaves availability unknown rather
+   * than failing the bag.
+   */
+  private async stockFor(items: readonly MedusaCartItem[]): Promise<Map<string, number>> {
+    const productIds = [...new Set(items.map((item) => item.product_id).filter(Boolean))];
+    const onHand = new Map<string, number>();
+    if (productIds.length === 0) return onHand;
+    try {
+      const data = await this.request<{
+        products: Array<{ variants?: Array<{ id: string; inventory_quantity?: number }> | null }>;
+      }>(
+        "GET",
+        `/store/products?fields=${encodeURIComponent("id,*variants,+variants.inventory_quantity")}` +
+          `&limit=${productIds.length}` +
+          productIds.map((id) => `&id[]=${encodeURIComponent(id!)}`).join(""),
+      );
+      for (const product of data.products) {
+        for (const variant of product.variants ?? []) {
+          if (typeof variant.inventory_quantity === "number") {
+            onHand.set(variant.id, variant.inventory_quantity);
+          }
+        }
+      }
+    } catch {
+      // Availability is a convenience; the stock guard still refuses at add.
+    }
+    return onHand;
   }
 
   /**
@@ -923,46 +1001,50 @@ export class MedusaClient implements PublicSurface {
   // ── Checkout and orders ─────────────────────────────────────
 
   /**
-   * COD checkout through the Siumora completion route.
-   *
-   * The address rides Medusa's cart (stateCode as province — the GST
-   * place-of-supply signal the order read turns back into interState), the
-   * cart gets a derived guest email (completion requires one; the card maps
-   * it back to null), and /store/siumora/carts/:id/complete allocates the
-   * SIU number + access key. Prepaid refuses until the M3 Razorpay port.
+   * Medusa takes prepaid money before the order exists (plan 16 Phase B):
+   * preparePayment → Checkout.js → completePayment.
    */
-  async checkout(
-    input: {
-      cartId: string;
-      address: Order["address"];
-      paymentMethod: Order["paymentMethod"];
-      eventId: string;
-      gaClientId?: string;
-      buyerGstin?: string;
-    },
-    idempotencyKey?: string,
-  ): Promise<{
-    ok: true;
-    orderNumber: string;
-    status: string;
-    invoiceNumber: string | null;
-    accessKey: string;
-    razorpay?: { orderId: string; keyId: string; amountPaise: number };
-  }> {
-    if (input.paymentMethod !== "cod") {
-      throw new NotPortedError("checkout (prepaid)", "the M3 Razorpay provider port");
-    }
-    const { address } = input;
+  readonly paymentFlow: PaymentFlow = "payment-first";
+
+  /**
+   * The delivery address onto Medusa's cart (stateCode as province — the GST
+   * place-of-supply signal the order read turns back into interState), plus
+   * a derived guest email (completion requires one; the card maps it back to
+   * null).
+   *
+   * The checkout's analytics identity rides the cart's metadata, which
+   * Medusa copies onto the order (plan 16 Phase G): the event id the browser
+   * pixel used (so the server conversion dedupes against it), the GA4 client
+   * id (GA4 refuses a server event without one), and the shopper's consent
+   * choice. The server overwrites its own keys (the payment method) after.
+   */
+  private async setCartAddress(
+    cartId: string,
+    address: Order["address"],
+    analytics: CheckoutAnalytics = {},
+    extras: CheckoutExtras = {},
+  ): Promise<void> {
     const normalized = normalisePhone(address.phone) ?? address.phone;
     const [firstName, ...restName] = address.name.split(/\s+/);
+    const metadata = {
+      ...(analytics.eventId ? { siumora_event_id: analytics.eventId } : {}),
+      ...(analytics.gaClientId ? { siumora_ga_client_id: analytics.gaClientId } : {}),
+      ...(analytics.consent ? { siumora_consent: analytics.consent } : {}),
+      // Always written, so a message removed after a refused attempt goes
+      // too; the server tidies, bounds, or drops it (plan 16 B21).
+      siumora_gift_message: extras.giftMessage?.trim() ?? "",
+    };
     try {
-      await this.request("POST", `/store/carts/${encodeURIComponent(input.cartId)}`, {
+      await this.request("POST", `/store/carts/${encodeURIComponent(cartId)}`, {
         email: guestEmail(normalized),
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         shipping_address: {
           first_name: firstName ?? "",
           last_name: restName.join(" "),
           address_1: address.line1,
-          ...("line2" in address && address.line2 ? { address_2: address.line2 } : {}),
+          // The landmark rides line 2 ("…, Near the post office") so it prints on
+          // the courier label and the invoice, where it is actually read.
+          ...(addressLine2(address) ? { address_2: addressLine2(address) } : {}),
           city: address.city,
           province: address.stateCode,
           postal_code: address.pincode,
@@ -982,10 +1064,109 @@ export class MedusaClient implements PublicSurface {
         throw error;
       }
     }
+  }
+
+  /**
+   * COD checkout through the Siumora completion route, which allocates the
+   * SIU number + access key. Prepaid goes through preparePayment and
+   * completePayment instead — refused here so a caller cannot place an
+   * order nobody has paid for.
+   */
+  async checkout(
+    input: {
+      cartId: string;
+      address: Order["address"];
+      paymentMethod: Order["paymentMethod"];
+      eventId: string;
+      gaClientId?: string;
+      buyerGstin?: string;
+      /** The shopper's consent choice at checkout, for the server conversion. */
+      consent?: CheckoutAnalytics["consent"];
+    } & CheckoutExtras,
+    idempotencyKey?: string,
+  ): Promise<PlacedOrder> {
+    if (input.paymentMethod !== "cod") {
+      throw new ApiError(
+        409,
+        "payment_first",
+        "Online payment is taken before the order: use preparePayment, then completePayment.",
+      );
+    }
+    await this.setCartAddress(input.cartId, input.address, analyticsOf(input), { giftMessage: input.giftMessage });
     return this.request(
       "POST",
       `/store/siumora/carts/${encodeURIComponent(input.cartId)}/complete`,
-      {},
+      // The route re-derives everything else; the method decides whether
+      // the COD fee and gate apply.
+      { paymentMethod: input.paymentMethod },
+      idempotencyKey ? { headers: { "idempotency-key": idempotencyKey } } : {},
+    );
+  }
+
+  /**
+   * Open a prepaid payment: the address onto the cart, then the prepare
+   * route readies the cart and opens (or reuses) a Razorpay order for its
+   * total. Nothing is placed. A 409 already_paid carries the handoff too —
+   * the caller should complete, not pay again.
+   */
+  async preparePayment(
+    input: {
+      cartId: string;
+      address: Order["address"];
+      paymentMethod: Order["paymentMethod"];
+    } & CheckoutAnalytics &
+      CheckoutExtras,
+  ): Promise<{ razorpay: RazorpayHandoff }> {
+    await this.setCartAddress(input.cartId, input.address, analyticsOf(input), { giftMessage: input.giftMessage });
+    return this.request(
+      "POST",
+      `/store/siumora/carts/${encodeURIComponent(input.cartId)}/prepare`,
+      { paymentMethod: input.paymentMethod },
+    );
+  }
+
+  /**
+   * Apply a coupon (plan 16 B19) — one at a time, a new code replaces the
+   * last. 400 invalid_coupon for an unknown code, 409 coupon_not_applicable
+   * when this bag does not qualify; the server message says which.
+   */
+  async applyCoupon(cartId: string, code: string): Promise<CouponState> {
+    return this.request("POST", "/store/siumora/coupons", { cartId, code });
+  }
+
+  async removeCoupon(cartId: string, code: string): Promise<CouponState> {
+    return this.request("DELETE", "/store/siumora/coupons", { cartId, code });
+  }
+
+  /**
+   * The cart-reminder opt-in from checkout step 1 (plan 16 B22): consent
+   * true records the number and the time, false withdraws it. Answers
+   * reminders:false when the operator has reminders off.
+   */
+  async setCartReminders(cartId: string, input: { phone: string; consent: boolean }): Promise<{ reminders: boolean }> {
+    return this.request("POST", `/store/siumora/carts/${encodeURIComponent(cartId)}/reminders`, input);
+  }
+
+  /** The signed link in a reminder → the cart it names (410 if already ordered). */
+  async resumeCart(token: string): Promise<{ cartId: string }> {
+    return this.request("POST", "/store/siumora/carts/resume", { token });
+  }
+
+  /**
+   * Place the order for a payment the browser says it made. The route
+   * believes Razorpay, not this call: it checks the signature, the session
+   * and the amount, and refunds if the order cannot be placed (409
+   * paid_not_placed); 409 payment_pending means Razorpay has not settled it
+   * yet and the webhook will finish the order.
+   */
+  async completePayment(
+    input: { cartId: string; paymentMethod: Order["paymentMethod"]; razorpay: PaymentProof },
+    idempotencyKey?: string,
+  ): Promise<PlacedOrder> {
+    return this.request(
+      "POST",
+      `/store/siumora/carts/${encodeURIComponent(input.cartId)}/complete`,
+      { paymentMethod: input.paymentMethod, razorpay: input.razorpay },
       idempotencyKey ? { headers: { "idempotency-key": idempotencyKey } } : {},
     );
   }
@@ -1084,14 +1265,7 @@ export class MedusaClient implements PublicSurface {
     city?: string;
     stateCode?: string;
     phone?: string;
-  }): Promise<{
-    serviceable: boolean;
-    estimatedDays: string;
-    addressQuality: { score: number; issues: string[]; needsReview: boolean };
-    rto: { risk: "low" | "medium" | "high"; score: number };
-    cod: CodDecision;
-    phoneVerified: boolean;
-  }> {
+  }): Promise<CheckoutQuote> {
     return this.request("POST", "/store/siumora/checkout/quote", input);
   }
 
@@ -1182,7 +1356,7 @@ export class MedusaClient implements PublicSurface {
     return data.content;
   }
 
-  async getStoreConfig(): Promise<{ paymentsEnabled: boolean; razorpayConfigured: boolean }> {
+  async getStoreConfig(): Promise<StoreConfig> {
     return this.request("GET", "/store/siumora/config");
   }
 
@@ -1290,4 +1464,22 @@ export function createMedusaClient(
     );
   }
   return new MedusaClient({ baseUrl, publishableKey });
+}
+
+/** The checkout's analytics identity, without unset keys. */
+function analyticsOf(input: CheckoutAnalytics): CheckoutAnalytics {
+  return {
+    ...(input.eventId ? { eventId: input.eventId } : {}),
+    ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
+    ...(input.consent ? { consent: input.consent } : {}),
+  };
+}
+
+/** Line 2 as the courier reads it: the area, then the landmark. */
+function addressLine2(address: Order["address"]): string | undefined {
+  const parts = [
+    "line2" in address ? address.line2?.trim() : undefined,
+    "landmark" in address && address.landmark?.trim() ? `Near ${address.landmark.trim()}` : undefined,
+  ].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(", ") : undefined;
 }

@@ -37,6 +37,8 @@ function toDomain(raw: Record<string, unknown>): Order {
       gstSlab: line.gstSlab as CartLine["gstSlab"],
       hsn: line.hsn as string,
       piercedJewellery: Boolean(line.piercedJewellery),
+      // Coupon paise off the line (plan 16 B19), when the order had one.
+      ...(typeof line.discount === "number" && line.discount > 0 ? { discount: line.discount } : {}),
     }),
   );
 
@@ -56,6 +58,7 @@ function toDomain(raw: Record<string, unknown>): Order {
       savings:
         lines.reduce((sum, l) => sum + l.mrp * l.quantity, 0) -
         (raw.subtotal as number),
+      discount: typeof raw.discount === "number" ? raw.discount : 0,
       shipping: raw.shipping as number,
       codFee: raw.codFee as number,
       total,
@@ -92,6 +95,10 @@ export interface PlaceOrderInput {
   readonly gaClientId?: string;
   /** A registered buyer GSTIN, for a B2B invoice. */
   readonly buyerGstin?: string;
+  /** The shopper's consent choice, for the server-side conversion (plan 16 Phase G). */
+  readonly consent?: "full" | "default";
+  /** For the card in the parcel, when the store offers one (plan 16 B21). */
+  readonly giftMessage?: string;
 }
 
 export interface RazorpayHandoff {
@@ -100,17 +107,54 @@ export interface RazorpayHandoff {
   readonly amountPaise: number;
 }
 
+/** A refusal the checkout form can act on: the API's words and its code. */
+function refusal(error: unknown, fallback: string): { ok: false; message: string; error?: string; fields?: Record<string, string> } {
+  return {
+    ok: false,
+    message: error instanceof Error && error.message ? error.message : fallback,
+    // verify_phone / step_up_required tell checkout which sheet to open
+    // (the COD gate, auth plan phase 2); paid_not_placed / payment_pending
+    // tell it what happened to the money.
+    ...(error instanceof ApiError ? { error: error.code } : {}),
+    ...(error instanceof ApiError && error.fields ? { fields: { ...error.fields } } : {}),
+  };
+}
+
+/**
+ * Place an order — or, on a payment-first backend (Medusa) with a prepaid
+ * method, open the payment instead: `payFirst` with a handoff and no order
+ * number. Nothing exists until the browser pays and `finishPayment` runs.
+ */
 export async function placeOrder(
   input: PlaceOrderInput,
 ): Promise<
   | { ok: true; orderNumber: string; razorpay?: RazorpayHandoff }
-  | { ok: false; message: string; error?: string }
+  | { ok: true; payFirst: true; razorpay: RazorpayHandoff }
+  | { ok: false; message: string; error?: string; fields?: Record<string, string> }
 > {
   const cartId = await currentCartId();
   if (!cartId) return { ok: false, message: "Your bag is empty." };
 
+  const client = await apiAs();
+  if (input.paymentMethod !== "cod" && client.paymentFlow === "payment-first") {
+    try {
+      const { razorpay } = await client.preparePayment({
+        cartId,
+        address: input.address,
+        paymentMethod: input.paymentMethod,
+        eventId: input.eventId,
+        ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
+        ...(input.consent ? { consent: input.consent } : {}),
+        ...(input.giftMessage ? { giftMessage: input.giftMessage } : {}),
+      });
+      return { ok: true, payFirst: true, razorpay };
+    } catch (error) {
+      return refusal(error, "Online payment could not be started. Nothing was charged.");
+    }
+  }
+
   try {
-    const result = await (await apiAs()).checkout(
+    const result = await client.checkout(
       {
         cartId,
         address: input.address,
@@ -118,6 +162,8 @@ export async function placeOrder(
         eventId: input.eventId,
         ...(input.gaClientId ? { gaClientId: input.gaClientId } : {}),
         ...(input.buyerGstin ? { buyerGstin: input.buyerGstin } : {}),
+        ...(input.consent ? { consent: input.consent } : {}),
+        ...(input.giftMessage ? { giftMessage: input.giftMessage } : {}),
       },
       input.idempotencyKey,
     );
@@ -132,16 +178,35 @@ export async function placeOrder(
       ...(result.razorpay ? { razorpay: result.razorpay } : {}),
     };
   } catch (error) {
-    return {
-      ok: false,
-      message:
-        error instanceof Error && error.message
-          ? error.message
-          : "Could not place the order.",
-      // verify_phone / step_up_required tell checkout which sheet to open
-      // (the COD gate, auth plan phase 2) instead of showing an error.
-      ...(error instanceof ApiError ? { error: error.code } : {}),
-    };
+    return refusal(error, "Could not place the order.");
+  }
+}
+
+/**
+ * Finish a payment-first checkout: the browser paid in Checkout.js, so ask
+ * the backend to place the order. The backend believes Razorpay, not this
+ * call — a forged or stale proof is refused, and money that cannot become an
+ * order is refunded (error paid_not_placed).
+ */
+export async function finishPayment(input: {
+  readonly paymentMethod: PaymentMethod;
+  readonly razorpay: { orderId: string; paymentId: string; signature: string };
+  readonly idempotencyKey?: string;
+}): Promise<
+  | { ok: true; orderNumber: string }
+  | { ok: false; message: string; error?: string }
+> {
+  const cartId = await currentCartId();
+  if (!cartId) return { ok: false, message: "Your bag is empty." };
+  try {
+    const result = await (await apiAs()).completePayment(
+      { cartId, paymentMethod: input.paymentMethod, razorpay: input.razorpay },
+      input.idempotencyKey,
+    );
+    await rememberOrderKey(result.orderNumber, result.accessKey);
+    return { ok: true, orderNumber: result.orderNumber };
+  } catch (error) {
+    return refusal(error, "We could not confirm the order.");
   }
 }
 

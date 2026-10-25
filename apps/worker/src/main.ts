@@ -1,6 +1,8 @@
 import { connectionStringFromEnv, createDb, createPool } from "@siumora/db";
 import { createTransport } from "@siumora/messaging";
 
+import { medusaStore } from "./medusa-store.ts";
+import { drizzleStore } from "./store.ts";
 import { configuredDestinations, httpTransport } from "./transport.ts";
 import { runWorker } from "./worker.ts";
 
@@ -10,11 +12,25 @@ import { runWorker } from "./worker.ts";
  * A small pool: this is one process doing one thing at a fixed concurrency, and
  * taking ten connections from a database sized for the API would be rude.
  */
+// Which outbox to drain (plan 16 Phases G, J): the Medusa one — its tables
+// live in Medusa's database — unless OUTBOX_BACKEND=fastify names the old
+// ledger, which goes with Fastify. Said out loud below; a worker draining
+// the wrong database looks exactly like a worker with nothing to do.
+const outboxBackend = process.env.OUTBOX_BACKEND ?? "medusa";
+if (outboxBackend !== "medusa" && outboxBackend !== "fastify") {
+  throw new Error(`OUTBOX_BACKEND must be medusa|fastify, got "${outboxBackend}"`);
+}
+const onMedusa = outboxBackend === "medusa";
+if (onMedusa && !process.env.MEDUSA_DATABASE_URL) {
+  throw new Error("The worker drains the Medusa outbox: set MEDUSA_DATABASE_URL (or OUTBOX_BACKEND=fastify for the old ledger).");
+}
 const pool = createPool({
-  connectionString: connectionStringFromEnv(),
+  connectionString: onMedusa ? process.env.MEDUSA_DATABASE_URL! : connectionStringFromEnv(),
   ssl: process.env.DATABASE_SSL === "true",
   max: 4,
 });
+const store = onMedusa ? medusaStore(pool) : drizzleStore(createDb(pool));
+console.log(`[worker] draining the ${store.name} outbox`);
 
 const transportConfig = {
   ...(process.env.GA4_MEASUREMENT_ID
@@ -61,7 +77,7 @@ console.log(
     : "[worker] no messaging provider configured — queued messages will be marked skipped",
 );
 
-await runWorker(createDb(pool), httpTransport(transportConfig), {
+await runWorker(store, httpTransport(transportConfig), {
   intervalMs: Number(process.env.WORKER_INTERVAL_MS ?? 15_000),
   signal: controller.signal,
   messages,

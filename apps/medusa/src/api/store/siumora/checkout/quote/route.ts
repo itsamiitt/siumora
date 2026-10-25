@@ -1,21 +1,12 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
+import { checkoutSettings, customerSignals } from "../../../../../lib/checkout-context";
+import { toInvoiceLines, type InvoiceLineWire } from "../../../../../modules/gst/invoice";
 import { findPincode, type SqlClient } from "../../../../../modules/serviceability/lookup";
-import {
-  ANONYMOUS_SIGNALS,
-  computeQuote,
-  parseQuoteBody,
-  type QuoteSignals,
-} from "../../../../../modules/serviceability/serviceability";
-import {
-  linePaise,
-  siumoraOrderStatus,
-  wireNumber,
-  type OrderLineWire,
-} from "../../../../../modules/siumora-order/identity";
-import { readSettings, type SqlClient as SettingsSqlClient } from "../../../../../modules/settings/read";
-import { SETTING_DEFAULTS } from "../../../../../modules/settings/settings";
+import { computeQuote, parseQuoteBody } from "../../../../../modules/serviceability/serviceability";
+import { cartVersion, quoteTotals } from "../../../../../modules/siumora-order/checkout-rules";
+import { lineDiscountPaise, linePaise, wireNumber } from "../../../../../modules/siumora-order/identity";
 
 /**
  * POST /store/siumora/checkout/quote — delivery promise, COD eligibility
@@ -30,27 +21,26 @@ import { SETTING_DEFAULTS } from "../../../../../modules/settings/settings";
  * (see the serviceability module), so the two stacks cannot disagree by
  * re-implementation.
  *
+ * Plan 16 Phase A (B8) adds, Medusa-only:
+ * - `totals` {prepaid, cod|null, interState}: what the order will carry per
+ *   method, in paise, from the same rules the completion route charges by
+ *   (modules/siumora-order/checkout-rules.ts). The storefront shows these
+ *   rather than computing its own.
+ * - `cartVersion`: a fingerprint of the lines and prices, so a changed bag
+ *   reads as "prices updated" instead of a silent new total.
+ * `totals` is null when a line cannot carry a lawful invoice (no HSN or
+ * slab) — the same refusal the invoice would make, surfaced before payment.
+ *
  * Read-only, so the storefront can call it as the customer types. An
  * unknown cart quotes over a zero subtotal — the same outcome as Fastify's
  * getCartLines returning no lines — and an unknown pincode quotes
  * serviceable:false with COD withheld ("Not available for this pincode").
- *
- * COD caps: the settings module's dial (siumora_settings) when its table
- * exists, else its compiled defaults — the same values Fastify's settings
- * repository defaults to, so an unconfigured stack quotes identically.
- *
- * phoneVerified: false unless the signed-in customer's stored phone equals
- * the submitted one — the same strict comparison as Fastify's
- * customerSignals (an unverified number must not launder an address into
- * the lower risk band). The customer arrives via req.auth_context, which
- * the session door (src/lib/session-auth.ts, mounted on /store) sets for a
- * live storefront session — closing track-m row 9. A guest is honestly
- * anonymous (phoneVerified:false, isNewCustomer:true, successfulOrders:0).
  */
 
 interface CartWire {
   id: string;
-  items?: Array<(OrderLineWire & { id: string }) | null> | null;
+  promotions?: Array<{ code?: string | null } | null> | null;
+  items?: Array<(InvoiceLineWire & { id: string }) | null> | null;
 }
 
 export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<void> {
@@ -67,82 +57,71 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   ) as unknown as SqlClient;
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY);
 
-  // ── Customer signals (see header: anonymous unless auth_context). ──
-  let signals: QuoteSignals = ANONYMOUS_SIGNALS;
-  const actorId = (req as { auth_context?: { actor_id?: string } }).auth_context
-    ?.actor_id;
-  if (actorId) {
-    const { data: customers } = await query.graph({
-      entity: "customer",
-      fields: ["id", "phone"],
-      filters: { id: actorId },
-    });
-    const customer = customers[0] as { id: string; phone: string | null } | undefined;
-    if (customer) {
-      const { data: past } = await query.graph({
-        entity: "order",
-        fields: ["id", "status"],
-        filters: { customer_id: actorId },
-      });
-      signals = {
-        // Strict equality against the stored (normalized) number, exactly
-        // like Fastify — the delivery number must be the one they proved.
-        phoneVerified: body.phone !== undefined && body.phone === customer.phone,
-        isNewCustomer: past.length === 0,
-        // "delivered" arrives with the M2 ops port's status vocabulary;
-        // until then this count is honestly zero by construction
-        // (confirmed-unless-cancelled), same as a new customer's history.
-        successfulOrders: past.filter(
-          (order) => siumoraOrderStatus((order as { status: string }).status) === "delivered",
-        ).length,
-      };
-    }
-  }
+  const signals = await customerSignals(req, body.phone);
 
-  // ── Cart subtotal, integer paise (the transport's own money path). ──
+  // ── Cart lines, integer paise (the transport's own money path). ──
   const { data: carts } = await query.graph({
     entity: "cart",
     fields: [
       // items.* rather than a field list: quantity is a computed field that
       // resolves undefined when named explicitly (probed on 2.18.0).
       "id",
+      // The coupons applied (plan 16 B19), so the summary can show and remove them.
+      "promotions.code",
       "items.*",
       "items.variant.id",
       "items.variant.metadata",
+      "items.variant.product.metadata",
+      "items.adjustments.amount",
     ],
     filters: { id: body.cartId },
   });
   const cart = carts[0] as CartWire | undefined;
-  const lines = (cart?.items ?? []).filter(Boolean);
-  const subtotalPaise = lines.reduce(
+  const items = (cart?.items ?? []).filter((item): item is InvoiceLineWire & { id: string } =>
+    Boolean(item),
+  );
+  // Net of any coupon (plan 16 B19): the COD limits judge what is paid.
+  const subtotalPaise = items.reduce(
     (sum, item) =>
-      sum + linePaise(item!).unitPrice * wireNumber(item!.quantity, "quantity"),
+      sum + linePaise(item).unitPrice * wireNumber(item.quantity, "quantity") - lineDiscountPaise(item),
     0,
   );
 
-  // ── The COD dial: settings table when present, defaults otherwise. ──
-  let dial = SETTING_DEFAULTS;
-  try {
-    dial = await readSettings(pg as unknown as SettingsSqlClient);
-  } catch {
-    // The settings module's table is not stood up yet (its migration runs
-    // with registration) — the compiled defaults are exactly what Fastify's
-    // settings repository answers over an empty table.
-  }
-
+  const dial = await checkoutSettings(req);
   const row = await findPincode(pg, body.pincode);
 
-  res.json(
-    computeQuote({
-      body,
-      row,
-      subtotalPaise,
-      signals,
-      limits: {
-        minOrder: dial.codMinOrder,
-        maxOrder: dial.codMaxOrder,
-        fee: dial.codFee,
-      },
-    }),
-  );
+  const quote = computeQuote({
+    body,
+    row,
+    subtotalPaise,
+    signals,
+    limits: {
+      minOrder: dial.codMinOrder,
+      maxOrder: dial.codMaxOrder,
+      fee: dial.codFee,
+    },
+  });
+
+  let totals: ReturnType<typeof quoteTotals> | null = null;
+  let version: string | null = null;
+  if (items.length > 0) {
+    try {
+      const lines = toInvoiceLines(items);
+      totals = quoteTotals(lines, { stateCode: body.stateCode, cod: quote.cod });
+      version = cartVersion(lines);
+    } catch {
+      // A line without HSN/slab: the totals stay null rather than guessed.
+    }
+  }
+
+  // Whether choosing COD will open the verify-your-number sheet (the gate in
+  // lib/checkout-identity.ts) — told up front, so the storefront asks when
+  // COD is chosen rather than surprising the shopper at Pay.
+  const codNeedsVerification = dial.codRequiresOtp && !quote.phoneVerified;
+
+  const coupons = (cart?.promotions ?? [])
+    .map((promotion) => promotion?.code)
+    .filter((code): code is string => typeof code === "string" && code.length > 0);
+
+  res.json({ ...quote, totals, cartVersion: version, codNeedsVerification, coupons });
 }

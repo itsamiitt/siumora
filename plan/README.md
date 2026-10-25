@@ -21,6 +21,8 @@ A production‑grade, AI‑ready architecture for a single‑vendor e‑commerce
 | [11-infra-security-compliance.md](11-infra-security-compliance.md) | Mumbai infra, CI/CD, observability, RBI/DPDP/consumer‑law checklist |
 | [12-roadmap-costs.md](12-roadmap-costs.md) | Phased roadmap (code + paperwork), ₹ costs, alternatives compared |
 | [13-complete-functional-roadmap.md](13-complete-functional-roadmap.md) | Current route-by-route functionality, admin parity, speed and UI acceptance, and cutover gates |
+| [16-cart-checkout-experience.md](16-cart-checkout-experience.md) | **Master plan v3:** cart & checkout UX, Medusa-only backend (payments, shipping, messaging, Fastify retirement), native-Medusa admin, timeline |
+| [17-one-backend.md](17-one-backend.md) | Two backends (Fastify + Medusa): options compared, plugin vs port research, recommendation to finish Medusa and retire Fastify before launch |
 
 ## Stack at a glance
 

@@ -16,6 +16,7 @@ function totals(total: number): CartTotals {
     mrpTotal: total,
     subtotal: total,
     savings: 0,
+    discount: 0,
     shipping: 0,
     codFee: 0,
     total,

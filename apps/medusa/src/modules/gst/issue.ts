@@ -67,6 +67,8 @@ export async function ensureInvoiceForOrder(
       "items.variant.id",
       "items.variant.metadata",
       "items.variant.product.metadata",
+
+      "items.adjustments.amount",
     ],
     filters: { id: orderId },
   });

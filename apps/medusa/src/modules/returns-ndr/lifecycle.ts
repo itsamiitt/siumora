@@ -19,7 +19,7 @@ export type { NdrAction, NdrReason, OrderStatus, ReturnReason, ReturnResolution 
 /** A refusal, shaped exactly like the Fastify error envelopes. */
 export interface Refusal {
   readonly ok: false;
-  readonly code: 400 | 403 | 409;
+  readonly code: 400 | 403 | 404 | 409;
   readonly error: string;
   readonly message: string;
 }
@@ -389,6 +389,8 @@ export interface ReturnRow {
   free_return_shipping: boolean;
   seal_intact: boolean | null;
   note: string | null;
+  payout_reference?: string | null;
+  payout_recorded_at?: string | Date | null;
   created_at: string | Date;
 }
 
@@ -436,4 +438,105 @@ export function returnEnvelope(row: ReturnRow): {
     },
     reversePickup: null,
   };
+}
+
+// ── Payout and restock (plan 16 Phase H — B28, B29) ───────────
+
+/**
+ * The manual COD payout's body: the UPI/UTR reference the founder paid the
+ * customer's VPA with. The Fastify bounds — trimmed, 4 to 120 characters.
+ */
+export function parsePayoutBody(body: unknown): Parsed<{ reference: string }> {
+  if (!isRecord(body)) return { ok: false, message: "body: expected an object" };
+  const reference = typeof body.reference === "string" ? body.reference.trim() : "";
+  if (reference.length < 4 || reference.length > 120) {
+    return { ok: false, message: "reference: expected the UPI/UTR reference, 4–120 characters" };
+  }
+  return { ok: true, value: { reference } };
+}
+
+/**
+ * May this order's return be paid out by hand? Only a COD order — a prepaid
+ * return refunds against the captured payment — with an open return that
+ * has not been paid already. One parcel, one payout.
+ */
+export function decidePayout(
+  paymentMethod: string,
+  openReturn: { payout_reference?: string | null } | undefined,
+): { ok: true } | Refusal {
+  if (paymentMethod !== "cod") {
+    return {
+      ok: false,
+      code: 409,
+      error: "not_cod",
+      message:
+        "Prepaid returns refund automatically against the captured payment; there is nothing to pay out by hand.",
+    };
+  }
+  if (!openReturn) {
+    return { ok: false, code: 404, error: "no_return", message: "No open return on this order to pay out." };
+  }
+  if (openReturn.payout_reference) {
+    return {
+      ok: false,
+      code: 409,
+      error: "already_paid",
+      message: `Already paid out as ${openReturn.payout_reference}.`,
+    };
+  }
+  return { ok: true };
+}
+
+/** The ended states whose goods come back to us. */
+export const RESTOCKABLE_STATUSES: readonly OrderStatus[] = ["rto", "returned"];
+
+/**
+ * Put an order's goods back on the shelf? Deliberately a separate step from
+ * the status change: a parcel marked RTO is on a van, not on a shelf —
+ * somebody has to have it in their hands. A repeat click is somebody
+ * checking, not an error (the route answers it 200 with the state).
+ */
+export function decideRestock(
+  status: string,
+  restockedAt: string | Date | null | undefined,
+): { ok: true } | { ok: false; already: true } | Refusal {
+  if (restockedAt) return { ok: false, already: true };
+  if (!(RESTOCKABLE_STATUSES as readonly string[]).includes(status)) {
+    return { ok: false, code: 409, error: "not_owed", message: "This order is not owed any stock back." };
+  }
+  return { ok: true };
+}
+
+export interface RestockLine {
+  quantity: number;
+  variant?: {
+    manage_inventory?: boolean | null;
+    inventory_items?: Array<{ inventory_item_id: string; required_quantity?: number | null } | null> | null;
+  } | null;
+}
+
+/**
+ * The inventory adjustments that put an order's goods back: every line's
+ * quantity times each inventory item's required quantity (a bundle variant
+ * returns all its parts), merged per item and sorted so two restocks take
+ * the levels in the same order. Variants that do not manage inventory are
+ * skipped — there is no level to put them back on.
+ */
+export function restockAdjustments(
+  lines: readonly RestockLine[],
+  locationId: string,
+): Array<{ inventoryItemId: string; locationId: string; adjustment: number }> {
+  const byItem = new Map<string, number>();
+  for (const line of lines) {
+    if (!line.variant || line.variant.manage_inventory === false) continue;
+    for (const item of line.variant.inventory_items ?? []) {
+      if (!item) continue;
+      const units = Number(line.quantity) * Number(item.required_quantity ?? 1);
+      if (!(units > 0)) continue;
+      byItem.set(item.inventory_item_id, (byItem.get(item.inventory_item_id) ?? 0) + units);
+    }
+  }
+  return [...byItem.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([inventoryItemId, adjustment]) => ({ inventoryItemId, locationId, adjustment }));
 }

@@ -10,6 +10,7 @@ import {
   mergeSettings,
   otpPolicyOf,
   razorpayConfigured,
+  validateSettingBatch,
   validateSettingWrite,
   type Settings,
 } from "./settings.ts";
@@ -225,4 +226,37 @@ test("the existing write refusals keep their wording", () => {
     ok: false,
     error: "cod_fee: expected integer paise between 0 and 10000000",
   });
+});
+
+// ── Batch saves (plan 16 B23) ──────────────────────────────────────────────
+
+test("a drawer's save validates every key and keeps them together", () => {
+  const result = validateSettingBatch([
+    { key: "cod_fee", value: 4900 },
+    { key: "cod_min_order", value: 49900 },
+    { key: "cod_max_order", value: 500000 },
+  ]);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.entries.map((entry) => entry.key), ["cod_fee", "cod_min_order", "cod_max_order"]);
+});
+
+test("one bad key refuses the whole save", () => {
+  assert.equal(validateSettingBatch([{ key: "cod_fee", value: 4900 }, { key: "nope", value: 1 }]).ok, false);
+  assert.equal(validateSettingBatch([{ key: "cod_fee", value: "49" }]).ok, false);
+});
+
+test("an empty, duplicated or oversized save is refused", () => {
+  assert.equal(validateSettingBatch([]).ok, false);
+  assert.equal(validateSettingBatch("cod_fee").ok, false);
+  assert.equal(validateSettingBatch([{ key: "cod_fee", value: 1 }, { key: "cod_fee", value: 2 }]).ok, false);
+  assert.equal(validateSettingBatch(Array.from({ length: 26 }, () => ({ key: "cod_fee", value: 1 }))).ok, false);
+});
+
+test("a COD range whose floor is above its cap is refused", () => {
+  const result = validateSettingBatch([
+    { key: "cod_min_order", value: 600000 },
+    { key: "cod_max_order", value: 500000 },
+  ]);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /cod_min_order/);
 });

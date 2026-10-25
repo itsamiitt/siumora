@@ -106,8 +106,12 @@ jobs:
       - name: Install Playwright
         run: pnpm --filter @siumora/e2e exec playwright install --with-deps chromium
 
+      # Named explicitly: the harness defaults to Medusa now (plan 16 Phase J).
+      # scripts/retire-fastify.mjs removes this job with apps/api.
       - name: E2E
         run: pnpm --filter @siumora/e2e test:e2e
+        env:
+          E2E_BACKEND: fastify
 
       - name: E2E traces
         if: failure()
@@ -222,3 +226,66 @@ jobs:
       - name: Medusa log
         if: failure()
         run: cat /tmp/medusa.log || true
+
+  # Plan 16 Phase J: the browser suite against Medusa — the launch path. Its
+  # own fresh Medusa database, Medusa on :9123 and the storefront built with
+  # COMMERCE_BACKEND=medusa (apps/e2e/setup/prepare-medusa.ts and
+  # playwright.config.ts). Non-blocking until it has been seen green once;
+  # then drop continue-on-error and run scripts/retire-fastify.mjs, which
+  # makes this the only E2E job.
+  e2e-medusa:
+    name: E2E (medusa)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: siumora
+          POSTGRES_PASSWORD: siumora
+          POSTGRES_DB: siumora_medusa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U siumora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MEDUSA_DATABASE_URL: postgresql://siumora:siumora@localhost:5432/siumora_medusa
+      E2E_BACKEND: medusa
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The storefront and SDK import the workspace packages' built output.
+      - name: Build workspace packages
+        run: pnpm turbo run build --filter=./packages/*
+
+      - name: Install Playwright
+        run: pnpm --filter @siumora/e2e exec playwright install --with-deps chromium
+
+      - name: E2E
+        run: pnpm --filter @siumora/e2e test:e2e
+
+      - name: E2E traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-medusa-traces
+          path: apps/e2e/test-results/
+          if-no-files-found: ignore

@@ -7,6 +7,7 @@ import {
   orderEnvelope,
   type OrderStatus,
 } from "../../../../../../modules/returns-ndr/lifecycle";
+import { orderMoved } from "../../../../../../lib/order-events";
 
 /**
  * POST /store/siumora/orders/:number/confirm?key=<uuid> — confirm a held
@@ -34,5 +35,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   }
 
   const updated = await setStatus(found.pg, found.orderId, "confirmed");
+  // The customer's message and the conversion for the new status (plan 16 Phase G).
+  await orderMoved(req.scope, found.orderId, updated.status);
   res.json(orderEnvelope(found.orderNumber, updated.status, 0, updated.ndr_reason));
 }

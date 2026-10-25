@@ -116,3 +116,9 @@ test("routes tax to IGST on an inter-state invoice", () => {
   assert.equal(totals.sgst, 0);
   assert.equal(totals.igst, totals.totalTax);
 });
+
+test("the HSN summary taxes a discounted line on its net value", () => {
+  const net = hsnSummary([line({ discount: 19900 })], { interState: false });
+  const repriced = hsnSummary([line({ unitPrice: 179100 })], { interState: false });
+  assert.deepEqual(net, repriced);
+});

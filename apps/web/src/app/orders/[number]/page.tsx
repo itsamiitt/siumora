@@ -261,6 +261,9 @@ export default async function OrderPage({ params }: PageProps) {
           <Row label="Total tax">
             {formatPaise(invoice.totalTax, { showPaise: true })}
           </Row>
+          {order.totals.discount > 0 && (
+            <Row label="Coupon">−{formatPaise(order.totals.discount)}</Row>
+          )}
           {order.totals.shipping > 0 && (
             <Row label="Shipping">{formatPaise(order.totals.shipping)}</Row>
           )}

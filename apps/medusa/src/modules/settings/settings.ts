@@ -73,6 +73,14 @@ export interface Settings {
    *  — the A/B arm against phone-only. */
   readonly googleSignInEnabled: boolean;
   readonly googleSignInPercent: number;
+  /** Checkout offers a gift message (≤150 characters) on the order (plan 16 B21). */
+  readonly giftMessageEnabled: boolean;
+  /**
+   * Cart reminders (plan 16 B22): checkout offers the opt-in, and a shopper
+   * who ticked it and left gets one WhatsApp this many minutes later.
+   */
+  readonly cartRecoveryEnabled: boolean;
+  readonly cartRecoveryDelayMinutes: number;
 }
 
 /**
@@ -101,6 +109,9 @@ export const SETTING_DEFAULTS: Settings = {
   staffMfaRequired: true,
   googleSignInEnabled: false,
   googleSignInPercent: 50,
+  giftMessageEnabled: false,
+  cartRecoveryEnabled: false,
+  cartRecoveryDelayMinutes: 60,
 };
 
 export type SettingKey =
@@ -122,7 +133,10 @@ export type SettingKey =
   | "cod_step_up_above"
   | "staff_mfa_required"
   | "google_signin_enabled"
-  | "google_signin_percent";
+  | "google_signin_percent"
+  | "gift_message_enabled"
+  | "cart_recovery_enabled"
+  | "cart_recovery_delay_minutes";
 
 interface SettingDefinition {
   readonly prop: keyof Settings;
@@ -184,6 +198,9 @@ const DEFINITIONS: Record<SettingKey, SettingDefinition> = {
   staff_mfa_required: bool("staffMfaRequired"),
   google_signin_enabled: bool("googleSignInEnabled"),
   google_signin_percent: intBetween("googleSignInPercent", 0, 100),
+  gift_message_enabled: bool("giftMessageEnabled"),
+  cart_recovery_enabled: bool("cartRecoveryEnabled"),
+  cart_recovery_delay_minutes: intBetween("cartRecoveryDelayMinutes", 30, 1440),
 };
 
 export function isSettingKey(value: string): value is SettingKey {
@@ -318,4 +335,38 @@ export function createSettingsCache(
       fetchedAt = 0;
     },
   };
+}
+
+/** The most keys one save may carry — a drawer form, not a bulk import. */
+export const MAX_BATCH = 25;
+
+/**
+ * A drawer's save (plan 16 B23): several keys, validated together and
+ * written together — all or nothing, so a form never half-applies. The
+ * COD range is checked as a pair when both ends are in the save.
+ */
+export function validateSettingBatch(
+  entries: unknown,
+): { ok: true; entries: Array<{ key: SettingKey; value: unknown }> } | { ok: false; error: string } {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return { ok: false, error: "entries: expected a non-empty list of {key, value}" };
+  }
+  if (entries.length > MAX_BATCH) return { ok: false, error: `entries: at most ${MAX_BATCH} at once` };
+  const seen = new Set<string>();
+  const valid: Array<{ key: SettingKey; value: unknown }> = [];
+  for (const entry of entries) {
+    const record = entry !== null && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+    if (typeof record.key !== "string") return { ok: false, error: "entries: every entry needs a key" };
+    if (seen.has(record.key)) return { ok: false, error: `${record.key}: appears twice` };
+    seen.add(record.key);
+    const checked = validateSettingWrite(record.key, record.value);
+    if (!checked.ok) return checked;
+    valid.push({ key: checked.key, value: record.value });
+  }
+  const min = valid.find((entry) => entry.key === "cod_min_order")?.value;
+  const max = valid.find((entry) => entry.key === "cod_max_order")?.value;
+  if (typeof min === "number" && typeof max === "number" && min > max) {
+    return { ok: false, error: "cod_min_order: must not be above cod_max_order" };
+  }
+  return { ok: true, entries: valid };
 }

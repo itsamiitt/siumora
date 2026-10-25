@@ -129,9 +129,40 @@ export default defineConfig({
     // write testifies to, and the COD remittance ledger.
     { resolve: "./src/modules/audit" },
     { resolve: "./src/modules/remittance" },
+    // The outbox (plan 16 Phase G): customer messages and server-side
+    // conversions, written by order events, drained by apps/worker.
+    { resolve: "./src/modules/outbox" },
     // Customer sessions, security state and the auth event log (auth plan
     // phase 1): revocable sessions behind the storefront cookie.
     { resolve: "./src/modules/customer-session" },
+    {
+      // Shiprocket courier booking (plan 16 Phase F): shiprocket_shiprocket,
+      // behind the seeded Standard Delivery option — the order page's native
+      // "Create fulfillment" books the courier. Overriding the fulfillment
+      // module's providers REPLACES the default list, so manual stays for
+      // anything fulfilled by hand. Credentials are read per call from the
+      // encrypted provider settings (env as the fallback); without them the
+      // provider books nothing and says so.
+      resolve: "@medusajs/medusa/fulfillment",
+      options: {
+        providers: [
+          { resolve: "@medusajs/medusa/fulfillment-manual", id: "manual" },
+          { resolve: "./src/modules/shiprocket-fulfillment", id: "shiprocket" },
+        ],
+      },
+    },
+    {
+      // Razorpay prepaid (plan 16 Phase B): pp_razorpay_razorpay, its webhook
+      // at /hooks/payment/razorpay_razorpay. Always registered — credentials
+      // are read per call from the encrypted provider settings (env as the
+      // fallback), so an owner can connect or disconnect it without a deploy
+      // and an unconfigured box simply refuses prepaid. The payment module's
+      // loader registers the system provider (COD) regardless of this list.
+      resolve: "@medusajs/medusa/payment",
+      options: {
+        providers: [{ resolve: "./src/modules/razorpay-payment", id: "razorpay" }],
+      },
+    },
     {
       // Phone-OTP sign-in (design doc M1): the Fastify OTP contract as a
       // Medusa auth provider, reusing packages/messaging's ordered channel

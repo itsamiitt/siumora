@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test:e2e": "node --experimental-strip-types setup/prepare-db.ts && playwright test"
+    "test:e2e": "node --experimental-strip-types setup/prepare.ts && playwright test"
   },
   "dependencies": {
     "@siumora/db": "workspace:*"

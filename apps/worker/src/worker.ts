@@ -1,7 +1,6 @@
-import type { Database } from "@siumora/db";
-
 import { drainConversions, type DrainReport } from "./drain.ts";
 import { drainNotifications, type MessageDrainReport, type MessageTransport } from "./messages.ts";
+import type { OutboxStore } from "./store.ts";
 import type { Transport } from "./transport.ts";
 
 /**
@@ -35,7 +34,7 @@ const DEFAULT_INTERVAL_MS = 15_000;
  * claim each other's rows and turn one backlog into two.
  */
 export async function runWorker(
-  db: Database,
+  store: OutboxStore,
   transport: Transport,
   options: WorkerOptions = {},
 ): Promise<void> {
@@ -43,7 +42,7 @@ export async function runWorker(
 
   while (!options.signal?.aborted) {
     try {
-      const report = await drainConversions(db, transport, {
+      const report = await drainConversions(store, transport, {
         ...(options.batchSize ? { batchSize: options.batchSize } : {}),
       });
       // Silent when there was nothing to do: a log line every fifteen seconds
@@ -54,7 +53,7 @@ export async function runWorker(
         // After the conversions, in the same pass. Separate queues, one loop:
         // two loops would double the polling for no benefit, and a message is
         // not more urgent than the pixel that says the order happened.
-        const messages = await drainNotifications(db, options.messages);
+        const messages = await drainNotifications(store, options.messages);
         if (messages.claimed > 0 || messages.reclaimed > 0) {
           options.logMessages?.(messages);
         }

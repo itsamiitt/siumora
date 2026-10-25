@@ -23,16 +23,116 @@ import type {
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /**
+   * Field-keyed problems when the API refused a form (checkout's
+   * invalid_address), so the storefront can put each message under its field.
+   */
+  readonly fields?: Readonly<Record<string, string>>;
 
   // Explicit fields, not constructor parameter properties: the API's test
   // runner executes source under --experimental-strip-types, which accepts
   // only erasable TypeScript syntax.
-  constructor(status: number, code: string, message: string) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    fields?: Readonly<Record<string, string>>,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    if (fields) this.fields = fields;
   }
+}
+
+/** What the browser needs to open Razorpay Checkout.js — never a secret. */
+export interface RazorpayHandoff {
+  orderId: string;
+  keyId: string;
+  amountPaise: number;
+}
+
+/** The Checkout.js success handler's proof of payment. */
+export interface PaymentProof {
+  orderId: string;
+  paymentId: string;
+  signature: string;
+}
+
+/**
+ * The checkout's analytics identity (plan 16 Phase G): the event id the
+ * browser pixel used, the GA4 client id, and the shopper's consent choice —
+ * what the server-side conversion needs to dedupe and to respect consent.
+ */
+export interface CheckoutAnalytics {
+  eventId?: string;
+  gaClientId?: string;
+  consent?: "full" | "default";
+}
+
+/** Optional checkout pieces the operator can switch on (Medusa, plan 16 Phase I). */
+export interface CheckoutExtras {
+  /** Up to 150 characters, for the card in the parcel (B21). */
+  giftMessage?: string;
+}
+
+/** A placed order, as checkout answers it. */
+export interface PlacedOrder {
+  ok: true;
+  orderNumber: string;
+  status: string;
+  invoiceNumber: string | null;
+  accessKey: string;
+  /** Order-first only: present when a provider order was created for the handoff. */
+  razorpay?: RazorpayHandoff;
+}
+
+/**
+ * How a backend takes prepaid money (plan 16 Phase B).
+ * - order-first (Fastify): checkout places a pending order, then the browser pays.
+ * - payment-first (Medusa): preparePayment opens the payment, the browser
+ *   pays, completePayment places the order — no order exists until money does.
+ */
+export type PaymentFlow = "order-first" | "payment-first";
+
+/** One method's totals as the quote states them, integer paise. */
+export interface QuotedTotals {
+  subtotal: number;
+  /** Coupon paise off the lines (plan 16 B19). Absent on a backend without coupons. */
+  discount?: number;
+  shipping: number;
+  codFee: number;
+  total: number;
+  gst: { taxableValue: number; cgst: number; sgst: number; igst: number };
+}
+
+/** The checkout quote — the risk card, plus totals where the backend has them. */
+export interface CheckoutQuote {
+  serviceable: boolean;
+  estimatedDays: string;
+  addressQuality: { score: number; issues: string[]; needsReview: boolean };
+  rto: { risk: "low" | "medium" | "high"; score: number };
+  cod: CodDecision;
+  phoneVerified: boolean;
+  /**
+   * What the order will carry per method (Medusa, plan 16 B8). Null when a
+   * line cannot be invoiced; absent on a backend that does not quote totals.
+   */
+  totals?: { prepaid: QuotedTotals; cod: QuotedTotals | null; interState: boolean } | null;
+  /** Fingerprint of the lines and prices, to notice a bag that changed. */
+  cartVersion?: string | null;
+  /** COD will ask to verify this number first (Medusa's verified-phone gate). */
+  codNeedsVerification?: boolean;
+  /** Coupon codes applied to the cart (Medusa, plan 16 B19). */
+  coupons?: string[];
+}
+
+/** What applying or removing a coupon leaves on the cart. */
+export interface CouponState {
+  coupons: string[];
+  /** Paise the cart's coupons and promotions take off. */
+  discount: number;
 }
 
 export interface ClientOptions {
@@ -155,6 +255,7 @@ interface NextFetchInit extends RequestInit {
 }
 
 export class SiumoraClient {
+  readonly paymentFlow: PaymentFlow = "order-first";
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly doFetch: typeof globalThis.fetch;
@@ -448,7 +549,7 @@ export class SiumoraClient {
 
   async getCart(
     cartId: string,
-  ): Promise<{ cartId: string; lines: CartLine[]; totals: CartTotals }> {
+  ): Promise<{ cartId: string; lines: CartLine[]; totals: CartTotals; coupons?: string[] }> {
     return this.request("GET", `/carts/${cartId}`, undefined, { cache: "no-store" });
   }
 
@@ -484,14 +585,7 @@ export class SiumoraClient {
     stateCode?: string;
     /** Lets the API tell whether this is the number the shopper proved. */
     phone?: string;
-  }): Promise<{
-    serviceable: boolean;
-    estimatedDays: string;
-    addressQuality: { score: number; issues: string[]; needsReview: boolean };
-    rto: { risk: "low" | "medium" | "high"; score: number };
-    cod: CodDecision;
-    phoneVerified: boolean;
-  }> {
+  }): Promise<CheckoutQuote> {
     return this.request("POST", "/checkout/quote", input, { cache: "no-store" });
   }
 
@@ -505,18 +599,51 @@ export class SiumoraClient {
       gaClientId?: string;
       /** A registered buyer GSTIN, for a B2B invoice. */
       buyerGstin?: string;
-    },
+      /** Medusa records it on the order; this API reads consent its own way. */
+      consent?: CheckoutAnalytics["consent"];
+    } & CheckoutExtras,
     idempotencyKey?: string,
-  ): Promise<{
-    ok: true;
-    orderNumber: string;
-    status: string;
-    invoiceNumber: string | null;
-    accessKey: string;
-    /** Present when a payment provider order was created for the handoff. */
-    razorpay?: { orderId: string; keyId: string; amountPaise: number };
-  }> {
-    return this.request("POST", "/checkout", input, { idempotencyKey });
+  ): Promise<PlacedOrder> {
+    const { consent: _consent, giftMessage: _giftMessage, ...body } = input;
+    return this.request("POST", "/checkout", body, { idempotencyKey });
+  }
+
+  // Payment-first prepaid is the Medusa flow; this backend places the order
+  // first (paymentFlow "order-first"), so callers never reach these.
+  async preparePayment(
+    _input: {
+      cartId: string;
+      address: Order["address"];
+      paymentMethod: Order["paymentMethod"];
+    } & CheckoutAnalytics &
+      CheckoutExtras,
+  ): Promise<{ razorpay: RazorpayHandoff }> {
+    throw new ApiError(501, "not_supported", "Payment-first checkout needs the Medusa backend.");
+  }
+
+  async completePayment(
+    _input: { cartId: string; paymentMethod: Order["paymentMethod"]; razorpay: PaymentProof },
+    _idempotencyKey?: string,
+  ): Promise<PlacedOrder> {
+    throw new ApiError(501, "not_supported", "Payment-first checkout needs the Medusa backend.");
+  }
+
+  // Coupons are Medusa Promotions (plan 16 B19); this backend has none.
+  async applyCoupon(_cartId: string, _code: string): Promise<CouponState> {
+    throw new ApiError(501, "not_supported", "Coupons need the Medusa backend.");
+  }
+
+  async removeCoupon(_cartId: string, _code: string): Promise<CouponState> {
+    throw new ApiError(501, "not_supported", "Coupons need the Medusa backend.");
+  }
+
+  // Cart reminders are Medusa-only (plan 16 B22).
+  async setCartReminders(_cartId: string, _input: { phone: string; consent: boolean }): Promise<{ reminders: boolean }> {
+    return { reminders: false };
+  }
+
+  async resumeCart(_token: string): Promise<{ cartId: string }> {
+    throw new ApiError(501, "not_supported", "Cart reminders need the Medusa backend.");
   }
 
   // ── Orders ──────────────────────────────────────────────────
@@ -722,6 +849,8 @@ export class SiumoraClient {
 export interface StoreConfig {
   readonly paymentsEnabled: boolean;
   readonly razorpayConfigured: boolean;
+  /** Optional checkout pieces the operator switched on (Medusa, plan 16 Phase I). */
+  readonly checkout?: { readonly giftMessage: boolean; readonly cartReminders: boolean };
 }
 
 /**

@@ -1,19 +1,20 @@
-import { defineRouteConfig } from "@medusajs/admin-sdk";
-import { DocumentText } from "@medusajs/icons";
-import { Button, Container, Heading, Input, Table, Text } from "@medusajs/ui";
+import { ArrowDownTray } from "@medusajs/icons";
+import { Button, Container, Select, Table, Text, toast } from "@medusajs/ui";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { OpsError, inr, opsFetch } from "../../../lib/ops";
+import { SectionHeader, inr } from "../../../components/kit";
+import { OpsError, opsFetch } from "../../../lib/ops";
 
 /**
- * Siumora · GST desk (plan/07): the GSTR-1 return for a period, computed by
- * the same engine that produced the invoices (GET /admin/siumora/gstr1).
- * Owner only — the route refuses anyone else and this page shows the
- * refusal wording the API chose.
+ * Siumora › GST returns (plan/07; made native in plan 16 Phase E): the
+ * GSTR-1 return for a month, computed by the same engine that issued the
+ * invoices (GET /admin/siumora/gstr1). Owner only — the route refuses
+ * anyone else and this page shows the refusal wording the API chose.
+ * Reached from the Siumora home's menu, not the sidebar.
  *
- * Downloads go through a plain fetch → blob rather than an <a href>: the
- * route needs the session cookie AND writes an audit entry per export, so
- * every download must be a real authenticated request.
+ * The CSV goes through an authenticated fetch → blob rather than a link:
+ * the route needs the session cookie AND writes an audit entry per export.
  */
 
 interface Gstr1 {
@@ -30,85 +31,92 @@ interface Gstr1 {
   }>;
 }
 
-function currentPeriod(): string {
+/** The last twelve months, newest first, as "YYYY-MM" with a readable label. */
+function recentMonths(): Array<{ value: string; label: string }> {
   const now = new Date();
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  return Array.from({ length: 12 }, (_, back) => {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1));
+    return {
+      value: `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`,
+      label: date.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" }),
+    };
+  });
 }
 
 const GstPage = () => {
-  const [period, setPeriod] = useState(currentPeriod());
-  const [gstr1, setGstr1] = useState<Gstr1 | null>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const months = recentMonths();
+  const [period, setPeriod] = useState(months[0]!.value);
+  const [downloading, setDownloading] = useState(false);
+  const gstr1 = useQuery({
+    queryKey: ["siumora", "gstr1", period],
+    queryFn: () => opsFetch<Gstr1>(`/admin/siumora/gstr1?period=${encodeURIComponent(period)}`),
+    retry: false,
+  });
 
-  const load = async () => {
-    setBusy(true);
-    setRefusal(null);
+  const download = async () => {
+    setDownloading(true);
     try {
-      setGstr1(
-        await opsFetch<Gstr1>(`/admin/siumora/gstr1?period=${encodeURIComponent(period)}`),
-      );
+      const response = await fetch(`/admin/siumora/gstr1?period=${encodeURIComponent(period)}&format=csv`, {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("The CSV was refused — try again, or check your access.");
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `gstr1-${period}.csv`;
+      anchor.click();
+      URL.revokeObjectURL(url);
     } catch (error) {
-      setGstr1(null);
-      setRefusal(
-        error instanceof OpsError ? error.message : "Could not build the return.",
-      );
+      toast.error(error instanceof Error ? error.message : "Download failed.");
     } finally {
-      setBusy(false);
+      setDownloading(false);
     }
   };
 
-  const download = async () => {
-    const response = await fetch(
-      `/admin/siumora/gstr1?period=${encodeURIComponent(period)}&format=csv`,
-      { credentials: "include" },
-    );
-    if (!response.ok) return;
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `gstr1-${period}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  };
-
+  const data = gstr1.data;
   return (
-    <div className="flex flex-col gap-4">
-      <Container className="p-6">
-        <Heading level="h1">GST desk</Heading>
-        <Text size="small" className="mt-1 text-ui-fg-subtle">
-          The GSTR-1 return, from the same engine that issued the invoices.
-          Filing stays the accountant's job.
-        </Text>
-        <div className="mt-4 flex items-end gap-2">
-          <div>
-            <Text size="small" weight="plus">Period (YYYY-MM)</Text>
-            <Input value={period} onChange={(event) => setPeriod(event.target.value)} />
-          </div>
-          <Button size="small" onClick={load} isLoading={busy}>
-            Build return
-          </Button>
-          {gstr1 && (
-            <Button size="small" variant="secondary" onClick={download}>
-              Download CSV
-            </Button>
-          )}
-        </div>
-        {refusal && (
-          <Text size="small" className="mt-3 text-ui-fg-error">{refusal}</Text>
-        )}
-      </Container>
+    <Container className="divide-y p-0">
+      <SectionHeader
+        level="h1"
+        title="GST returns"
+        subtitle="GSTR-1 from the same engine that issued the invoices. Filing stays the accountant's job."
+      />
+      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
+        <Select value={period} onValueChange={setPeriod}>
+          <Select.Trigger className="w-56">
+            <Select.Value />
+          </Select.Trigger>
+          <Select.Content>
+            {months.map((month) => (
+              <Select.Item key={month.value} value={month.value}>
+                {month.label}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select>
+        <Button size="small" variant="secondary" disabled={!data} isLoading={downloading} onClick={() => void download()}>
+          <ArrowDownTray />
+          Download CSV
+        </Button>
+      </div>
 
-      {gstr1 && (
-        <Container className="p-6">
-          <div className="flex items-center justify-between">
-            <Heading level="h2">{gstr1.period}</Heading>
-            <Text size="small" className="text-ui-fg-subtle">
-              {gstr1.totals.invoices} invoices · taxable {inr(gstr1.totals.taxableValue)}
+      {gstr1.isLoading ? (
+        <Text size="small" className="px-6 py-4 text-ui-fg-subtle">
+          Building the return…
+        </Text>
+      ) : !data ? (
+        <Text size="small" className="px-6 py-4 text-ui-fg-subtle">
+          {gstr1.error instanceof OpsError ? gstr1.error.message : "Could not build the return."}
+        </Text>
+      ) : (
+        <>
+          <div className="px-6 py-4">
+            <Text size="small">
+              {data.totals.invoices} invoices · taxable {inr(data.totals.taxableValue)} · CGST {inr(data.totals.cgst)} · SGST{" "}
+              {inr(data.totals.sgst)} · IGST {inr(data.totals.igst)}
             </Text>
           </div>
-          <Table className="mt-3">
+          <Table>
             <Table.Header>
               <Table.Row>
                 <Table.HeaderCell>HSN</Table.HeaderCell>
@@ -121,28 +129,36 @@ const GstPage = () => {
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {gstr1.hsn.map((row) => (
-                <Table.Row key={`${row.hsn}-${row.slab}`}>
-                  <Table.Cell>{row.hsn}</Table.Cell>
-                  <Table.Cell>{row.slab}%</Table.Cell>
-                  <Table.Cell>{inr(row.taxableValue)}</Table.Cell>
-                  <Table.Cell>{inr(row.cgst)}</Table.Cell>
-                  <Table.Cell>{inr(row.sgst)}</Table.Cell>
-                  <Table.Cell>{inr(row.igst)}</Table.Cell>
-                  <Table.Cell>{inr(row.total)}</Table.Cell>
+              {data.hsn.length === 0 ? (
+                <Table.Row>
+                  <Table.Cell>No invoices this month.</Table.Cell>
+                  <Table.Cell />
+                  <Table.Cell />
+                  <Table.Cell />
+                  <Table.Cell />
+                  <Table.Cell />
+                  <Table.Cell />
                 </Table.Row>
-              ))}
+              ) : (
+                data.hsn.map((row) => (
+                  <Table.Row key={`${row.hsn}-${row.slab}`}>
+                    <Table.Cell>{row.hsn}</Table.Cell>
+                    <Table.Cell>{row.slab}%</Table.Cell>
+                    <Table.Cell>{inr(row.taxableValue)}</Table.Cell>
+                    <Table.Cell>{inr(row.cgst)}</Table.Cell>
+                    <Table.Cell>{inr(row.sgst)}</Table.Cell>
+                    <Table.Cell>{inr(row.igst)}</Table.Cell>
+                    <Table.Cell>{inr(row.total)}</Table.Cell>
+                  </Table.Row>
+                ))
+              )}
             </Table.Body>
           </Table>
-        </Container>
+        </>
       )}
-    </div>
+    </Container>
   );
 };
 
-export const config = defineRouteConfig({
-  label: "GST desk",
-  icon: DocumentText,
-});
-
+// No route config: reached from the Siumora home's menu, not the sidebar.
 export default GstPage;

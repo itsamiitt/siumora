@@ -92,3 +92,107 @@ export async function seedServiceability(
 
   return { pincodes: PINCODES.length };
 }
+
+// ── The admin's view (plan 16 B25) ────────────────────────────────────────
+
+export interface ServiceabilitySummary {
+  total: number;
+  serviceable: number;
+  codAvailable: number;
+  updatedAt: string | null;
+}
+
+export async function summariseServiceability(client: SqlClient): Promise<ServiceabilitySummary> {
+  const result = await client.raw(
+    `SELECT count(*)::int AS total,
+            count(*) FILTER (WHERE serviceable)::int AS serviceable,
+            count(*) FILTER (WHERE serviceable AND cod_available)::int AS cod_available,
+            max(updated_at) AS updated_at
+       FROM siumora_pincode_serviceability WHERE deleted_at IS NULL`,
+  );
+  const row = (result.rows[0] ?? {}) as Record<string, unknown>;
+  const updated = row.updated_at;
+  return {
+    total: Number(row.total ?? 0),
+    serviceable: Number(row.serviceable ?? 0),
+    codAvailable: Number(row.cod_available ?? 0),
+    updatedAt: updated instanceof Date ? updated.toISOString() : typeof updated === "string" ? updated : null,
+  };
+}
+
+const IMPORT_CHUNK = 500;
+
+/**
+ * Upsert a checked courier file. `dryRun` reports what would change and
+ * writes nothing — the owner sees "1,240 new, 36 changed" before committing.
+ * Rows not in the file are left alone: a partial file never unserves the
+ * rest of India.
+ */
+export async function importServiceability(
+  client: SqlClient,
+  rows: ReadonlyArray<{
+    pincode: string;
+    city: string;
+    state_code: string;
+    serviceable: boolean;
+    cod_available: boolean;
+    estimated_days: string;
+    rto_rate_bps: number;
+  }>,
+  options: { dryRun: boolean },
+): Promise<{ added: number; updated: number; unchanged: number }> {
+  let added = 0;
+  let updated = 0;
+  let unchanged = 0;
+  for (let start = 0; start < rows.length; start += IMPORT_CHUNK) {
+    const chunk = rows.slice(start, start + IMPORT_CHUNK);
+    const existing = await client.raw(
+      `SELECT ${COLUMNS} FROM siumora_pincode_serviceability
+        WHERE deleted_at IS NULL AND pincode IN (${chunk.map(() => "?").join(", ")})`,
+      chunk.map((row) => row.pincode),
+    );
+    const known = new Map(
+      (existing.rows as unknown as PincodeRow[]).map((row) => [row.pincode, row]),
+    );
+    for (const row of chunk) {
+      const current = known.get(row.pincode);
+      if (!current) added += 1;
+      else if (
+        current.city === row.city &&
+        current.state_code === row.state_code &&
+        current.serviceable === row.serviceable &&
+        current.cod_available === row.cod_available &&
+        current.estimated_days === row.estimated_days &&
+        current.rto_rate_bps === row.rto_rate_bps
+      ) unchanged += 1;
+      else updated += 1;
+    }
+    if (options.dryRun) continue;
+
+    await client.raw(
+      `INSERT INTO siumora_pincode_serviceability
+         (id, pincode, city, state_code, serviceable, cod_available, estimated_days, rto_rate_bps, created_at, updated_at)
+       VALUES ${chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, now(), now())").join(", ")}
+       ON CONFLICT (pincode) WHERE deleted_at IS NULL
+       DO UPDATE SET
+         city = excluded.city,
+         state_code = excluded.state_code,
+         serviceable = excluded.serviceable,
+         cod_available = excluded.cod_available,
+         estimated_days = excluded.estimated_days,
+         rto_rate_bps = excluded.rto_rate_bps,
+         updated_at = now()`,
+      chunk.flatMap((row) => [
+        `sipin_${randomUUID().replaceAll("-", "")}`,
+        row.pincode,
+        row.city,
+        row.state_code,
+        row.serviceable,
+        row.cod_available,
+        row.estimated_days,
+        row.rto_rate_bps,
+      ]),
+    );
+  }
+  return { added, updated, unchanged };
+}
