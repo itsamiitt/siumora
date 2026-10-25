@@ -1,6 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
+import { razorpayCredentials } from "../../../../modules/razorpay-payment/credentials";
 import { settingsCache } from "../../../../modules/settings/cache";
 import { readSettings, type SqlClient } from "../../../../modules/settings/read";
 import { configEnvelope } from "../../../../modules/settings/settings";
@@ -17,10 +18,15 @@ import { configEnvelope } from "../../../../modules/settings/settings";
  *
  * paymentsEnabled comes from the siumora_settings table merged over the
  * in-code defaults (enabled unless an operator stored otherwise), behind the
- * same 30s in-process TTL the Fastify app uses. razorpayConfigured is env
- * presence — RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET both set — which is
- * precisely the condition under which the Fastify boot builds its payment
- * client and its /config says true.
+ * same 30s in-process TTL the Fastify app uses. razorpayConfigured is the
+ * Razorpay provider's own readiness (plan 16 Phase B): key id and secret
+ * present in the encrypted provider settings or the environment, and the
+ * provider not switched off in the admin — exactly the condition under which
+ * the prepare route opens a payment.
+ *
+ * Medusa adds `checkout` beside the pinned pair (plan 16 Phase I): which
+ * optional checkout pieces the operator switched on — the gift message and
+ * the cart-reminder opt-in — so the storefront offers only what is live.
  */
 
 // One cache per process, shared with the admin settings PATCH (which
@@ -32,9 +38,17 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
   ) as unknown as SqlClient;
   const cache = settingsCache(() => readSettings(pg));
 
-  const settings = await cache.get();
+  const [settings, razorpay] = await Promise.all([
+    cache.get(),
+    razorpayCredentials(pg as unknown as Parameters<typeof razorpayCredentials>[0]),
+  ]);
   res.setHeader("Cache-Control", "no-store");
-  // Credentials alone do not make Medusa prepaid checkout operational.
-  // The SDK currently refuses prepaid checkout until the payment provider is ported.
-  res.json({ ...configEnvelope(settings, process.env), razorpayConfigured: false });
+  res.json({
+    ...configEnvelope(settings, process.env),
+    razorpayConfigured: razorpay.configured,
+    checkout: {
+      giftMessage: settings.giftMessageEnabled,
+      cartReminders: settings.cartRecoveryEnabled,
+    },
+  });
 }

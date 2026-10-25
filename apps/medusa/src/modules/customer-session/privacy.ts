@@ -98,3 +98,31 @@ export async function forgetAuthEvents(pg: SqlClient, customerId: string): Promi
     [customerId],
   );
 }
+
+export async function getPrivacyRequest(pg: SqlClient, id: string): Promise<PrivacyRequestRow | undefined> {
+  const result = await pg.raw(
+    `SELECT ${COLUMNS} FROM siumora_privacy_request WHERE id = ? AND deleted_at IS NULL`,
+    [id],
+  );
+  return result.rows[0] as PrivacyRequestRow | undefined;
+}
+
+export type PrivacyAction = { action: "complete" } | { action: "refuse"; note: string };
+
+/**
+ * The operator's answer to an open request (plan 16 B27): complete it (an
+ * erasure re-runs the same check as the customer path — never an override)
+ * or refuse it, which needs the reason the person will be given.
+ */
+export function parsePrivacyAction(body: unknown): { ok: true; value: PrivacyAction } | { ok: false; message: string } {
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  if (record.action === "complete") return { ok: true, value: { action: "complete" } };
+  if (record.action === "refuse") {
+    const note = typeof record.note === "string" ? record.note.trim() : "";
+    if (note.length < 3 || note.length > 500) {
+      return { ok: false, message: "note: say why the request is refused (3–500 characters)" };
+    }
+    return { ok: true, value: { action: "refuse", note } };
+  }
+  return { ok: false, message: "action: expected complete|refuse" };
+}

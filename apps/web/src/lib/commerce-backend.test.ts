@@ -16,17 +16,16 @@ import { createCommerceClient } from "./commerce-backend.ts";
 
 const ENV = { API_URL: "http://127.0.0.1:4000" };
 
-test("unset COMMERCE_BACKEND defaults to fastify — today's client, unchanged", () => {
-  const client = createCommerceClient({ ...ENV });
-  assert.ok(client instanceof SiumoraClient);
-  assert.deepEqual(client, createClient({ ...ENV }));
+const MEDUSA = { MEDUSA_URL: "http://127.0.0.1:9000", MEDUSA_PUBLISHABLE_KEY: "pk_test" };
+
+test("unset COMMERCE_BACKEND defaults to medusa — the launch path (plan 16 Phase J)", () => {
+  assert.ok(createCommerceClient({ ...ENV, ...MEDUSA }) instanceof MedusaClient);
 });
 
-test("explicit fastify constructs the same client as the default", () => {
-  assert.deepEqual(
-    createCommerceClient({ ...ENV, COMMERCE_BACKEND: "fastify" }),
-    createCommerceClient({ ...ENV }),
-  );
+test("fastify is still selectable by name until it is retired", () => {
+  const client = createCommerceClient({ ...ENV, COMMERCE_BACKEND: "fastify" });
+  assert.ok(client instanceof SiumoraClient);
+  assert.deepEqual(client, createClient({ ...ENV }));
 });
 
 test("medusa constructs the M1 transport when configured", () => {

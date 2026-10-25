@@ -58,7 +58,7 @@ async function AdminContents({ searchParams }: { searchParams: Promise<{ page?: 
 }
 
 export default function WaitlistAdminPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
-  if (process.env.COMMERCE_BACKEND === "medusa") {
+  if (process.env.COMMERCE_BACKEND !== "fastify") {
     const adminUrl = process.env.MEDUSA_ADMIN_URL ?? process.env.MEDUSA_URL;
     if (!adminUrl) throw new Error("MEDUSA_ADMIN_URL or MEDUSA_URL is required for the Medusa dashboard.");
     redirect(`${adminUrl.replace(/\/+$/, "")}/app/siumora/waitlist`);

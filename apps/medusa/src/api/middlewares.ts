@@ -45,6 +45,10 @@ function rateLimit(
   limit(req, res, next);
 }
 
+function closedPromotionsRoute(_req: MedusaRequest, res: MedusaResponse): void {
+  res.status(404).json({ error: "not_found", message: "Apply coupons through /store/siumora/coupons." });
+}
+
 export default defineMiddlewares({
   routes: [
     // Customer sessions (auth plan phase 1): an `sst_` bearer becomes the
@@ -90,6 +94,25 @@ export default defineMiddlewares({
     },
     // The custom checkout/orders namespace, present and future routes alike.
     { matcher: "/store/siumora", middlewares: [rateLimit] },
+    // Coupons go through /store/siumora/coupons, which carries the strict
+    // guessing ceiling (plan 16 B19); the native door would sit under the
+    // loose cart-building one.
+    { matcher: "/store/carts/:id/promotions", middlewares: [closedPromotionsRoute] },
+    // The courier webhook (plan 16 Phase F) signs its raw body; keep it for
+    // the HMAC check. Rate-limited like the store surface it moves orders on.
+    // Delivery receipts (plan 16 Phase G) are signed over the raw body too.
+    {
+      matcher: "/webhooks/messaging",
+      method: ["POST"],
+      bodyParser: { preserveRawBody: true },
+      middlewares: [rateLimit],
+    },
+    {
+      matcher: "/webhooks/courier",
+      method: ["POST"],
+      bodyParser: { preserveRawBody: true },
+      middlewares: [rateLimit],
+    },
     // Browse class, loosest. Medusa 2.21 refuses any store `fields` path not
     // on the route's allow-list, and the SDK's PRODUCT_FIELDS / CART_FIELDS
     // (packages/sdk/src/medusa.ts) read the metadata our India fields live in
@@ -102,6 +125,9 @@ export default defineMiddlewares({
           "items.variant.metadata",
           "items.variant.product.metadata",
           "items.variant.product.images",
+          // Coupons (plan 16 B19) — the cart read shows what each code takes off.
+          "items.adjustments",
+          "promotions.code",
         ),
       ],
     },

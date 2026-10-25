@@ -2,12 +2,14 @@
 import { calculateTotals, isInterState, type CartLine, type Order, type OrderStatus, type ShippingAddress } from "@siumora/core";
 
 import {
+  lineDiscountPaise,
   linePaise,
   majorToPaise,
   wireNumber,
   type OrderLineWire,
 } from "../modules/siumora-order/identity.ts";
 import { initialSiumoraStatus } from "../modules/returns-ndr/lifecycle.ts";
+import { codFeeOf, paymentMethodOf } from "../modules/siumora-order/checkout-rules.ts";
 
 /**
  * Pure assembly of core's domain Order from Medusa wire shapes — the Medusa
@@ -42,6 +44,9 @@ export interface OrderWire {
   created_at: string | Date;
   /** BigNumber on the wire — unwrap through wireNumber, never arithmetic. */
   shipping_total: unknown;
+  /** The COD fee rides the shipping method's data (plan 16 B3). */
+  shipping_methods?: Array<{ data?: Record<string, unknown> | null } | null> | null;
+  metadata?: Record<string, unknown> | null;
   shipping_address?: Record<string, unknown> | null;
   items?: Array<ItemWire | null> | null;
 }
@@ -102,6 +107,7 @@ export function toCartLines(wire: OrderWire): CartLine[] {
           : (5 as CartLine["gstSlab"]),
       hsn: typeof productMetadata.hsn === "string" ? productMetadata.hsn : "",
       piercedJewellery: productMetadata.pierced_jewellery === true,
+      ...(lineDiscountPaise(item!) > 0 ? { discount: lineDiscountPaise(item!) } : {}),
     };
   });
 }
@@ -115,7 +121,8 @@ export function toDomainOrder(wire: OrderWire, sidecars: OrderSidecars): Order {
   const lines = toCartLines(wire);
   const address = toShippingAddress(wire.shipping_address);
   const interState = isInterState(address.stateCode);
-  const shipping = majorToPaise(wireNumber(wire.shipping_total, "shipping_total"));
+  const codFee = codFeeOf(wire.shipping_methods);
+  const shipping = majorToPaise(wireNumber(wire.shipping_total, "shipping_total")) - codFee;
   const status = (sidecars.statusRow?.status ??
     initialSiumoraStatus(wire.status)) as OrderStatus;
   const ndrReason = sidecars.statusRow?.ndr_reason ?? null;
@@ -125,8 +132,8 @@ export function toDomainOrder(wire: OrderWire, sidecars: OrderSidecars): Order {
     number: sidecars.orderNumber,
     status,
     lines,
-    totals: calculateTotals(lines, { interState, shipping, codFee: 0 }),
-    paymentMethod: "cod",
+    totals: calculateTotals(lines, { interState, shipping, codFee }),
+    paymentMethod: paymentMethodOf(wire.metadata),
     address,
     interState,
     placedAt: new Date(wire.created_at).toISOString(),

@@ -26,4 +26,7 @@ export const SiumoraOrderStatus = model.define("siumora_order_status", {
   order_id: model.text().unique(),
   status: model.text(),
   ndr_reason: model.text().nullable(),
+  // rto/returned goods back on the shelf (plan 16 B29) — set once. Never
+  // touches updated_at, which is the delivered-at clock (above).
+  restocked_at: model.dateTime().nullable(),
 });

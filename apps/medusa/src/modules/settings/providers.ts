@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { PROVIDERS, type ProviderName } from "./provider-fields.ts";
+import { OPTIONAL_FIELDS, PROVIDERS, type ProviderName } from "./provider-fields.ts";
 import type { WriteSqlClient } from "./write";
 
 type Env = Record<string, string | undefined>;
@@ -48,7 +48,7 @@ export async function providerConfiguration(pg: { raw(sql: string): Promise<{ ro
       fields[field] = Boolean(value);
       effective[field] = enabled ? value : undefined;
     }
-    const required = PROVIDERS[name].fields.filter((field) => field !== "RAZORPAY_WEBHOOK_SECRET");
+    const required = PROVIDERS[name].fields.filter((field) => !OPTIONAL_FIELDS.has(field));
     providers[name] = { enabled, configured: enabled && required.every((key) => fields[key]), saved: Boolean(row), fields, ...(error ? { error } : {}) };
   }
   return { effective, providers, editable: Boolean(env.SETTINGS_ENCRYPTION_KEY && env.SETTINGS_ENCRYPTION_KEY.length >= 32) };

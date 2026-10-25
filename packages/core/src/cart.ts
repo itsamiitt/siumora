@@ -29,15 +29,30 @@ export interface CartLine {
   readonly hsn: string;
   /** Drives the returns hygiene exception. */
   readonly piercedJewellery: boolean;
+  /**
+   * Units on hand for this variant, when the cart read knows it — the bag
+   * caps its "+" here instead of offering a quantity the stock guard will
+   * refuse. Absent means unknown, never zero.
+   */
+  readonly available?: number;
+  /**
+   * Paise off this line's total from a coupon or promotion, tax-inclusive.
+   * A discount shown on the invoice reduces the transaction value (CGST Act
+   * s.15(3)(a)), so it comes off the line before GST is extracted — never
+   * off the grand total. Absent means none.
+   */
+  readonly discount?: number;
 }
 
 export interface CartTotals {
   /** Sum of line MRPs — the "you saved" comparison base. */
   readonly mrpTotal: number;
-  /** Sum of line selling prices, tax-inclusive. */
+  /** Sum of line selling prices, tax-inclusive, before any discount. */
   readonly subtotal: number;
   /** mrpTotal − subtotal. */
   readonly savings: number;
+  /** Coupon and promotion discounts across the lines, tax-inclusive. */
+  readonly discount: number;
   readonly shipping: number;
   /** COD handling fee, zero on prepaid. */
   readonly codFee: number;
@@ -56,8 +71,9 @@ export interface TotalsOptions {
   readonly codFee?: number;
 }
 
+/** What the line actually sells for: price × quantity, less its discount. */
 export function lineTotal(line: CartLine): number {
-  return line.unitPrice * line.quantity;
+  return line.unitPrice * line.quantity - (line.discount ?? 0);
 }
 
 /**
@@ -91,9 +107,10 @@ export function calculateTotals(
   const { interState, shipping = 0, codFee = 0 } = options;
 
   const mrpTotal = lines.reduce((sum, l) => sum + l.mrp * l.quantity, 0);
-  const subtotal = lines.reduce((sum, l) => sum + lineTotal(l), 0);
+  const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
+  const discount = lines.reduce((sum, l) => sum + (l.discount ?? 0), 0);
   const itemCount = lines.reduce((sum, l) => sum + l.quantity, 0);
-  const total = subtotal + shipping + codFee;
+  const total = subtotal - discount + shipping + codFee;
 
   // Bucket taxable amounts by slab. Shipping and the COD fee ride the
   // principal slab as part of the composite supply.
@@ -124,6 +141,7 @@ export function calculateTotals(
     mrpTotal,
     subtotal,
     savings: mrpTotal - subtotal,
+    discount,
     shipping,
     codFee,
     total,

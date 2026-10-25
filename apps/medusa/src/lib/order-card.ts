@@ -9,7 +9,9 @@ import {
   type SqlClient as StatusSqlClient,
 } from "../modules/returns-ndr/data";
 import { returnEnvelope } from "../modules/returns-ndr/lifecycle";
+import { codFeeOf, paymentMethodOf } from "../modules/siumora-order/checkout-rules";
 import {
+  lineDiscountPaise,
   linePaise,
   majorToPaise,
   siumoraOrderStatus,
@@ -29,7 +31,11 @@ export const ORDER_FIELDS = [
   "email",
   "created_at",
   "customer_id",
+  // The payment method rides order metadata (plan 16 Phase B).
+  "metadata",
   "shipping_total",
+  // The COD fee rides the shipping method (plan 16 B3); its data says how much.
+  "shipping_methods.data",
   "shipping_address.*",
   // items.* rather than a field list: quantity is a computed field that
   // resolves undefined when named explicitly (probed on 2.18.0).
@@ -37,6 +43,8 @@ export const ORDER_FIELDS = [
   "items.variant.id",
   "items.variant.metadata",
   "items.variant.product.metadata",
+  // Coupon adjustments per line (plan 16 B19).
+  "items.adjustments.amount",
 ];
 
 export interface OrderWire {
@@ -47,6 +55,8 @@ export interface OrderWire {
   customer_id: string | null;
   /** BigNumber on the wire — unwrap through wireNumber, never arithmetic. */
   shipping_total: unknown;
+  shipping_methods?: Array<{ data?: Record<string, unknown> | null } | null> | null;
+  metadata?: Record<string, unknown> | null;
   shipping_address?: Record<string, unknown> | null;
   items?: Array<
     | (OrderLineWire & {
@@ -95,6 +105,8 @@ export interface OrderCardLine {
   gstSlab: number | null;
   hsn: string;
   piercedJewellery: boolean;
+  /** Coupon paise off this line (plan 16 B19); absent when none. */
+  discount?: number;
 }
 
 export function orderLines(order: OrderWire): OrderCardLine[] {
@@ -114,6 +126,7 @@ export function orderLines(order: OrderWire): OrderCardLine[] {
       gstSlab: typeof productMetadata.gst_slab === "number" ? productMetadata.gst_slab : null,
       hsn: typeof productMetadata.hsn === "string" ? productMetadata.hsn : "",
       piercedJewellery: productMetadata.pierced_jewellery === true,
+      ...(lineDiscountPaise(item!) > 0 ? { discount: lineDiscountPaise(item!) } : {}),
     };
   });
 }
@@ -129,8 +142,11 @@ export async function orderCard(
   // Integer paise throughout: line money from the lossless metadata channel,
   // shipping from Medusa majors through the refusing converter. Never floats.
   const subtotal = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
-  const shipping = majorToPaise(wireNumber(order.shipping_total, "shipping_total"));
-  const codFee = 0;
+  const discount = lines.reduce((sum, line) => sum + (line.discount ?? 0), 0);
+  // shipping_total carries any COD fee folded into the method at checkout
+  // (plan 16 B3); the card shows the two apart, as the invoice does.
+  const codFee = codFeeOf(order.shipping_methods);
+  const shipping = majorToPaise(wireNumber(order.shipping_total, "shipping_total")) - codFee;
 
   // The stored statutory invoice (M2 gst module). Absent for orders that
   // predate the module — invoice and invoiceNumber honestly null, no 500.
@@ -155,13 +171,14 @@ export async function orderCard(
       id: order.id,
       number: identity.order_number,
       status: statusRow?.status ?? siumoraOrderStatus(order.status),
-      paymentMethod: "cod",
+      paymentMethod: paymentMethodOf(order.metadata),
       placedAt: order.created_at,
       address: order.shipping_address ?? null,
       subtotal,
+      discount,
       shipping,
       codFee,
-      total: subtotal + shipping + codFee,
+      total: subtotal - discount + shipping + codFee,
       invoiceNumber: invoiceRow?.invoice_number ?? null,
       lines,
     },

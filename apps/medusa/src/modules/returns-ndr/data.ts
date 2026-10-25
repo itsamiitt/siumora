@@ -52,11 +52,12 @@ export interface StatusRow {
   order_id: string;
   status: string;
   ndr_reason: string | null;
+  restocked_at?: string | Date | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
 
-const STATUS_COLUMNS = "id, order_id, status, ndr_reason, created_at, updated_at";
+const STATUS_COLUMNS = "id, order_id, status, ndr_reason, restocked_at, created_at, updated_at";
 
 export async function getStatusRow(
   client: SqlClient,
@@ -195,7 +196,7 @@ export async function recordNdrAction(
 // ── siumora_return_requests ───────────────────────────────────
 
 const RETURN_COLUMNS =
-  "id, order_id, status, reason, resolution, variant_ids, refund_to, free_return_shipping, seal_intact, note, created_at";
+  "id, order_id, status, reason, resolution, variant_ids, refund_to, free_return_shipping, seal_intact, note, payout_reference, payout_recorded_at, created_at";
 
 export type ReturnInsert =
   | { kind: "created"; row: ReturnRow }
@@ -257,4 +258,132 @@ export async function findOpenReturn(
     [orderId],
   );
   return result.rows[0] as ReturnRow | undefined;
+}
+
+/**
+ * Record the manual COD payout (plan 16 B28). Conditional on the reference
+ * still being empty, in one statement: two operators clicking at once get
+ * one payout, and the loser gets undefined (the route's "already paid").
+ */
+export async function recordPayout(
+  client: SqlClient,
+  returnId: string,
+  reference: string,
+  now: Date,
+): Promise<ReturnRow | undefined> {
+  const result = await client.raw(
+    `UPDATE siumora_return_requests
+        SET payout_reference = ?, payout_recorded_at = ?, updated_at = now()
+      WHERE id = ? AND payout_reference IS NULL AND deleted_at IS NULL
+      RETURNING ${RETURN_COLUMNS}`,
+    [reference, now.toISOString(), returnId],
+  );
+  return result.rows[0] as ReturnRow | undefined;
+}
+
+/**
+ * Claim the restock (plan 16 B29): set restocked_at once, only while the
+ * order is still rto/returned. Claimed BEFORE the inventory adjustment so a
+ * double click cannot count the goods twice; releaseRestock undoes the
+ * claim when the adjustment fails. updated_at is left alone — it is the
+ * delivered-at clock.
+ */
+export async function claimRestock(client: SqlClient, orderId: string, now: Date): Promise<boolean> {
+  const result = await client.raw(
+    `UPDATE siumora_order_status
+        SET restocked_at = ?
+      WHERE order_id = ? AND restocked_at IS NULL AND status IN ('rto', 'returned') AND deleted_at IS NULL
+      RETURNING id`,
+    [now.toISOString(), orderId],
+  );
+  return result.rows.length > 0;
+}
+
+export async function releaseRestock(client: SqlClient, orderId: string): Promise<void> {
+  await client.raw(
+    `UPDATE siumora_order_status SET restocked_at = NULL WHERE order_id = ? AND deleted_at IS NULL`,
+    [orderId],
+  );
+}
+
+// ── siumora_shipments (plan 16 Phase F) ───────────────────────
+
+export interface ShipmentRow {
+  id: string;
+  order_id: string;
+  courier_order_id: string | null;
+  shipment_id: string | null;
+  awb: string | null;
+  courier: string | null;
+  pickup_scheduled: boolean;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
+const SHIPMENT_COLUMNS =
+  "id, order_id, courier_order_id, shipment_id, awb, courier, pickup_scheduled, created_at, updated_at";
+
+export async function getShipment(client: SqlClient, orderId: string): Promise<ShipmentRow | undefined> {
+  const result = await client.raw(
+    `SELECT ${SHIPMENT_COLUMNS} FROM siumora_shipments WHERE order_id = ? AND deleted_at IS NULL`,
+    [orderId],
+  );
+  return result.rows[0] as ShipmentRow | undefined;
+}
+
+export async function findShipmentByAwb(client: SqlClient, awb: string): Promise<ShipmentRow | undefined> {
+  const result = await client.raw(
+    `SELECT ${SHIPMENT_COLUMNS} FROM siumora_shipments WHERE awb = ? AND deleted_at IS NULL`,
+    [awb],
+  );
+  return result.rows[0] as ShipmentRow | undefined;
+}
+
+/**
+ * Record booking progress — inserted on the first step, then only the
+ * fields given are written (COALESCE keeps what an earlier step stored), so
+ * each step of a resumed booking adds to the row rather than replacing it.
+ */
+export async function saveShipment(
+  client: SqlClient,
+  orderId: string,
+  patch: {
+    courierOrderId?: string;
+    shipmentId?: string;
+    awb?: string;
+    courier?: string;
+    pickupScheduled?: boolean;
+  },
+): Promise<ShipmentRow> {
+  const result = await client.raw(
+    `INSERT INTO siumora_shipments (id, order_id, courier_order_id, shipment_id, awb, courier, pickup_scheduled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, now(), now())
+     ON CONFLICT (order_id) WHERE deleted_at IS NULL DO UPDATE SET
+       courier_order_id = COALESCE(EXCLUDED.courier_order_id, siumora_shipments.courier_order_id),
+       shipment_id = COALESCE(EXCLUDED.shipment_id, siumora_shipments.shipment_id),
+       awb = COALESCE(EXCLUDED.awb, siumora_shipments.awb),
+       courier = COALESCE(EXCLUDED.courier, siumora_shipments.courier),
+       pickup_scheduled = siumora_shipments.pickup_scheduled OR EXCLUDED.pickup_scheduled,
+       updated_at = now()
+     RETURNING ${SHIPMENT_COLUMNS}`,
+    [
+      mintId("sishp"),
+      orderId,
+      patch.courierOrderId ?? null,
+      patch.shipmentId ?? null,
+      patch.awb ?? null,
+      patch.courier ?? null,
+      patch.pickupScheduled ?? false,
+    ],
+  );
+  return result.rows[0] as ShipmentRow;
+}
+
+/** A cancelled booking steps aside (soft delete) so a fresh one can follow. */
+export async function cancelShipment(client: SqlClient, orderId: string): Promise<void> {
+  await client.raw(
+    `UPDATE siumora_shipments SET deleted_at = now(), updated_at = now()
+      WHERE order_id = ? AND deleted_at IS NULL`,
+    [orderId],
+  );
 }

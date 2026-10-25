@@ -8,13 +8,15 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  *   The storefront holds it (HTTP-only cookie) while the shopper proves
  *   their phone with an OTP; only then does the Google account link.
  * - "email_verify": the link in a verification email.
+ * - "cart_resume": the link in a cart reminder (plan 16 B22) — opens the
+ *   bag it names on whichever browser taps it.
  *
  * `<base64url(json)>.<base64url(hmac-sha256)>`, with the purpose inside the
  * signed payload so one kind can never be replayed as the other. No Medusa
  * imports, so node --test can strip-type it.
  */
 
-export type TokenPurpose = "google_link" | "email_verify";
+export type TokenPurpose = "google_link" | "email_verify" | "cart_resume";
 
 export interface TokenPayload {
   readonly purpose: TokenPurpose;

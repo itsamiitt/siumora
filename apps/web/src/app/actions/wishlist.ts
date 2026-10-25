@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 
 import { api } from "@/lib/api";
-import { removeWishlist, toggleWishlist } from "@/lib/wishlist-store";
+import { isWishlisted, removeWishlist, toggleWishlist } from "@/lib/wishlist-store";
 
-import { addToCart } from "./cart";
+import { addToCart, removeFromCart } from "./cart";
 
 export interface WishlistResult {
   wishlisted: boolean;
@@ -62,4 +62,23 @@ export async function moveSavedToCart(
   } catch {
     return { ok: false, moved: false, count: 0, message: "Could not move this piece. Please try again." };
   }
+}
+
+/**
+ * Bag → Saved (plan 16 Phase D): keep the piece for later instead of
+ * deleting it. Saved first, then out of the bag — a failure between the two
+ * leaves it in both places, never in neither.
+ */
+export async function moveBagLineToSaved(
+  handle: string,
+  variantId: string,
+): Promise<{ ok: boolean; count: number; message?: string }> {
+  try {
+    if (!(await isWishlisted(handle))) await toggleWishlist(handle);
+  } catch {
+    return { ok: false, count: 0, message: "Could not save this piece. Please try again." };
+  }
+  const removed = await removeFromCart(variantId);
+  revalidatePath("/wishlist");
+  return { ok: true, count: removed.count };
 }

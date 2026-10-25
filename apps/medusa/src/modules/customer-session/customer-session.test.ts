@@ -10,7 +10,7 @@ import {
   type SqlClient,
 } from "./data.ts";
 import { healthWindow, summariseHealth } from "./health.ts";
-import { openPrivacyRequest } from "./privacy.ts";
+import { openPrivacyRequest, parsePrivacyAction } from "./privacy.ts";
 import {
   STEP_UP_WINDOW_SECONDS,
   TOUCH_INTERVAL_MS,
@@ -297,4 +297,15 @@ test("no traffic is no rate, not zero", () => {
   assert.deepEqual(health.channels, []);
   assert.equal(healthWindow("7d"), "7d");
   assert.equal(healthWindow("forever"), "24h");
+});
+
+test("parsePrivacyAction: complete, or refuse with a stated reason", () => {
+  assert.deepEqual(parsePrivacyAction({ action: "complete" }), { ok: true, value: { action: "complete" } });
+  assert.deepEqual(parsePrivacyAction({ action: "refuse", note: "  Not the account holder  " }), {
+    ok: true,
+    value: { action: "refuse", note: "Not the account holder" },
+  });
+  assert.equal(parsePrivacyAction({ action: "refuse" }).ok, false);
+  assert.equal(parsePrivacyAction({ action: "erase" }).ok, false);
+  assert.equal(parsePrivacyAction(null).ok, false);
 });

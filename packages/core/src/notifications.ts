@@ -130,6 +130,15 @@ export const TEMPLATES: readonly Template[] = [
     variables: ["name", "product"],
     body: "Hi {{name}}, {{product}} is back. We kept one aside for a day.",
   },
+  {
+    // Plan 16 B22. Marketing — they placed nothing — so it needs the opt-in
+    // ticked at checkout and keeps quiet hours. One per cart, ever.
+    key: "cart_reminder",
+    category: "marketing",
+    channels: ["whatsapp"],
+    variables: ["items", "link"],
+    body: "You left {{items}} in your Siumora bag. It is saved for you here: {{link}} — reply STOP and we will not remind you again.",
+  },
 ];
 
 export function templateFor(key: string): Template | undefined {

@@ -1,14 +1,6 @@
-import {
-  MAX_SEND_ATTEMPTS,
-  claimPendingTrackingEvents,
-  markTrackingEventFailed,
-  markTrackingEventSent,
-  reclaimStalledTrackingEvents,
-  type Database,
-  type TrackingDestination,
-  type TrackingRow,
-} from "@siumora/db";
+import type { TrackingDestination } from "./store.ts";
 
+import type { ConversionRow, OutboxStore } from "./store.ts";
 import type { SendOutcome, Transport } from "./transport.ts";
 
 /**
@@ -45,7 +37,7 @@ const DEFAULT_BATCH = 50;
 const DEFAULT_CONCURRENCY = 5;
 
 export async function drainConversions(
-  db: Database,
+  store: OutboxStore,
   transport: Transport,
   options: DrainOptions = {},
 ): Promise<DrainReport> {
@@ -53,13 +45,9 @@ export async function drainConversions(
 
   // Before claiming anything new, so a stranded row rejoins the same pass that
   // would otherwise go looking for work and find none.
-  const reclaimed = await reclaimStalledTrackingEvents(db, now);
+  const reclaimed = await store.reclaimConversions(now);
 
-  const batch = await claimPendingTrackingEvents(
-    db,
-    options.batchSize ?? DEFAULT_BATCH,
-    now,
-  );
+  const batch = await store.claimConversions(options.batchSize ?? DEFAULT_BATCH, now);
 
   let sent = 0;
   let retrying = 0;
@@ -73,12 +61,12 @@ export async function drainConversions(
 
   for (const { row, outcome } of outcomes) {
     if (outcome.kind === "sent") {
-      await markTrackingEventSent(db, row.id, now);
+      await store.markConversionSent(row.id, now);
       sent += 1;
       continue;
     }
 
-    await markTrackingEventFailed(db, row.id, {
+    await store.markConversionFailed(row.id, {
       error: outcome.error,
       permanent: outcome.kind === "permanent",
       now,
@@ -86,7 +74,7 @@ export async function drainConversions(
 
     // A permanent refusal is finished with; a retryable one has attempts left
     // unless this was the last. Counted from what was recorded, not guessed.
-    if (outcome.kind === "permanent" || row.attempts + 1 >= MAX_SEND_ATTEMPTS) {
+    if (outcome.kind === "permanent" || row.attempts + 1 >= store.maxConversionAttempts) {
       failed += 1;
     } else {
       retrying += 1;
@@ -98,7 +86,7 @@ export async function drainConversions(
 
 async function sendOne(
   transport: Transport,
-  row: TrackingRow,
+  row: ConversionRow,
 ): Promise<SendOutcome> {
   if (row.payload === null || row.payload === undefined) {
     // Nothing to post and nothing a retry would produce. This is a bug upstream

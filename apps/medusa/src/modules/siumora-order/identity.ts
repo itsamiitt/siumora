@@ -96,6 +96,26 @@ export interface OrderLineWire {
   variant?: {
     metadata?: { mrp_paise?: unknown; price_paise?: unknown } | null;
   } | null;
+  /** Promotion adjustments on the line (plan 16 B19) — `items.adjustments.amount`. */
+  adjustments?: Array<{ amount?: unknown } | null> | null;
+}
+
+/**
+ * Paise a coupon or promotion takes off this line: the sum of Medusa's
+ * line adjustments (the region carries no Medusa tax, so an adjustment is
+ * already the tax-inclusive amount). Rounded to the paisa — a promotion
+ * spread "across" lines can split into fractions — where every other money
+ * read refuses fractions: the order's own total still goes through the
+ * refusing converter, so a split that does not land on whole paise is loud
+ * at payment, never a silent mismatch.
+ */
+export function lineDiscountPaise(line: OrderLineWire): number {
+  let total = 0;
+  for (const adjustment of line.adjustments ?? []) {
+    if (adjustment?.amount === undefined || adjustment.amount === null) continue;
+    total += wireNumber(adjustment.amount, "adjustments.amount");
+  }
+  return Math.max(0, Math.round(total * 100));
 }
 
 /**

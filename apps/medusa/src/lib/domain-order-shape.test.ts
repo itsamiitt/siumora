@@ -111,3 +111,18 @@ test("a non-Maharashtra destination is inter-state and taxed as one", () => {
   assert.equal(order.totals.gst.igst > 0, true);
   assert.equal(order.totals.gst.cgst, 0);
 });
+
+test("a COD fee folded into shipping is reported apart from it", () => {
+  // Below free shipping: ₹79 shipping + ₹49 COD fee on one method (plan 16 B3).
+  const order = toDomainOrder(
+    {
+      ...WIRE,
+      shipping_total: 128,
+      shipping_methods: [{ data: { siumora_shipping_paise: 7900, siumora_cod_fee_paise: 4900 } }],
+    },
+    { orderNumber: "SIU-00043", ndrAttempts: 0 },
+  );
+  assert.equal(order.totals.shipping, 7900);
+  assert.equal(order.totals.codFee, 4900);
+  assert.equal(order.totals.total, 2 * 199000 + 7900 + 4900);
+});

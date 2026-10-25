@@ -1,17 +1,39 @@
 import { defineWidgetConfig } from "@medusajs/admin-sdk";
-import { Badge, Button, Container, Heading, Prompt, Text, toast } from "@medusajs/ui";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowPath, ArrowUturnLeft, ArchiveBox, CheckCircle, CurrencyDollar, PencilSquare, TruckFast, XCircle } from "@medusajs/icons";
+import { Container, Input, Prompt, toast } from "@medusajs/ui";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
+import {
+  CardSkeleton,
+  EditDrawer,
+  FormField,
+  KeyValueRow,
+  OrderStatusBadge,
+  SectionHeader,
+  humanize,
+  inr,
+  orderStatusLabel,
+  type Action,
+} from "../components/kit";
 import { OpsError, opsFetch } from "../lib/ops";
+import { keys } from "../lib/queries";
 
 /**
- * Siumora order ops (M2 wave B): the SIU number, the status-machine truth,
- * and the operator levers — legal transitions as buttons (the lookup route
- * serves only what core's canTransition allows, so no button 409s), NDR
- * answers, and the open return — on the Admin order-detail page.
+ * Siumora · Order, in the order page's side column (plan 16 Phase E): the
+ * SIU number, the status-machine truth, how it was paid and where the
+ * parcel is — and every operator lever in the header's "⋯" menu instead of
+ * rows of buttons. Only the transitions core's machine allows are offered
+ * (the lookup serves them), so no item 409s.
  *
- * "delivered" opens the returns window and recognises revenue, so that one
- * transition asks for confirmation before it fires.
+ * Booking the courier is the page's own "Create fulfillment" (Shiprocket,
+ * plan 16 Phase F); this card then shows the AWB and the tracking link.
+ * "Delivered" and "Cancelled" ask first: one recognises revenue and opens
+ * the returns window, the other ends the order.
+ *
+ * Plan 16 Phase H adds the two once-only levers: "Record COD payout" on a
+ * COD order's open return (the UPI/UTR reference, in a drawer), and "Put
+ * back in stock" on an rto/returned order whose goods are back in hand.
  */
 
 interface OpsCard {
@@ -21,176 +43,215 @@ interface OpsCard {
   deliveryAttempts: number;
   nextStatuses: string[];
   permissions: string[];
-  return: { id: string; status: string; reason: string; resolution: string } | null;
+  return: { id: string; status: string; reason: string; resolution: string; payoutReference: string | null } | null;
+  awaitsRestock: boolean;
+  giftMessage: string | null;
+  payment: { method: string; codFee: number; reference: string | null };
+  shipment: { awb: string; courier: string | null; trackingUrl: string; pickupScheduled: boolean } | null;
 }
 
-const NDR_ACTIONS = ["reattempt", "update_address", "cancel"] as const;
-
-const STATUS_COLOR: Record<string, "green" | "orange" | "red" | "blue" | "grey"> = {
-  delivered: "green",
-  ndr: "orange",
-  rto: "red",
-  cancelled: "red",
-  returned: "red",
-  shipped: "blue",
-  out_for_delivery: "blue",
+const METHOD_LABEL: Record<string, string> = {
+  cod: "Cash on delivery",
+  upi: "UPI",
+  card: "Card",
+  netbanking: "Netbanking",
 };
 
+const NDR_ACTIONS = [
+  { action: "reattempt", label: "Deliver again" },
+  { action: "update_address", label: "Customer updated the address" },
+  { action: "cancel", label: "Customer cancelled" },
+] as const;
+
 const OrderOpsWidget = ({ data }: { data: { id: string } }) => {
-  const [card, setCard] = useState<OpsCard | null>(null);
-  const [notOps, setNotOps] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const client = useQueryClient();
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [payingOut, setPayingOut] = useState(false);
+  const [reference, setReference] = useState("");
+  const card = useQuery({
+    queryKey: keys.orderCard(data.id),
+    queryFn: () => opsFetch<OpsCard>(`/admin/siumora/orders/lookup?order_id=${encodeURIComponent(data.id)}`),
+    retry: false,
+  });
 
-  const load = useCallback(() => {
-    opsFetch<OpsCard>(`/admin/siumora/orders/lookup?order_id=${encodeURIComponent(data.id)}`)
-      .then(setCard)
-      .catch((error) => {
-        // 404 = a draft order with no SIU identity; anything else the page
-        // reports once, quietly.
-        if (error instanceof OpsError && error.status === 404) setNotOps(true);
-      });
-  }, [data.id]);
+  if (card.isLoading) return <CardSkeleton rows={3} />;
+  // A draft order (no SIU number) or an operator without access: the card
+  // simply is not there, rather than a box saying so.
+  if (card.error instanceof OpsError && (card.error.status === 404 || card.error.status === 403)) return null;
+  if (!card.data) return null;
+  const c = card.data;
+  const mayWrite = c.permissions.includes("orders:write");
 
-  useEffect(load, [load]);
+  const refresh = () => client.invalidateQueries({ queryKey: keys.orderCard(data.id) });
 
-  if (notOps) {
-    return (
-      <Container className="p-0">
-        <div className="px-6 py-4">
-          <Heading level="h2">Siumora ops</Heading>
-          <Text size="small" className="text-ui-fg-subtle">
-            Not a storefront order — no SIU identity, no status machine.
-          </Text>
-        </div>
-      </Container>
-    );
-  }
-  if (!card) return null;
-
-  const mayWrite = card.permissions.includes("orders:write");
-
-  const walk = async (to: string) => {
+  const post = async (path: string, body: unknown, done: string | ((result: Record<string, unknown>) => string)) => {
     setBusy(true);
     try {
-      await opsFetch(`/admin/siumora/orders/${encodeURIComponent(card.number)}/status`, {
+      const result = await opsFetch<Record<string, unknown>>(`/admin/siumora/orders/${encodeURIComponent(c.number)}/${path}`, {
         method: "POST",
-        body: JSON.stringify({ status: to }),
+        body: JSON.stringify(body),
       });
-      toast.success(`Order moved to ${to}.`);
-      load();
+      toast.success(typeof done === "string" ? done : done(result));
+      await refresh();
+      return true;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Transition refused.");
+      toast.error(error instanceof Error ? error.message : "Refused.");
+      return false;
     } finally {
       setBusy(false);
       setConfirming(null);
     }
   };
 
-  const answerNdr = async (action: (typeof NDR_ACTIONS)[number]) => {
-    setBusy(true);
-    try {
-      await opsFetch(`/admin/siumora/orders/${encodeURIComponent(card.number)}/ndr`, {
-        method: "POST",
-        body: JSON.stringify({ action }),
-      });
-      toast.success(`NDR answer recorded: ${action}.`);
-      load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "NDR answer refused.");
-    } finally {
-      setBusy(false);
-    }
+  const walk = (to: string) => post("status", { status: to }, `Moved to ${orderStatusLabel(to).toLowerCase()}.`);
+
+  const moves: Action[] = mayWrite
+    ? c.nextStatuses
+        .filter((to) => to !== "cancelled")
+        .map((to) => ({
+          label: `Mark ${orderStatusLabel(to).toLowerCase()}`,
+          icon: to === "delivered" ? <CheckCircle /> : <TruckFast />,
+          disabled: busy,
+          onClick: () => (to === "delivered" ? setConfirming(to) : void walk(to)),
+        }))
+    : [];
+  const ndr: Action[] =
+    mayWrite && c.status === "ndr"
+      ? NDR_ACTIONS.map(({ action, label }) => ({
+          label,
+          icon: action === "reattempt" ? <ArrowPath /> : action === "update_address" ? <PencilSquare /> : <ArrowUturnLeft />,
+          disabled: busy,
+          onClick: () => void post("ndr", { action }, `Recorded: ${label.toLowerCase()}.`),
+        }))
+      : [];
+  const cancel: Action[] =
+    mayWrite && c.nextStatuses.includes("cancelled")
+      ? [{ label: "Cancel order", icon: <XCircle />, destructive: true, disabled: busy, onClick: () => setConfirming("cancelled") }]
+      : [];
+  const afterwards: Action[] = [
+    ...(c.permissions.includes("remittance:write") && c.payment.method === "cod" && c.return && !c.return.payoutReference
+      ? [{ label: "Record COD payout", icon: <CurrencyDollar />, disabled: busy, onClick: () => setPayingOut(true) }]
+      : []),
+    ...(mayWrite && c.awaitsRestock
+      ? [{ label: "Put back in stock", icon: <ArchiveBox />, disabled: busy, onClick: () => setConfirming("restock") }]
+      : []),
+  ];
+
+  const restock = () =>
+    post("restock", {}, (result) =>
+      result.ok === false
+        ? String(result.message ?? "Already back in stock.")
+        : `${String(result.units ?? 0)} pieces back in stock.`,
+    );
+
+  const PROMPTS: Record<string, { title: string; description: string }> = {
+    delivered: {
+      title: "Mark as delivered?",
+      description: "Delivered opens the 7-day returns window and counts the revenue.",
+    },
+    cancelled: {
+      title: "Cancel this order?",
+      description: "Cancelling ends this order. A prepaid payment is refunded from the native Payments section.",
+    },
+    restock: {
+      title: "Put these goods back in stock?",
+      description: "Only once the parcel is in your hands and checked. Every piece on this order is added back to inventory, once.",
+    },
   };
+  const prompt = confirming ? PROMPTS[confirming] : undefined;
 
   return (
     <Container className="divide-y p-0">
-      <div className="flex items-center justify-between px-6 py-4">
-        <div className="flex items-center gap-3">
-          <Heading level="h2">Siumora ops</Heading>
-          <Text size="small" weight="plus">{card.number}</Text>
-        </div>
-        <Badge color={STATUS_COLOR[card.status] ?? "grey"}>{card.status}</Badge>
-      </div>
+      <SectionHeader title={c.number} subtitle="Siumora order" badge={<OrderStatusBadge status={c.status} />} actions={[ndr, moves, afterwards, cancel]} />
 
-      {card.status === "ndr" && (
-        <div className="px-6 py-4">
-          <Text size="small" weight="plus">
-            NDR — attempt {card.deliveryAttempts}
-            {card.ndrReason ? ` (${card.ndrReason.replaceAll("_", " ")})` : ""}
-          </Text>
-          {mayWrite && (
-            <div className="mt-2 flex gap-2">
-              {NDR_ACTIONS.map((action) => (
-                <Button
-                  key={action}
-                  size="small"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => answerNdr(action)}
-                >
-                  {action.replaceAll("_", " ")}
-                </Button>
-              ))}
-            </div>
-          )}
-        </div>
+      <KeyValueRow label="Payment">
+        {METHOD_LABEL[c.payment.method] ?? humanize(c.payment.method)}
+        {c.payment.codFee > 0 ? ` · ${inr(c.payment.codFee)} COD fee` : ""}
+      </KeyValueRow>
+      {c.payment.reference && <KeyValueRow label="Razorpay payment">{c.payment.reference}</KeyValueRow>}
+      {c.giftMessage && (
+        <KeyValueRow label="Gift message">
+          <span className="italic">“{c.giftMessage}”</span> — write it on the card in the parcel
+        </KeyValueRow>
       )}
 
-      {card.return && (
-        <div className="px-6 py-4">
-          <Text size="small" weight="plus">
-            Open return — {card.return.status} ({card.return.reason.replaceAll("_", " ")},{" "}
-            {card.return.resolution})
-          </Text>
-        </div>
-      )}
+      <KeyValueRow label="Courier">
+        {c.shipment ? (
+          <>
+            {c.shipment.courier ?? "Courier"} ·{" "}
+            <a href={c.shipment.trackingUrl} target="_blank" rel="noreferrer" className="text-ui-fg-interactive hover:underline">
+              {c.shipment.awb}
+            </a>
+            {!c.shipment.pickupScheduled && " · pickup not scheduled"}
+          </>
+        ) : (
+          "Not booked — use Create fulfillment"
+        )}
+      </KeyValueRow>
 
-      {mayWrite && card.nextStatuses.length > 0 && (
-        <div className="px-6 py-4">
-          <Text size="small" weight="plus" className="mb-2">Move to</Text>
-          <div className="flex flex-wrap gap-2">
-            {card.nextStatuses.map((to) => (
-              <Button
-                key={to}
-                size="small"
-                variant={to === "cancelled" ? "danger" : "secondary"}
-                disabled={busy}
-                onClick={() =>
-                  to === "delivered" || to === "cancelled" ? setConfirming(to) : walk(to)
-                }
-              >
-                {to.replaceAll("_", " ")}
-              </Button>
-            ))}
-          </div>
-        </div>
+      {c.status === "ndr" && (
+        <KeyValueRow label="Failed delivery">
+          Attempt {c.deliveryAttempts}
+          {c.ndrReason ? ` · ${humanize(c.ndrReason)}` : ""}
+        </KeyValueRow>
       )}
+      {c.return && (
+        <KeyValueRow label="Open return">
+          {humanize(c.return.status)} · {humanize(c.return.reason)} · {humanize(c.return.resolution)}
+        </KeyValueRow>
+      )}
+      {c.return?.payoutReference && <KeyValueRow label="COD payout">Paid · {c.return.payoutReference}</KeyValueRow>}
+      {c.awaitsRestock && <KeyValueRow label="Stock">Not back on the shelf yet</KeyValueRow>}
 
-      <Prompt open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
+      <Prompt open={prompt !== undefined} onOpenChange={(open) => !open && setConfirming(null)}>
         <Prompt.Content>
           <Prompt.Header>
-            <Prompt.Title>Move to {confirming?.replaceAll("_", " ")}?</Prompt.Title>
-            <Prompt.Description>
-              {confirming === "delivered"
-                ? "Delivered opens the returns window and recognises the revenue."
-                : "Cancelling ends this order's journey."}
-            </Prompt.Description>
+            <Prompt.Title>{prompt?.title}</Prompt.Title>
+            <Prompt.Description>{prompt?.description}</Prompt.Description>
           </Prompt.Header>
           <Prompt.Footer>
             <Prompt.Cancel>Keep as is</Prompt.Cancel>
-            <Prompt.Action onClick={() => confirming && walk(confirming)}>
+            <Prompt.Action
+              onClick={() => {
+                if (confirming === "restock") void restock();
+                else if (confirming) void walk(confirming);
+              }}
+            >
               Confirm
             </Prompt.Action>
           </Prompt.Footer>
         </Prompt.Content>
       </Prompt>
+
+      <EditDrawer
+        open={payingOut}
+        onOpenChange={(open) => {
+          setPayingOut(open);
+          if (!open) setReference("");
+        }}
+        title="Record COD payout"
+        description="A COD return has no payment to reverse: pay the customer's UPI by hand, then record the reference here. It can be recorded once."
+        saving={busy}
+        saveLabel="Record payout"
+        onSave={async () => {
+          const ok = await post("returns/payout", { reference: reference.trim() }, "Payout recorded.");
+          if (ok) {
+            setPayingOut(false);
+            setReference("");
+          }
+        }}
+      >
+        <FormField label="UPI / UTR reference" hint="From your bank or UPI app's payment receipt.">
+          <Input size="small" value={reference} onChange={(event) => setReference(event.target.value)} />
+        </FormField>
+      </EditDrawer>
     </Container>
   );
 };
 
 export const config = defineWidgetConfig({
-  zone: "order.details.after",
+  zone: "order.details.side.after",
 });
 
 export default OrderOpsWidget;

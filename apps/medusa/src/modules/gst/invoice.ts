@@ -10,13 +10,13 @@
  */
 
 // @ts-ignore -- TS1479 until @siumora/core ships require-condition types
-import { hsnSummary, isGstSlab, summariseInvoice, type CartLine, type HsnSummaryRow, type InvoiceTotals } from "@siumora/core";
+import { hsnSummary, isGstSlab, lineTotal, summariseInvoice, type CartLine, type HsnSummaryRow, type InvoiceTotals } from "@siumora/core";
 
 // The .ts extension is deliberate: this file is imported by invoice.test.ts
 // under node --test's ESM loader, which resolves relative paths literally
 // (same convention as serviceability/lookup.ts). Medusa's require hook
 // resolves it identically at runtime.
-import { linePaise, wireNumber, type OrderLineWire } from "../siumora-order/identity.ts";
+import { lineDiscountPaise, linePaise, wireNumber, type OrderLineWire } from "../siumora-order/identity.ts";
 
 /**
  * The invoice-number format, mirrored from @siumora/core's invoiceNumber().
@@ -126,6 +126,7 @@ export function toInvoiceLines(items: ReadonlyArray<InvoiceLineWire>): CartLine[
       gstSlab: slab as CartLine["gstSlab"],
       hsn,
       piercedJewellery: productMetadata.pierced_jewellery === true,
+      ...(lineDiscountPaise(item) > 0 ? { discount: lineDiscountPaise(item) } : {}),
     };
   });
 }
@@ -202,10 +203,8 @@ export function computeInvoice(
 ): { rows: HsnSummaryRow[]; totals: InvoiceTotals } {
   const rows: HsnSummaryRow[] = hsnSummary(lines, options);
   const totals: InvoiceTotals = summariseInvoice(rows);
-  const goodsTotal = lines.reduce(
-    (sum, line) => sum + line.unitPrice * line.quantity,
-    0,
-  );
+  // Net of coupons: what the goods actually sold for (core lineTotal).
+  const goodsTotal = lines.reduce((sum, line) => sum + lineTotal(line), 0);
   assertInvoiceReconciles(rows, totals, {
     goodsTotal,
     interState: options.interState,

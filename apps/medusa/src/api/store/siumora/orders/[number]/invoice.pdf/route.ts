@@ -13,6 +13,7 @@ import {
   findIdentityByNumber,
   type SqlClient,
 } from "../../../../../../modules/siumora-order/allocate";
+import { codFeeOf, paymentMethodOf } from "../../../../../../modules/siumora-order/checkout-rules";
 import {
   isWellFormedAccessKey,
   majorToPaise,
@@ -85,6 +86,8 @@ interface PdfOrderWire {
   customer_id: string | null;
   /** BigNumber on the wire — unwrap through wireNumber, never arithmetic. */
   shipping_total: unknown;
+  shipping_methods?: Array<{ data?: Record<string, unknown> | null } | null> | null;
+  metadata?: Record<string, unknown> | null;
   shipping_address?: Record<string, unknown> | null;
   items?: Array<InvoiceLineWire | null> | null;
 }
@@ -124,6 +127,8 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
       "created_at",
       "customer_id",
       "shipping_total",
+      "shipping_methods.data",
+      "metadata",
       "shipping_address.*",
       // items.* rather than a field list: quantity is a computed field that
       // resolves undefined when named explicitly (probed on 2.18.0).
@@ -131,6 +136,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
       "items.variant.id",
       "items.variant.metadata",
       "items.variant.product.metadata",
+      "items.adjustments.amount",
     ],
     filters: { id: identity.order_id },
   });
@@ -181,8 +187,11 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
     (order.items ?? []).filter((item): item is InvoiceLineWire => Boolean(item)),
   );
   const subtotal = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
-  const shipping = majorToPaise(wireNumber(order.shipping_total, "shipping_total"));
-  const codFee = 0;
+  const discount = lines.reduce((sum, line) => sum + (line.discount ?? 0), 0);
+  // The COD fee rides the shipping method (plan 16 B3) and prints on its
+  // own invoice line, so it comes out of shipping_total here.
+  const codFee = codFeeOf(order.shipping_methods);
+  const shipping = majorToPaise(wireNumber(order.shipping_total, "shipping_total")) - codFee;
 
   const invoice = buildInvoice({
     invoiceNumber: invoiceRow.invoice_number,
@@ -196,8 +205,8 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
     lines,
     shipping,
     codFee,
-    total: subtotal + shipping + codFee,
-    paymentMethod: "cod",
+    total: subtotal - discount + shipping + codFee,
+    paymentMethod: paymentMethodOf(order.metadata),
   });
 
   res.setHeader("Content-Type", "application/pdf");

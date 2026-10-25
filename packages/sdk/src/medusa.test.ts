@@ -19,7 +19,6 @@ import { calculateTotals, productSchema } from "@siumora/core";
 import { ApiError } from "./index.ts";
 import {
   MedusaClient,
-  NotPortedError,
   createMedusaClient,
   majorToPaise,
   mapCartLine,
@@ -373,9 +372,9 @@ test("removeWishlist uses the idempotent Medusa item route", async () => {
   );
 });
 
-test("not-yet-ported surface refuses with 501 not_ported, never a wrong answer", async () => {
+test("prepaid checkout() is refused — payment comes first on this backend", async () => {
   const client = new MedusaClient({ baseUrl: "http://x", publishableKey: "pk" });
-  // Prepaid checkout refuses too — only the COD path is ported.
+  // Placing an unpaid prepaid order is exactly what payment-first prevents.
   await assert.rejects(
     client.checkout({
       cartId: "cart_x",
@@ -391,10 +390,9 @@ test("not-yet-ported surface refuses with 501 not_ported, never a wrong answer",
       eventId: "e",
     }),
     (error: unknown) => {
-      assert.ok(error instanceof NotPortedError);
       assert.ok(error instanceof ApiError);
-      assert.equal(error.status, 501);
-      assert.equal(error.code, "not_ported");
+      assert.equal(error.status, 409);
+      assert.equal(error.code, "payment_first");
       return true;
     },
   );
@@ -638,4 +636,161 @@ test("a changed email goes through the step-up route, never Medusa's profile rou
   assert.equal(result.customer.email, "asha@example.com");
   assert.ok(!(calls[0]!.body as Record<string, unknown>).email, "no email on the profile route");
   assert.deepEqual(calls[1]!.body, { email: "asha@example.com" });
+});
+
+// ── Plan 16 Phase A: availability on lines, field errors, the method ──────
+
+test("cart lines carry units on hand, from one read of just the cart's products", async () => {
+  const { impl, calls } = scripted({
+    "GET /store/carts/cart_1": {
+      cart: { id: "cart_1", items: [{ ...CART_ITEM_FIXTURE, product_id: "prod_1" }] },
+    },
+    "GET /store/products": {
+      products: [{ variants: [{ id: CART_ITEM_FIXTURE.variant.id, inventory_quantity: 3 }] }],
+    },
+  });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  const { lines } = await client.getCart("cart_1");
+  assert.equal(lines[0]!.available, 3);
+  const productRead = calls.find((call) => call.url.includes("/store/products"))!;
+  assert.match(productRead.url, /id%5B%5D=prod_1|id\[\]=prod_1/);
+  assert.match(productRead.url, /limit=1/);
+});
+
+test("a failed stock read leaves availability unknown rather than failing the bag", async () => {
+  const { impl } = scripted({
+    "GET /store/carts/cart_1": {
+      cart: { id: "cart_1", items: [{ ...CART_ITEM_FIXTURE, product_id: "prod_1" }] },
+    },
+  });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  const { lines } = await client.getCart("cart_1");
+  assert.equal(lines.length, 1);
+  assert.equal("available" in lines[0]!, false);
+});
+
+test("a refused address surfaces its field map on the ApiError", async () => {
+  const impl = (async () => ({
+    ok: false,
+    status: 400,
+    json: async () => ({
+      error: "invalid_address",
+      message: "Enter the city.",
+      fields: { city: "Enter the city." },
+    }),
+  })) as unknown as typeof fetch;
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  await assert.rejects(client.getPincode("400001"), (error: unknown) => {
+    const apiError = error as { code: string; fields?: Record<string, string> };
+    assert.equal(apiError.code, "invalid_address");
+    assert.deepEqual(apiError.fields, { city: "Enter the city." });
+    return true;
+  });
+});
+
+// ── Plan 16 Phase B: payment-first prepaid ────────────────────────────────
+
+const ADDRESS_INPUT = {
+  name: "Asha Menon",
+  phone: "98123 45678",
+  line1: "Flat 3B, Sunrise Apartments",
+  city: "Mumbai",
+  stateCode: "27",
+  pincode: "400001",
+};
+
+test("this transport takes payment first", () => {
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk" });
+  assert.equal(client.paymentFlow, "payment-first");
+});
+
+test("preparePayment puts the address on the cart, then opens the payment", async () => {
+  const handoff = { razorpay: { orderId: "order_1", keyId: "rzp_test", amountPaise: 225900 } };
+  const { impl, calls } = scripted({
+    "POST /store/carts/cart_1": { cart: { id: "cart_1" } },
+    "POST /store/siumora/carts/cart_1/prepare": handoff,
+  });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  assert.deepEqual(
+    await client.preparePayment({ cartId: "cart_1", address: ADDRESS_INPUT, paymentMethod: "upi" }),
+    handoff,
+  );
+  assert.deepEqual(
+    calls.map((call) => `${call.method} ${new URL(call.url).pathname}`),
+    ["POST /store/carts/cart_1", "POST /store/siumora/carts/cart_1/prepare"],
+  );
+  const address = (calls[0]!.body as { shipping_address: Record<string, string> }).shipping_address;
+  assert.equal(address.phone, "9812345678", "the phone is normalised on the cart");
+  assert.equal(address.province, "27");
+  assert.deepEqual(calls[1]!.body, { paymentMethod: "upi" });
+});
+
+test("completePayment sends the Checkout.js proof with the method", async () => {
+  const placed = {
+    ok: true,
+    orderNumber: "SIU-00042",
+    status: "confirmed",
+    invoiceNumber: "SIU/2026-27/000042",
+    accessKey: "k".repeat(36),
+  };
+  const { impl, calls } = scripted({ "POST /store/siumora/carts/cart_1/complete": placed });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  const proof = { orderId: "order_1", paymentId: "pay_1", signature: "sig" };
+  assert.deepEqual(
+    await client.completePayment({ cartId: "cart_1", paymentMethod: "upi", razorpay: proof }, "key-1"),
+    placed,
+  );
+  assert.deepEqual(calls[0]!.body, { paymentMethod: "upi", razorpay: proof });
+});
+
+test("the checkout's event id, GA client id and consent ride the cart's metadata (plan 16 Phase G)", async () => {
+  const { impl, calls } = scripted({
+    "POST /store/carts/cart_1": { cart: { id: "cart_1" } },
+    "POST /store/siumora/carts/cart_1/prepare": { razorpay: { orderId: "o", keyId: "k", amountPaise: 1 } },
+  });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  await client.preparePayment({
+    cartId: "cart_1",
+    address: ADDRESS_INPUT,
+    paymentMethod: "upi",
+    eventId: "ev_1",
+    gaClientId: "123.456",
+    consent: "full",
+  });
+  assert.deepEqual((calls[0]!.body as { metadata: unknown }).metadata, {
+    siumora_event_id: "ev_1",
+    siumora_ga_client_id: "123.456",
+    siumora_consent: "full",
+    // Always written, so a removed message does not linger (plan 16 B21).
+    siumora_gift_message: "",
+  });
+
+  await client.preparePayment({
+    cartId: "cart_1",
+    address: ADDRESS_INPUT,
+    paymentMethod: "upi",
+    giftMessage: "  Happy birthday!  ",
+  });
+  assert.equal((calls[2]!.body as { metadata: Record<string, unknown> }).metadata.siumora_gift_message, "Happy birthday!");
+});
+
+test("coupons go through the Siumora route with the cart id and code in the body", async () => {
+  const calls: Array<{ url: string; method?: string; body?: unknown }> = [];
+  const client = new MedusaClient({
+    baseUrl: "https://example.test",
+    publishableKey: "pk_test",
+    fetch: (async (url: URL | RequestInfo, init?: RequestInit) => {
+      calls.push({ url: String(url), method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return new Response(JSON.stringify({ coupons: ["DIWALI10"], discount: 19900 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch,
+  });
+  assert.deepEqual(await client.applyCoupon("cart_1", "diwali10"), { coupons: ["DIWALI10"], discount: 19900 });
+  await client.removeCoupon("cart_1", "DIWALI10");
+  assert.equal(calls[0]!.url, "https://example.test/store/siumora/coupons");
+  assert.equal(calls[0]!.method, "POST");
+  assert.deepEqual(calls[0]!.body, { cartId: "cart_1", code: "diwali10" });
+  assert.equal(calls[1]!.method, "DELETE");
 });

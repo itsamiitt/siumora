@@ -11,6 +11,7 @@ import {
   orderEnvelope,
   parseNdrBody,
 } from "../../../../../../modules/returns-ndr/lifecycle";
+import { orderMoved } from "../../../../../../lib/order-events";
 
 /**
  * POST /store/siumora/orders/:number/ndr?key=<uuid> — the customer's answer
@@ -50,6 +51,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
 
   await recordNdrAction(found.pg, found.orderId, parsed.value.action);
   const updated = await setStatus(found.pg, found.orderId, decision.target);
+  // The customer's message and the conversion for the new status (plan 16 Phase G).
+  await orderMoved(req.scope, found.orderId, updated.status);
 
   res.json(orderEnvelope(found.orderNumber, updated.status, attempts, updated.ndr_reason));
 }

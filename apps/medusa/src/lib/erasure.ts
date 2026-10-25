@@ -13,6 +13,7 @@ import { REDACTED, blockedReason, normalisePhone } from "@siumora/core";
 
 import { revokeAllSessions, type SqlClient } from "../modules/customer-session/data";
 import { forgetAuthEvents } from "../modules/customer-session/privacy";
+import { forgetRecipient, type SqlClient as OutboxSqlClient } from "../modules/outbox/data";
 import { getStatusRow, type SqlClient as StatusSqlClient } from "../modules/returns-ndr/data";
 import { siumoraOrderStatus } from "../modules/siumora-order/identity";
 import { identitiesOwnedBy, type SqlClient as OwnershipSqlClient } from "../modules/siumora-order/ownership";
@@ -36,7 +37,8 @@ import { fetchOrders } from "./order-card";
  * - its orders are KEPT (CGST Act s.36 — RETENTION_NOTICE) with the
  *   personal fields on their delivery addresses redacted and the derived
  *   phone email replaced;
- * - the phone traces in its auth event log are cleared.
+ * - the phone traces in its auth event log are cleared;
+ * - its queued messages and conversions in the outbox are emptied.
  */
 
 export interface ErasureOutcome {
@@ -112,6 +114,26 @@ export async function eraseCustomer(
   // ── Sessions and the event log. ──
   await revokeAllSessions(pg, { customerId, reason: "erased", now });
   await forgetAuthEvents(pg, customerId);
+
+  // The outbox (plan 16 Phase H): queued messages to any number this
+  // account used are skipped and emptied, conversions for its orders lose
+  // their payload, and its message preferences go.
+  const recipients = new Set<string>(phone ? [phone] : []);
+  for (const order of orders.values()) {
+    const shipTo = normalisePhone(
+      String((order.shipping_address as { phone?: unknown } | null)?.phone ?? ""),
+    ) as string | undefined;
+    if (shipTo) recipients.add(shipTo);
+  }
+  const orderIds = owned.map((identity) => identity.order_id);
+  let first = true;
+  for (const recipient of recipients) {
+    await forgetRecipient(pg as unknown as OutboxSqlClient, { phone: recipient, orderIds: first ? orderIds : [] });
+    first = false;
+  }
+  if (recipients.size === 0 && orderIds.length > 0) {
+    await forgetRecipient(pg as unknown as OutboxSqlClient, { phone: "", orderIds });
+  }
 
   // ── Retained orders: redact the person, keep the tax facts. ──
   for (const identity of owned) {

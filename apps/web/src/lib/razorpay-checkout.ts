@@ -1,15 +1,22 @@
 /**
  * The browser half of the payment handoff.
  *
- * Loads Checkout.js once and opens the provider's modal for an order the API
- * already created. Confirmation is deliberately NOT driven from here: the
- * signed webhook and the reconciliation sweep are the authority on whether
- * money moved, so the handler resolving only tells the UI where to navigate —
- * an order page that renders whatever the server knows to be true.
+ * Loads Checkout.js once and opens the provider's modal for a Razorpay order
+ * the backend already created. The success handler's response is returned as
+ * the payment proof: on a payment-first backend (Medusa) the proof is what
+ * the order is completed with — and the backend still asks Razorpay itself
+ * before placing anything. On the order-first backend (Fastify) the signed
+ * webhook and the recon sweep confirm; the proof just tells the UI to move on.
  */
 
 interface RazorpayModal {
   open(): void;
+}
+
+interface RazorpaySuccess {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
 }
 
 interface RazorpayOptions {
@@ -21,7 +28,7 @@ interface RazorpayOptions {
   description?: string;
   prefill?: { contact?: string; name?: string };
   theme?: { color: string };
-  handler: () => void;
+  handler: (response: RazorpaySuccess) => void;
   modal?: { ondismiss?: () => void };
 }
 
@@ -52,7 +59,10 @@ function loadScript(): Promise<void> {
   return scriptPromise;
 }
 
-export type RazorpayCheckoutOutcome = "paid" | "dismissed" | "unavailable";
+export type RazorpayCheckoutOutcome =
+  | { kind: "paid"; proof: { orderId: string; paymentId: string; signature: string } }
+  | { kind: "dismissed" }
+  | { kind: "unavailable" };
 
 export async function openRazorpayCheckout(input: {
   keyId: string;
@@ -64,9 +74,9 @@ export async function openRazorpayCheckout(input: {
   try {
     await loadScript();
   } catch {
-    return "unavailable";
+    return { kind: "unavailable" };
   }
-  if (!window.Razorpay) return "unavailable";
+  if (!window.Razorpay) return { kind: "unavailable" };
 
   return new Promise<RazorpayCheckoutOutcome>((resolve) => {
     const modal = new window.Razorpay!({
@@ -82,8 +92,16 @@ export async function openRazorpayCheckout(input: {
       },
       // Mulberry — the single accent (brand kit rule 4).
       theme: { color: "#6B2942" },
-      handler: () => resolve("paid"),
-      modal: { ondismiss: () => resolve("dismissed") },
+      handler: (response) =>
+        resolve({
+          kind: "paid",
+          proof: {
+            orderId: response.razorpay_order_id,
+            paymentId: response.razorpay_payment_id,
+            signature: response.razorpay_signature,
+          },
+        }),
+      modal: { ondismiss: () => resolve({ kind: "dismissed" }) },
     });
     modal.open();
   });

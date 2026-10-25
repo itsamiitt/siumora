@@ -1,4 +1,4 @@
-import type { CartLine } from "./cart.ts";
+import { lineTotal, type CartLine } from "./cart.ts";
 import { extractGst, type GstSlab } from "./gst.ts";
 
 /**
@@ -74,7 +74,8 @@ export function hsnSummary(
   for (const line of lines) {
     const key = `${line.hsn}:${line.gstSlab}`;
     const existing = groups.get(key);
-    const amount = line.unitPrice * line.quantity;
+    // Net of any coupon: the discount reduces the taxable value (cart.ts).
+    const amount = lineTotal(line);
 
     if (existing) existing.amount += amount;
     else groups.set(key, { hsn: line.hsn, slab: line.gstSlab, amount });

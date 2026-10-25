@@ -14,6 +14,7 @@ import {
   parseStatusBody,
   type OrderStatus,
 } from "../../../../../../modules/returns-ndr/lifecycle";
+import { orderMoved } from "../../../../../../lib/order-events";
 
 /**
  * POST /store/siumora/orders/:number/status?key=<uuid> — courier-driven
@@ -68,6 +69,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     decision.status,
     decision.ndrReason ?? undefined,
   );
+  // The customer's message and the conversion for the new status (plan 16 Phase G).
+  await orderMoved(req.scope, found.orderId, updated.status);
   if (decision.recordNdr) {
     await insertNdrEvent(found.pg, {
       orderId: found.orderId,

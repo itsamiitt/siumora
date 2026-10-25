@@ -24,6 +24,10 @@ import {
   returnEnvelope,
   type OrderStatus,
   type ReturnRow,
+  decidePayout,
+  decideRestock,
+  parsePayoutBody,
+  restockAdjustments,
 } from "./lifecycle.ts";
 
 // Dynamic on purpose: this app typechecks as CJS and core's static surface
@@ -438,4 +442,41 @@ test("returnEnvelope carries exactly {ok, return, reversePickup}, pickup null un
   assert.equal(envelope.return.refundTo, "upi");
   assert.equal(envelope.return.freeReturnShipping, false);
   assert.deepEqual(envelope.return.variantIds, ["variant_1"]);
+});
+
+test("parsePayoutBody trims and bounds the UTR reference", () => {
+  assert.deepEqual(parsePayoutBody({ reference: "  UTR123456  " }), { ok: true, value: { reference: "UTR123456" } });
+  assert.equal(parsePayoutBody({ reference: "abc" }).ok, false);
+  assert.equal(parsePayoutBody({ reference: "x".repeat(121) }).ok, false);
+  assert.equal(parsePayoutBody(null).ok, false);
+});
+
+test("decidePayout: COD only, an open return, and once", () => {
+  assert.equal((decidePayout("upi", { payout_reference: null }) as { error: string }).error, "not_cod");
+  assert.equal((decidePayout("cod", undefined) as { code: number }).code, 404);
+  assert.match((decidePayout("cod", { payout_reference: "UTR1" }) as { message: string }).message, /UTR1/);
+  assert.deepEqual(decidePayout("cod", { payout_reference: null }), { ok: true });
+});
+
+test("decideRestock: rto/returned once; a repeat is 'already', not an error", () => {
+  assert.deepEqual(decideRestock("rto", null), { ok: true });
+  assert.deepEqual(decideRestock("returned", undefined), { ok: true });
+  assert.deepEqual(decideRestock("returned", "2026-10-25T10:00:00Z"), { ok: false, already: true });
+  assert.equal((decideRestock("shipped", null) as { error: string }).error, "not_owed");
+});
+
+test("restockAdjustments merges per item, honours bundles, skips unmanaged variants", () => {
+  const adjustments = restockAdjustments(
+    [
+      { quantity: 2, variant: { inventory_items: [{ inventory_item_id: "iitem_b", required_quantity: 1 }] } },
+      { quantity: 1, variant: { inventory_items: [{ inventory_item_id: "iitem_b" }, { inventory_item_id: "iitem_a", required_quantity: 3 }] } },
+      { quantity: 5, variant: { manage_inventory: false, inventory_items: [{ inventory_item_id: "iitem_c" }] } },
+      { quantity: 1, variant: null },
+    ],
+    "sloc_1",
+  );
+  assert.deepEqual(adjustments, [
+    { inventoryItemId: "iitem_a", locationId: "sloc_1", adjustment: 3 },
+    { inventoryItemId: "iitem_b", locationId: "sloc_1", adjustment: 3 },
+  ]);
 });

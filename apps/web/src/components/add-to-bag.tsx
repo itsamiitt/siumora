@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { track, mintEventId } from "@siumora/analytics/client";
@@ -10,7 +9,7 @@ import { Button, MicroLabel } from "@siumora/ui";
 
 import { addToCart } from "@/app/actions/cart";
 
-import { notifyCartChanged } from "./cart-badge";
+import { notifyCartChanged, openBag } from "./cart-badge";
 
 /**
  * Variant picker plus add-to-bag.
@@ -25,7 +24,6 @@ export function AddToBag({
   variants: readonly Variant[];
   productTitle: string;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
 
@@ -77,7 +75,9 @@ export function AddToBag({
           ],
         });
         notifyCartChanged(result.count);
-        router.refresh();
+        // The drawer shows the bag the server now holds, the new piece
+        // marked — no full-page refresh of the product page underneath.
+        openBag({ added: selected.id });
         setMessage("Added to bag");
       } else {
         setMessage(result.message ?? "Could not add that.");

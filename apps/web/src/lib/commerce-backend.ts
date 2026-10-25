@@ -4,10 +4,10 @@ import { createMedusaClient, type MedusaClient } from "@siumora/sdk/medusa";
 /**
  * The COMMERCE_BACKEND seam (design doc, Track M).
  *
- * `fastify` is today's path. `medusa` constructs the M1 Medusa transport —
- * the same public surface, catalogue and cart and COD checkout served by
- * Medusa's store API, everything not yet ported refusing with a structured
- * 501 not_ported rather than a wrong answer. An unknown value refuses
+ * `medusa` is the default and the launch path (plan 16 Phase J): the Medusa
+ * transport, with everything not ported refusing with a structured 501
+ * not_ported rather than a wrong answer. `fastify` stays selectable, by
+ * name only, until scripts/retire-fastify.mjs removes it. An unknown value refuses
  * loudly, the same posture as apps/e2e's E2E_BACKEND refusal: a flipped
  * environment can never quietly keep serving the wrong backend.
  *
@@ -22,7 +22,7 @@ export type CommerceClient = SiumoraClient | MedusaClient;
 export function createCommerceClient(
   env: Record<string, string | undefined> = process.env,
 ): CommerceClient {
-  const backend = env.COMMERCE_BACKEND ?? "fastify";
+  const backend = env.COMMERCE_BACKEND ?? "medusa";
   if (backend === "medusa") {
     // Throws its own named error when MEDUSA_URL / MEDUSA_PUBLISHABLE_KEY
     // are missing — misconfiguration fails at construction, not mid-render.

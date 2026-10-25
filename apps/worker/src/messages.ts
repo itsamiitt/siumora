@@ -1,14 +1,4 @@
 import {
-  MAX_NOTIFICATION_ATTEMPTS,
-  claimDueNotifications,
-  markNotificationFailed,
-  markNotificationSent,
-  markNotificationSkipped,
-  reclaimStalledNotifications,
-  type Database,
-  type NotificationRow,
-} from "@siumora/db";
-import {
   renderTemplate,
   sendableOn,
   templateFor,
@@ -16,6 +6,8 @@ import {
 } from "@siumora/core";
 
 import type { MessageTransport } from "@siumora/messaging";
+
+import type { MessageRow, OutboxStore } from "./store.ts";
 
 /**
  * Drain the notification outbox.
@@ -42,13 +34,13 @@ export interface MessageDrainReport {
 }
 
 export async function drainNotifications(
-  db: Database,
+  store: OutboxStore,
   transport: MessageTransport,
   options: { batchSize?: number; now?: Date } = {},
 ): Promise<MessageDrainReport> {
   const now = options.now ?? new Date();
-  const reclaimed = await reclaimStalledNotifications(db, now);
-  const batch = await claimDueNotifications(db, options.batchSize ?? 25, now);
+  const reclaimed = await store.reclaimMessages(now);
+  const batch = await store.claimMessages(options.batchSize ?? 25, now);
 
   let sent = 0;
   let retrying = 0;
@@ -59,13 +51,13 @@ export async function drainNotifications(
     const attempt = await sendOne(transport, row);
 
     if (attempt.kind === "skipped") {
-      await markNotificationSkipped(db, row.id, attempt.error);
+      await store.markMessageSkipped(row.id, attempt.error);
       skipped += 1;
       continue;
     }
 
     if (attempt.kind === "sent") {
-      await markNotificationSent(db, row.id, {
+      await store.markMessageSent(row.id, {
         channel: attempt.channel,
         ...(attempt.providerMessageId
           ? { providerMessageId: attempt.providerMessageId }
@@ -76,13 +68,13 @@ export async function drainNotifications(
       continue;
     }
 
-    await markNotificationFailed(db, row.id, {
+    await store.markMessageFailed(row.id, {
       error: attempt.error,
       permanent: attempt.kind === "permanent",
       now,
     });
 
-    if (attempt.kind === "permanent" || row.attempts + 1 >= MAX_NOTIFICATION_ATTEMPTS) {
+    if (attempt.kind === "permanent" || row.attempts + 1 >= store.maxMessageAttempts) {
       failed += 1;
     } else {
       retrying += 1;
@@ -110,7 +102,7 @@ type Attempt =
  */
 async function sendOne(
   transport: MessageTransport,
-  row: NotificationRow,
+  row: MessageRow,
 ): Promise<Attempt> {
   const template = templateFor(row.templateKey);
   if (!template) {

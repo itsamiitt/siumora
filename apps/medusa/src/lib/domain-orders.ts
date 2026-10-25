@@ -83,6 +83,8 @@ export async function loadDomainOrders(
         "status",
         "created_at",
         "shipping_total",
+        "shipping_methods.data",
+        "metadata",
         "shipping_address.*",
         // items.* rather than a field list: quantity is a computed field
         // that resolves undefined when named explicitly (probed on 2.18.0).
@@ -90,6 +92,7 @@ export async function loadDomainOrders(
         "items.variant.id",
         "items.variant.metadata",
         "items.variant.product.metadata",
+        "items.adjustments.amount",
       ],
       filters: { id: ids },
     }),

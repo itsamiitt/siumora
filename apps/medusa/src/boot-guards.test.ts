@@ -65,3 +65,13 @@ test("development and staging boot without Redis", () => {
   assert.doesNotThrow(() => assertMedusaBootSafety({}));
   assert.doesNotThrow(() => assertMedusaBootSafety({ APP_ENV: "staging" }));
 });
+
+test("production refuses the courier simulation and OTP echo", () => {
+  assert.throws(() => assertMedusaBootSafety({ ...PROD_OK, COURIER_SIMULATION: "true" }), /COURIER_SIMULATION/);
+  assert.throws(() => assertMedusaBootSafety({ ...PROD_OK, OTP_ECHO: "true" }), /OTP_ECHO/);
+  assert.equal(assertMedusaBootSafety({ ...PROD_OK, COURIER_SIMULATION: "false" }).appEnv, "production");
+  assert.equal(
+    assertMedusaBootSafety({ APP_ENV: "staging", COURIER_SIMULATION: "true", OTP_ECHO: "true" }).appEnv,
+    "staging",
+  );
+});

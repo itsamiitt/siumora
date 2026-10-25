@@ -43,6 +43,21 @@ async function ensureCartId(): Promise<string> {
   return id;
 }
 
+/**
+ * The cart lines and the coupon codes on it (plan 16 B19) in one read — the
+ * checkout page shows both. Lines carry each coupon's discount.
+ */
+export async function getCartView(): Promise<{ lines: CartLine[]; coupons: string[] }> {
+  const id = await readCartId();
+  if (!id) return { lines: [], coupons: [] };
+  try {
+    const cart = await api().getCart(id);
+    return { lines: cart.lines, coupons: cart.coupons ?? [] };
+  } catch {
+    return { lines: [], coupons: [] };
+  }
+}
+
 export async function getCartLines(): Promise<CartLine[]> {
   const id = await readCartId();
   if (!id) return [];
@@ -91,6 +106,17 @@ export async function clearCart(): Promise<void> {
   if (id) await api().clearCart(id);
 }
 
+/**
+ * Let go of a cart that became an order. Both backends close the cart as
+ * part of placing the order (Fastify empties it in the order transaction,
+ * Medusa completes it), so the browser only needs to stop pointing at it;
+ * the next add creates a fresh one. Mutating a completed Medusa cart would
+ * fail after the order already stands. Only callable from a Server Action.
+ */
+export async function forgetCart(): Promise<void> {
+  (await cookies()).delete(CART_COOKIE);
+}
+
 /** The cart id, for the checkout call. */
 export async function currentCartId(): Promise<string | undefined> {
   return readCartId();
@@ -123,4 +149,20 @@ export async function linkCartToAccount(client: {
       maxAge: 60 * 60 * 24 * 30,
     });
   }
+}
+
+/**
+ * Put a known cart on this browser — the cart-reminder link (plan 16 B22),
+ * after the API has checked the link's signature and that the cart is still
+ * open. Replaces whatever bag this browser had: the link names the one the
+ * shopper meant.
+ */
+export async function adoptCart(cartId: string): Promise<void> {
+  (await cookies()).set(CART_COOKIE, cartId, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+  });
 }

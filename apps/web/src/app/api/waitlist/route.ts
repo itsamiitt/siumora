@@ -36,7 +36,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "Enter a valid name and email address." }, { status: 400 });
   }
 
-  const medusa = process.env.COMMERCE_BACKEND === "medusa";
+  // Medusa unless the Fastify path is named (plan 16 Phase J).
+  const medusa = process.env.COMMERCE_BACKEND !== "fastify";
   const apiUrl = medusa ? process.env.MEDUSA_URL : process.env.API_URL;
   if (!apiUrl || (medusa && !process.env.MEDUSA_PUBLISHABLE_KEY)) {
     return NextResponse.json({ message: "Signups are unavailable right now. Please try again later." }, { status: 503 });

@@ -1,44 +1,67 @@
 import { Suspense } from "react";
 
 import type { Metadata } from "next";
-import Loading from "./loading";
 import Link from "next/link";
 
 import { calculateTotals, shippingFor } from "@siumora/core";
-import { Display, MicroLabel } from "@siumora/ui";
+import { formatPaise } from "@siumora/in-locale";
+import { Display, MicroLabel, TrustRow, buttonClassName } from "@siumora/ui";
 
 import { CartLines } from "@/components/cart-lines";
 import { FreeShippingProgress } from "@/components/free-shipping-progress";
 import { OrderSummary } from "@/components/order-summary";
+import { PincodeChecker } from "@/components/pincode-checker";
+import { ProductCard } from "@/components/product-card";
+import { TrackViewCart } from "@/components/track-view-cart";
 import { getCartLines } from "@/lib/cart-store";
+import { listRecentProducts } from "@/lib/catalog";
+
+import Loading from "./loading";
 
 export const metadata: Metadata = {
   title: "Bag",
   robots: { index: false },
 };
 
+const TRUST = [
+  { label: "Gift-wrapped" },
+  { label: "GST invoice" },
+  { label: "7-day returns" },
+] as const;
 
-async function CartPageContents() {
-  const lines = await getCartLines();
-
-  if (lines.length === 0) {
-    return (
-      <div className="mx-auto flex max-w-md flex-col items-center px-5 py-32 text-center">
+/** An empty bag offers somewhere to go, not just a sentence (plan 16 Phase D). */
+async function EmptyBag() {
+  const products = await listRecentProducts(4).catch(() => []);
+  return (
+    <div className="mx-auto max-w-6xl px-5 py-20">
+      <div className="mx-auto flex max-w-md flex-col items-center text-center">
         <Display as="h1" size="sm">
           Your bag is empty.
         </Display>
-        <p className="mt-4 text-content-muted">
-          Nothing kept here yet. Something is waiting.
-        </p>
-        <Link
-          href="/shop"
-          className="mt-8 border-b border-content pb-1 transition-colors hover:border-accent-ink hover:text-accent-ink"
-        >
-          <MicroLabel>Shop everyday</MicroLabel>
+        <p className="mt-4 text-content-muted">Nothing kept here yet. Something is waiting.</p>
+        <Link href="/shop" className={buttonClassName({ variant: "secondary", className: "mt-8" })}>
+          Shop everyday
         </Link>
       </div>
-    );
-  }
+      {products.length > 0 && (
+        <section aria-labelledby="bag-suggestions" className="mt-20">
+          <h2 id="bag-suggestions" className="mb-6 text-center">
+            <MicroLabel>Loved this week</MicroLabel>
+          </h2>
+          <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
+            {products.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+async function CartPageContents() {
+  const lines = await getCartLines();
+  if (lines.length === 0) return <EmptyBag />;
 
   const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
   const totals = calculateTotals(lines, {
@@ -46,9 +69,11 @@ async function CartPageContents() {
     interState: false,
     shipping: shippingFor(subtotal),
   });
+  const checkoutLabel = `Checkout · ${formatPaise(totals.total)}`;
 
   return (
-    <div className="mx-auto max-w-6xl px-5 py-14">
+    <div className="mx-auto max-w-6xl px-5 pb-32 pt-14 lg:pb-14">
+      <TrackViewCart lines={lines} value={totals.total} />
       <Display as="h1" size="sm">
         Your bag
       </Display>
@@ -62,20 +87,34 @@ async function CartPageContents() {
         <aside className="lg:sticky lg:top-28 lg:self-start">
           <OrderSummary totals={totals} />
 
-          <Link
-            href="/checkout"
-            className="mt-6 flex h-14 w-full items-center justify-center bg-accent font-body text-[13px] font-medium uppercase text-ivory transition-colors hover:bg-accent/90"
-            style={{ letterSpacing: "var(--tracking-caps)" }}
-          >
+          <Link href="/checkout" className={buttonClassName({ size: "lg", className: "mt-6 w-full" })}>
+            {checkoutLabel}
+          </Link>
+          <p className="mt-2 text-center text-xs text-content-muted">
+            UPI, cards, netbanking or cash on delivery
+          </p>
+
+          <TrustRow className="mt-6" layout="stacked" items={TRUST} />
+
+          {/* Delivery checked here is remembered — checkout opens with it. */}
+          <div className="mt-6 border-t border-[var(--color-rule)] pt-5">
+            <PincodeChecker inline />
+          </div>
+        </aside>
+      </div>
+
+      {/* Phones: the total and the one action stay in reach while the lines
+          scroll. Desktop has the sticky summary instead. */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-rule)] bg-ground/95 px-5 py-3 backdrop-blur-sm lg:hidden">
+        <div className="mx-auto flex max-w-6xl items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <p className="font-display text-2xl font-light leading-none">{formatPaise(totals.total)}</p>
+            <p className="mt-1 text-xs text-content-muted">Inclusive of all taxes</p>
+          </div>
+          <Link href="/checkout" className={buttonClassName({ className: "shrink-0" })}>
             Checkout
           </Link>
-
-          <ul className="mt-6 space-y-1.5 text-xs text-content-muted">
-            <li>GST invoice with every order</li>
-            <li>7-day returns</li>
-            <li>Every piece wrapped as a gift</li>
-          </ul>
-        </aside>
+        </div>
       </div>
     </div>
   );

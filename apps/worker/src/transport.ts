@@ -1,4 +1,4 @@
-import type { TrackingDestination } from "@siumora/db";
+import type { TrackingDestination } from "./store.ts";
 
 /**
  * Where a conversion actually goes.

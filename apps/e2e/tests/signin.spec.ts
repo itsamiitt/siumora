@@ -12,7 +12,9 @@ import { expect, test, type Page } from "@playwright/test";
  * different number: the per-number resend cooldown is real here too.
  */
 
-const backend = process.env.E2E_BACKEND ?? "fastify";
+import { e2eBackend } from "../setup/backend.ts";
+
+const backend = e2eBackend();
 
 async function acceptConsent(page: Page) {
   const accept = page.getByRole("button", { name: "Accept" });

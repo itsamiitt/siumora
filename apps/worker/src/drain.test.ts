@@ -13,6 +13,7 @@ import {
   type TestDatabase,
 } from "@siumora/db";
 import { drainConversions } from "./drain.ts";
+import { drizzleStore } from "./store.ts";
 import { classify, httpTransport, type SendOutcome, type Transport } from "./transport.ts";
 
 /**
@@ -87,7 +88,7 @@ workerTest("sends a queued conversion and marks it", async () => {
   const eventId = await queue();
   const { transport, calls } = stub({ kind: "sent" });
 
-  const report = await drainConversions(db, transport);
+  const report = await drainConversions(drizzleStore(db), transport);
 
   assert.equal(report.claimed, 1);
   assert.equal(report.sent, 1);
@@ -105,7 +106,7 @@ workerTest("leaves an unconfigured destination alone", async () => {
   await queue({ status: "skipped" });
   const { transport, calls } = stub({ kind: "sent" });
 
-  const report = await drainConversions(db, transport);
+  const report = await drainConversions(drizzleStore(db), transport);
   assert.equal(report.claimed, 0);
   assert.equal(calls.length, 0);
 });
@@ -115,7 +116,7 @@ workerTest("schedules a refused send instead of retrying it at once", async () =
   const { transport } = stub({ kind: "retry", error: "HTTP 503: upstream" });
   const now = new Date();
 
-  const report = await drainConversions(db, transport, { now });
+  const report = await drainConversions(drizzleStore(db), transport, { now });
   assert.equal(report.retrying, 1);
 
   const row = await rowFor(eventId);
@@ -131,8 +132,8 @@ workerTest("does not pick a row back up before it is due", async () => {
   await queue();
   const { transport, calls } = stub({ kind: "retry", error: "HTTP 503" });
 
-  await drainConversions(db, transport);
-  await drainConversions(db, transport);
+  await drainConversions(drizzleStore(db), transport);
+  await drainConversions(drizzleStore(db), transport);
 
   assert.equal(calls.length, 1, "the second pass found nothing due");
 });
@@ -143,7 +144,7 @@ workerTest("stops retrying a payload that will never be accepted", async () => {
   const eventId = await queue();
   const { transport } = stub({ kind: "permanent", error: "HTTP 400: bad event" });
 
-  const report = await drainConversions(db, transport);
+  const report = await drainConversions(drizzleStore(db), transport);
 
   assert.equal(report.failed, 1);
   const row = await rowFor(eventId);
@@ -158,7 +159,7 @@ workerTest("gives up after the attempt cap", async () => {
   for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt += 1) {
     // Each pass is run at a time past the backoff the last one set, which is
     // what a real worker does by waiting.
-    await drainConversions(db, transport, {
+    await drainConversions(drizzleStore(db), transport, {
       now: new Date(Date.now() + attempt * 60 * 60_000),
     });
   }
@@ -178,8 +179,8 @@ workerTest("does not hand the same row to two workers", async () => {
   const b = stub({ kind: "sent" });
 
   const [first, second] = await Promise.all([
-    drainConversions(db, a.transport),
-    drainConversions(db, b.transport),
+    drainConversions(drizzleStore(db), a.transport),
+    drainConversions(drizzleStore(db), b.transport),
   ]);
 
   assert.equal(first.claimed + second.claimed, 2);
@@ -196,7 +197,7 @@ workerTest("puts a dead worker's claim back on the queue", async () => {
   // Six minutes on: past the claim timeout, so the row is assumed stranded.
   const later = new Date(Date.now() + 6 * 60_000);
   const { transport } = stub({ kind: "sent" });
-  const report = await drainConversions(db, transport, { now: later });
+  const report = await drainConversions(drizzleStore(db), transport, { now: later });
 
   assert.equal(report.reclaimed, 1);
   // Reclaimed and drained in the same pass, rather than waiting for the next.
@@ -215,7 +216,7 @@ workerTest("does not steal a claim that is still in flight", async () => {
   );
 
   const { transport, calls } = stub({ kind: "sent" });
-  const report = await drainConversions(db, transport);
+  const report = await drainConversions(drizzleStore(db), transport);
 
   assert.equal(report.reclaimed, 0);
   assert.equal(calls.length, 0);
@@ -225,7 +226,7 @@ workerTest("refuses a ledger row with no payload rather than posting null", asyn
   const eventId = await queue({ payload: null });
   const { transport, calls } = stub({ kind: "sent" });
 
-  const report = await drainConversions(db, transport);
+  const report = await drainConversions(drizzleStore(db), transport);
 
   assert.equal(calls.length, 0, "nothing was posted");
   assert.equal(report.failed, 1);
@@ -241,7 +242,7 @@ workerTest("does not strand a row when the transport throws", async () => {
     },
   };
 
-  const report = await drainConversions(db, transport);
+  const report = await drainConversions(drizzleStore(db), transport);
 
   assert.equal(report.retrying, 1);
   const row = await rowFor(eventId);
@@ -276,7 +277,7 @@ workerTest("drains a batch without posting them all at once", async () => {
     },
   };
 
-  const report = await drainConversions(db, transport, { concurrency: 3 });
+  const report = await drainConversions(drizzleStore(db), transport, { concurrency: 3 });
 
   assert.equal(report.sent, 12);
   // An unbounded fan-out is how a backlog becomes a rate limit becomes a
@@ -406,7 +407,7 @@ workerTest("sends a queued message and renders it in full", async () => {
     providerMessageId: "wamid.1",
   }));
 
-  const report = await drainNotifications(db, transport);
+  const report = await drainNotifications(drizzleStore(db), transport);
 
   assert.equal(report.sent, 1);
   assert.equal(calls[0]?.recipient, "9876543210");
@@ -433,7 +434,7 @@ workerTest("falls through to the next channel when the first refuses", async () 
       : { kind: "sent" },
   );
 
-  const report = await drainNotifications(db, transport);
+  const report = await drainNotifications(drizzleStore(db), transport);
 
   assert.equal(report.sent, 1);
   assert.deepEqual(calls.map((call) => call.channel), ["whatsapp", "push"]);
@@ -445,7 +446,7 @@ workerTest("skips a message no configured channel can carry", async () => {
   await pool.query("DELETE FROM notifications; DELETE FROM notification_preferences");
   await enqueueNotification(db, { eventKey: crypto.randomUUID(), ...SHIPPED });
 
-  const report = await drainNotifications(db, unconfiguredTransport());
+  const report = await drainNotifications(drizzleStore(db), unconfiguredTransport());
 
   assert.equal(report.skipped, 1);
   assert.equal(report.sent, 0);
@@ -523,7 +524,7 @@ workerTest("holds a marketing message until the morning", async () => {
   // Held, not dropped: still owed, just not at half past eleven at night.
   assert.ok(rows[0].next_attempt_at > night);
 
-  const nothingYet = await drainNotifications(db, unconfiguredTransport(), { now: night });
+  const nothingYet = await drainNotifications(drizzleStore(db), unconfiguredTransport(), { now: night });
   assert.equal(nothingYet.claimed, 0);
 });
 
@@ -537,8 +538,8 @@ workerTest("does not hand the same message to two workers", async () => {
   const b = messenger(["whatsapp"], () => ({ kind: "sent" }));
 
   const [first, second] = await Promise.all([
-    drainNotifications(db, a.transport),
-    drainNotifications(db, b.transport),
+    drainNotifications(drizzleStore(db), a.transport),
+    drainNotifications(drizzleStore(db), b.transport),
   ]);
 
   assert.equal(first.claimed + second.claimed, 2);
@@ -554,7 +555,7 @@ workerTest("reports what is queued, sent and stuck", async () => {
   assert.equal(before.pending, 1);
   assert.equal(before.sent, 0);
 
-  await drainNotifications(db, messenger(["whatsapp"], () => ({ kind: "sent" })).transport);
+  await drainNotifications(drizzleStore(db), messenger(["whatsapp"], () => ({ kind: "sent" })).transport);
 
   const after = await notificationHealth(db);
   assert.equal(after.sent, 1);

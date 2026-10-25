@@ -29,7 +29,7 @@ export async function FestivalBanner() {
   const left = daysRemaining(festival);
 
   return (
-    <div className="border-b border-brass/40 bg-plate text-ivory">
+    <div className="festival-banner border-b border-brass/40 bg-plate text-ivory">
       <Link
         href="/shop"
         className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-3 gap-y-1 px-5 py-2.5 text-center"

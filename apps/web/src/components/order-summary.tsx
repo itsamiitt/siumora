@@ -30,6 +30,12 @@ export function OrderSummary({
           </Row>
         )}
 
+        {totals.discount > 0 && (
+          <Row label="Coupon" tone="mulberry">
+            −{formatPaise(totals.discount)}
+          </Row>
+        )}
+
         <Row label="Shipping">
           {totals.shipping === 0 ? "Free" : formatPaise(totals.shipping)}
         </Row>

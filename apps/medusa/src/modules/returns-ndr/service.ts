@@ -3,6 +3,7 @@ import { MedusaService } from "@medusajs/framework/utils";
 import { SiumoraNdrEvent } from "./models/siumora-ndr-event";
 import { SiumoraOrderStatus } from "./models/siumora-order-status";
 import { SiumoraReturnRequest } from "./models/siumora-return-request";
+import { SiumoraShipment } from "./models/siumora-shipment";
 
 /**
  * Generated CRUD over the returns/NDR tables (listSiumoraOrderStatuses,
@@ -19,6 +20,7 @@ class ReturnsNdrModuleService extends MedusaService({
   SiumoraNdrEvent,
   SiumoraOrderStatus,
   SiumoraReturnRequest,
+  SiumoraShipment,
 }) {}
 
 export default ReturnsNdrModuleService;
