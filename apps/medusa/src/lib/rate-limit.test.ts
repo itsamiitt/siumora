@@ -134,6 +134,57 @@ test("the shipped rules cover what plan/11 §4 names", () => {
   assert.ok(covered("/store/siumora/anything-added-tomorrow", "POST") > 0, "namespace catch-all");
 });
 
+test("prepare and complete sit under the strict checkout ceiling, sharing its budget", () => {
+  const limiter = createRateLimiter(DEFAULT_RULES);
+  const strict = DEFAULT_RULES.find((rule) => rule.bucket === "checkout")!.limit;
+  const paths = [
+    "/store/siumora/carts/cart_01/prepare",
+    "/store/siumora/carts/cart_01/complete",
+    "/store/siumora/checkout",
+  ];
+  let refusedAt = 0;
+  for (let n = 1; n <= 200 && refusedAt === 0; n += 1) {
+    if (!limiter.check("1.1.1.1", paths[n % paths.length]!, "POST").allowed) refusedAt = n;
+  }
+  assert.equal(refusedAt, strict + 1);
+  // Reminders and the cart read under the same id stay on the loose ceiling.
+  const loose = createRateLimiter(DEFAULT_RULES);
+  for (let n = 0; n < strict + 5; n += 1) {
+    assert.ok(loose.check("1.1.1.1", "/store/siumora/carts/cart_01/reminders", "POST").allowed);
+  }
+});
+
+test("middleware keys on the storefront-signed client IP, not the storefront's own", async () => {
+  const { signClientIp } = await import("./client-ip.ts");
+  const saved = process.env.CLIENT_IP_SECRET;
+  process.env.CLIENT_IP_SECRET = "k".repeat(32);
+  try {
+    const handler = rateLimitMiddleware(createRateLimiter(RULES));
+    const from = (ip: string) =>
+      fakeExchange({
+        ip: "10.0.0.5",
+        headers: {
+          "x-siumora-client-ip": ip,
+          "x-siumora-client-ip-sig": signClientIp(ip, "k".repeat(32)),
+        },
+      });
+    for (let n = 0; n < 3; n += 1) {
+      const x = from("203.0.113.1");
+      handler(x.req, x.res, x.next);
+    }
+    const burst = from("203.0.113.1");
+    handler(burst.req, burst.res, burst.next);
+    assert.equal(burst.sent.status, 429);
+    // A different shopper behind the same storefront still gets through.
+    const other = from("203.0.113.2");
+    handler(other.req, other.res, other.next);
+    assert.equal(other.calls(), 1);
+  } finally {
+    if (saved === undefined) delete process.env.CLIENT_IP_SECRET;
+    else process.env.CLIENT_IP_SECRET = saved;
+  }
+});
+
 /* -------------------------------------------------------------------------- *
  * Middleware level — the handler src/api/middlewares.ts mounts, driven with
  * fake express request/response objects. No framework boot involved.

@@ -12,6 +12,7 @@ import {
   razorpaySession,
   readSessionPayments,
   readyCart,
+  refundSuperseded,
   refundUnplaced,
   refuse,
   stampPaymentMethod,
@@ -21,6 +22,7 @@ import {
   type Refusal,
 } from "../../../../../../lib/checkout-cart";
 import { adoptPlacedOrder } from "../../../../../../lib/checkout-identity";
+import { currentSession } from "../../../../../../lib/session-auth";
 import { type GstTxClient } from "../../../../../../modules/gst/allocate";
 import { ensureInvoiceForOrder, type GraphQuery } from "../../../../../../modules/gst/issue";
 import { verifyCheckoutSignature } from "../../../../../../modules/razorpay-payment/decide";
@@ -38,6 +40,8 @@ import {
 import {
   PLACED_STATUS,
   completionEnvelope,
+  guardedCompletionEnvelope,
+  mayRevealAccessKey,
 } from "../../../../../../modules/siumora-order/identity";
 
 /**
@@ -172,11 +176,21 @@ async function checkPrepaid(
   }
   const session = razorpaySession(cart);
   if (!session || session.data?.razorpay_order_id !== proof.orderId) {
+    // A real payment (the signature held) against a Razorpay order this bag
+    // no longer points at — a superseded order, paid from a stale modal.
+    // Refund it now rather than promise to (security review, item 2); the
+    // ledger sweep in payment-recon is the backstop if this cannot.
+    const outcome = await refundSuperseded(req, proof.orderId);
     return {
       status: 409,
       body: {
         error: "payment_mismatch",
-        message: "That payment is not for this bag. If you were charged, it will be refunded.",
+        message:
+          outcome === "refunded"
+            ? "That payment was for an earlier version of this bag. We are refunding it in full — review your bag and pay again."
+            : outcome === "nothing_taken"
+              ? "That payment is not for this bag. Nothing was charged — review your bag and pay again."
+              : "That payment is not for this bag. If you were charged, it will be refunded automatically — our team has been alerted.",
       },
     };
   }
@@ -270,6 +284,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   // (same key, or an already-completed cart id) must not hand a guest's
   // order to whoever replays it (security review).
   let completedHere = false;
+  // A verified Checkout.js proof for this cart's own Razorpay order: the
+  // caller is the payer, even when the webhook placed the order first.
+  let paymentProven = false;
 
   if (cart.completed_at) {
     // Already completed — Medusa's native semantics make completion
@@ -284,6 +301,12 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
       return;
     }
     orderId = existing;
+    if (proof) {
+      const credentials = await paymentCredentials(req);
+      paymentProven =
+        verifyCheckoutSignature(proof, credentials.keySecret) &&
+        razorpaySession(cart)?.data?.razorpay_order_id === proof.orderId;
+    }
     res.setHeader("Idempotent-Replay", "true");
   } else {
     const refusal =
@@ -294,6 +317,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
       refuse(res, refusal);
       return;
     }
+    // checkPrepaid verified the signature and bound it to this cart's session.
+    paymentProven = paymentMethod !== "cod";
     if (paymentMethod !== "cod") await stampPaymentMethod(req, cart, paymentMethod);
 
     try {
@@ -342,7 +367,14 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     res.setHeader("Idempotent-Replay", completedHere ? "false" : "true");
   }
 
-  const allocation = await allocateIdentity(pg, { orderId, cartId, idempotencyKey });
+  // Only an entitled request's key is recorded: a later replay of that key
+  // is then the buyer retrying, and gets the access key (item 9). A bare
+  // replay of a completed cart id must not plant a key it can replay.
+  const allocation = await allocateIdentity(pg, {
+    orderId,
+    cartId,
+    idempotencyKey: completedHere || paymentProven ? idempotencyKey : null,
+  });
   if (allocation.kind === "key_conflict") {
     res.status(422).json({
       error: "idempotency_key_reused",
@@ -357,8 +389,16 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   // Identity first, then the statutory invoice — the M2 gst module. Both
   // COD and a paid prepaid order are confirmed at placement, so completion
   // is what raises the invoice.
+  const reveal = mayRevealAccessKey({
+    completedHere,
+    keyReplay: false,
+    paymentProven,
+    ownerSignedIn:
+      !!allocation.identity.customer_id &&
+      allocation.identity.customer_id === currentSession(req)?.customerId,
+  });
   res.json({
-    ...completionEnvelope(allocation.identity, PLACED_STATUS),
+    ...guardedCompletionEnvelope(allocation.identity, PLACED_STATUS, reveal),
     invoiceNumber: await invoiceNumberForOrder(
       req,
       gstPg,

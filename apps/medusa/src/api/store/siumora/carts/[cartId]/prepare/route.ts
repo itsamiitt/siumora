@@ -1,4 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
 import { checkoutSettings } from "../../../../../../lib/checkout-context";
 import {
@@ -12,6 +13,7 @@ import {
   type SessionSnapshot,
 } from "../../../../../../lib/checkout-cart";
 import { RAZORPAY_PROVIDER_ID } from "../../../../../../modules/razorpay-payment/index";
+import { stampLedgerCart, type RawClient } from "../../../../../../modules/siumora-order/razorpay-ledger";
 import {
   PAYMENTS_PAUSED,
   type CheckoutPaymentMethod,
@@ -135,6 +137,12 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     });
     return;
   }
+
+  // The ledger row the provider wrote learns its cart, so the recon sweep
+  // can tell a completed bag from an abandoned one (security review, item 2).
+  // Best effort: without the stamp recon judges by the live session alone.
+  const pg = req.scope.resolve(ContainerRegistrationKeys.PG_CONNECTION) as unknown as RawClient;
+  await stampLedgerCart(pg, session.data.razorpay_order_id, ready.cart.id).catch(() => undefined);
 
   res.json({ razorpay: handoff(session) });
 }

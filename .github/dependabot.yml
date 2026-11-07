@@ -1,0 +1,26 @@
+version: 2
+updates:
+  # One weekly PR per ecosystem for minor/patch bumps across the workspace;
+  # majors arrive individually so each gets read. Security updates are not
+  # grouped and open as soon as an advisory is published.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Medusa packages move in lockstep (all pinned to one version); bump
+      # them together by hand with the upgrade notes open.
+      - dependency-name: "@medusajs/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

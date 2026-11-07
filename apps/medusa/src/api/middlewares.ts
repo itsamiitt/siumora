@@ -25,6 +25,11 @@ import { restrictSelfUpdate } from "../lib/customer-guard";
 import { limiterFromEnv, rateLimitMiddleware } from "../lib/rate-limit";
 import { connectRedis, logRedisError } from "../lib/redis";
 import {
+  closedNativeCompletion,
+  guardNativeCartWrite,
+  guardPaymentSessionCreate,
+} from "../lib/store-cart-guard";
+import {
   closedCustomerAuthRoute,
   refuseCustomerTokenMinting,
   sessionAuth,
@@ -98,6 +103,22 @@ export default defineMiddlewares({
     // guessing ceiling (plan 16 B19); the native door would sit under the
     // loose cart-building one.
     { matcher: "/store/carts/:id/promotions", middlewares: [closedPromotionsRoute] },
+    // Native completion would place a COD order past the OTP gate, the fee
+    // and serviceability (pp_system_default is enabled on the region); the
+    // only way to an order is /store/siumora/carts/:id/complete. The system
+    // session is opened there, after the gates, never by the shopper. See
+    // src/lib/store-cart-guard.ts.
+    { matcher: "/store/carts/:id/complete", middlewares: [closedNativeCompletion] },
+    {
+      matcher: "/store/payment-collections/:id/payment-sessions",
+      methods: ["POST"],
+      middlewares: [guardPaymentSessionCreate],
+    },
+    // Native cart create/update: no promo_codes (coupons go through the
+    // strict door above) and no server-owned siumora_* metadata (the
+    // payment method and friends are the server's to write).
+    { matcher: "/store/carts", methods: ["POST"], middlewares: [guardNativeCartWrite] },
+    { matcher: "/store/carts/:id", methods: ["POST"], middlewares: [guardNativeCartWrite] },
     // The courier webhook (plan 16 Phase F) signs its raw body; keep it for
     // the HMAC check. Rate-limited like the store surface it moves orders on.
     // Delivery receipts (plan 16 Phase G) are signed over the raw body too.

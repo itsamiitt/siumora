@@ -387,3 +387,18 @@ export async function cancelShipment(client: SqlClient, orderId: string): Promis
     [orderId],
   );
 }
+
+/**
+ * Undo a payout claim whose refund did not go through (security review,
+ * item 8): the prepaid path claims the reference before calling Razorpay,
+ * so a double click cannot refund twice, and releases it on failure so the
+ * operator can try again.
+ */
+export async function releasePayout(client: SqlClient, returnId: string, reference: string): Promise<void> {
+  await client.raw(
+    `UPDATE siumora_return_requests
+        SET payout_reference = NULL, payout_recorded_at = NULL, updated_at = now()
+      WHERE id = ? AND payout_reference = ? AND deleted_at IS NULL`,
+    [returnId, reference],
+  );
+}

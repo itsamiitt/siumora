@@ -28,13 +28,15 @@ export interface CartActionResult {
 /**
  * Cart mutations.
  *
- * Each revalidates the paths that render cart state so the header count and the
- * cart page stay in step after a mutation from anywhere.
+ * Each revalidates only the pages that render cart lines. The header count is
+ * not one of them: it is client-side, fed by each action's returned `count`
+ * (notifyCartChanged), so wiping the whole layout's cache — every catalogue
+ * page — on each add would buy nothing but cold renders.
  */
 
 function revalidateCartSurfaces() {
   revalidatePath("/cart");
-  revalidatePath("/", "layout");
+  revalidatePath("/checkout");
 }
 
 async function currentCount(): Promise<number> {
@@ -83,7 +85,11 @@ export async function readBag(): Promise<{ lines: CartLine[]; subtotal: number; 
 }
 
 export async function emptyCart(): Promise<CartActionResult> {
-  await clearCart();
+  try {
+    await clearCart();
+  } catch {
+    return { ok: false, message: "We could not reach your bag just now. Please try again.", count: await currentCount() };
+  }
   revalidateCartSurfaces();
   return { ok: true, count: 0 };
 }

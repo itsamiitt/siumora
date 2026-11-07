@@ -7,7 +7,35 @@ loadEnv(process.env.NODE_ENV || "development", process.cwd());
 // The config loader is this stack's one choke point — the Medusa port of
 // assertBootSafety. The guards themselves are pure and tested in
 // src/boot-guards.test.ts.
-const { jwtSecret, cookieSecret } = assertMedusaBootSafety(process.env);
+const { jwtSecret, cookieSecret, workerMode } = assertMedusaBootSafety(process.env);
+
+// Redis-backed infrastructure modules (production; the boot guard requires
+// MEDUSA_REDIS_URL there). Without them each process runs the in-memory
+// event bus / workflow engine / locks: subscribers fire only on the process
+// that emitted, a restart drops queued events and long-running workflows, and
+// two instances can both take the same "lock". Dev keeps the in-memory
+// defaults so a laptop needs no Redis. All four ship inside @medusajs/medusa.
+const redisUrl = process.env.MEDUSA_REDIS_URL;
+const redisModules = redisUrl
+  ? [
+      { resolve: "@medusajs/medusa/event-bus-redis", options: { redisUrl } },
+      { resolve: "@medusajs/medusa/workflow-engine-redis", options: { redis: { redisUrl } } },
+      { resolve: "@medusajs/medusa/cache-redis", options: { redisUrl } },
+      {
+        resolve: "@medusajs/medusa/locking",
+        options: {
+          providers: [
+            {
+              resolve: "@medusajs/medusa/locking-redis",
+              id: "locking-redis",
+              is_default: true,
+              options: { redisUrl },
+            },
+          ],
+        },
+      },
+    ]
+  : [];
 
 // Google sign-in (auth plan phase 4) exists only once its credentials do; the
 // storefront offers it only when the owner also switches it on in Settings →
@@ -36,7 +64,11 @@ export default defineConfig({
     // checkout-path dependency, priced in the design doc, and required by
     // the boot guard: the rate limiter (src/api/middlewares.ts) shares its
     // counters there.
-    ...(process.env.MEDUSA_REDIS_URL ? { redisUrl: process.env.MEDUSA_REDIS_URL } : {}),
+    ...(redisUrl ? { redisUrl } : {}),
+    // MEDUSA_WORKER_MODE splits one deploy into "server" (HTTP) and "worker"
+    // (subscribers, scheduled jobs, workflow steps) processes. Only safe with
+    // the Redis modules above — the two halves talk through Redis.
+    workerMode,
     http: {
       storeCors: process.env.STORE_CORS ?? "http://localhost:3000",
       // 9000 is Medusa's default port (CI boots there); 9101 is the local
@@ -64,7 +96,12 @@ export default defineConfig({
       },
     },
   },
+  // A worker process serves no HTTP, so it has no dashboard to host.
+  admin: {
+    disable: workerMode === "worker",
+  },
   modules: [
+    ...redisModules,
     // Product images (M4). The file module accepts exactly one provider and
     // registers file-local by default, so dev needs no block at all — uploads
     // land under ./static and serve from the backend. Production points at

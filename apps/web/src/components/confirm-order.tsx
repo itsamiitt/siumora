@@ -14,8 +14,18 @@ import { confirmCodOrder } from "@/app/actions/order";
  * webhook drives this transition. The button exists here so the lifecycle can
  * be exercised without a Meta Business account, and it says what it is rather
  * than pretending a message was sent.
+ *
+ * The button itself is the customer's real way to confirm until WhatsApp is
+ * wired, so it stays everywhere; only the "not connected" note is dev-only
+ * (`simulated`), and production gets plain customer copy instead.
  */
-export function ConfirmOrder({ orderNumber }: { orderNumber: string }) {
+export function ConfirmOrder({
+  orderNumber,
+  simulated,
+}: {
+  orderNumber: string;
+  simulated: boolean;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -23,8 +33,9 @@ export function ConfirmOrder({ orderNumber }: { orderNumber: string }) {
   return (
     <div className="mt-8 border border-accent-ink/25 bg-accent/[0.04] p-5 text-center">
       <p className="text-sm text-content-muted">
-        WhatsApp is not connected in this environment. Confirm here to continue
-        the order.
+        {simulated
+          ? "WhatsApp is not connected in this environment. Confirm here to continue the order."
+          : "Confirm your cash on delivery order here and we will start packing it."}
       </p>
       <Button
         size="sm"

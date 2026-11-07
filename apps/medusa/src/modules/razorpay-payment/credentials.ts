@@ -39,6 +39,9 @@ export async function razorpayCredentials(
 ): Promise<RazorpayCredentials> {
   if (!pg) return fromEnv(env);
   try {
+    // A stored row that cannot be decrypted comes back with `error` and
+    // configured: false — prepaid off, never an env fallback. The
+    // [money-alert] for it is logged by providerConfiguration.
     const { effective, providers } = await providerConfiguration(pg, env);
     return {
       configured: providers.razorpay.configured,
@@ -46,8 +49,14 @@ export async function razorpayCredentials(
       keySecret: effective.RAZORPAY_KEY_SECRET || undefined,
       webhookSecret: effective.RAZORPAY_WEBHOOK_SECRET || undefined,
     };
-  } catch {
+  } catch (error) {
     // No settings table yet (fresh database): the environment alone decides.
+    // Said out loud, because the same path also catches a settings read that
+    // failed for another reason — and then an owner's admin-saved keys (or
+    // their "off" switch) are being ignored in favour of env.
+    console.warn(
+      `[money-alert] razorpay provider settings unreadable, using env credentials: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return fromEnv(env);
   }
 }

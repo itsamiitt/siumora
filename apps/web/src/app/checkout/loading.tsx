@@ -23,8 +23,8 @@ export default function Loading({ bare = false }: { bare?: boolean }) {
   );
   if (bare) return body;
   return (
-    <div className="mx-auto max-w-6xl px-5 pb-16 pt-8 lg:pt-12">
-      <Skeleton className="mb-10 h-9 w-40" />
+    <div className="mx-auto max-w-6xl px-5 pb-10 pt-5 lg:pb-16 lg:pt-12">
+      <Skeleton className="mb-4 h-9 w-40 lg:mb-10" />
       {body}
     </div>
   );

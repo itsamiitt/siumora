@@ -55,7 +55,13 @@ export function AddToBag({
     setMessage(null);
 
     startTransition(async () => {
-      const result = await addToCart(selected.id);
+      // A failed action (server down, network drop) rejects rather than
+      // returning — caught here so it reads as a message, not a crashed page.
+      const result = await addToCart(selected.id).catch(() => null);
+      if (!result) {
+        setMessage("Could not reach the bag. Check your connection and try again.");
+        return;
+      }
       if (result.ok) {
         track("add_to_cart", {
           // Minted here and reused if this is ever echoed server-side, so the

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { normalisePhone } from "@siumora/core";
 import { ApiError, type DeviceSession, type OtpChannel } from "@siumora/sdk";
 
+import { revalidateAccountSurfaces } from "@/lib/account-surfaces";
 import { api } from "@/lib/api";
 import { linkCartToAccount } from "@/lib/cart-store";
 import { clearGoogleLink, pendingGoogleLink } from "@/lib/google-signin";
@@ -96,9 +97,9 @@ export async function verifyCode(phone: string, code: string): Promise<VerifyCod
     const signedIn = api().withToken(session.token);
     await Promise.allSettled([linkCartToAccount(signedIn), linkWishlistToAccount(signedIn)]);
 
-    // The header, the account page and the ops link all change once someone is
-    // signed in, so the whole layout is stale.
-    revalidatePath("/", "layout");
+    // The account pages, the ops link and the linked bag change once someone
+    // is signed in; the static header does not.
+    revalidateAccountSurfaces();
 
     return {
       ok: true,
@@ -130,18 +131,18 @@ export async function signOut(): Promise<void> {
   }
 
   await endSession();
-  revalidatePath("/", "layout");
+  revalidateAccountSurfaces();
 }
 
 export async function signOutEverywhere(): Promise<{ ok: boolean; revoked: number }> {
   try {
     const result = await (await apiAs()).signOutEverywhere();
     await endSession();
-    revalidatePath("/", "layout");
+    revalidateAccountSurfaces();
     return result;
   } catch {
     await endSession();
-    revalidatePath("/", "layout");
+    revalidateAccountSurfaces();
     return { ok: false, revoked: 0 };
   }
 }
@@ -184,7 +185,7 @@ export async function revokeDevice(id: string): Promise<{ ok: boolean; message?:
     if (result.current) {
       // Signing this very device out from the list is a sign-out.
       await endSession();
-      revalidatePath("/", "layout");
+      revalidateAccountSurfaces();
     }
     return { ok: true };
   } catch (error) {

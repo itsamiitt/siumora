@@ -540,3 +540,56 @@ export function restockAdjustments(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([inventoryItemId, adjustment]) => ({ inventoryItemId, locationId, adjustment }));
 }
+
+// ── Prepaid return refund (security review, item 8) ───────────
+
+/**
+ * The refund for an approved prepaid return, back to the instrument: the
+ * returned lines at what the order charged for them (line totals — tax in,
+ * discounts out; shipping is not refunded, as for the COD payout), capped by
+ * what is still refundable on the captured Razorpay payment. Same guards as
+ * the COD payout: an open return, not paid already — one parcel, one
+ * refund. Paise in, paise out.
+ */
+export function decideInstrumentRefund(input: {
+  openReturn: { payout_reference?: string | null; variant_ids: unknown } | undefined;
+  payment: { capturedPaise: number; refundedPaise: number } | undefined;
+  lines: ReadonlyArray<{ variantId: string | null; totalPaise: number }>;
+}): { ok: true; amountPaise: number } | Refusal {
+  const { openReturn, payment } = input;
+  if (!openReturn) {
+    return { ok: false, code: 404, error: "no_return", message: "No open return on this order to refund." };
+  }
+  if (openReturn.payout_reference) {
+    return {
+      ok: false,
+      code: 409,
+      error: "already_paid",
+      message: `Already refunded as ${openReturn.payout_reference}.`,
+    };
+  }
+  if (!payment) {
+    return {
+      ok: false,
+      code: 409,
+      error: "no_capture",
+      message: "This order has no captured online payment to refund — check it in Razorpay.",
+    };
+  }
+  const returned = new Set(
+    Array.isArray(openReturn.variant_ids) ? openReturn.variant_ids.filter((id): id is string => typeof id === "string") : [],
+  );
+  const owed = input.lines
+    .filter((line) => line.variantId !== null && returned.has(line.variantId))
+    .reduce((sum, line) => sum + line.totalPaise, 0);
+  const amountPaise = Math.min(owed, payment.capturedPaise - payment.refundedPaise);
+  if (amountPaise <= 0) {
+    return {
+      ok: false,
+      code: 409,
+      error: "nothing_to_refund",
+      message: "Nothing is left to refund on this payment for the returned pieces.",
+    };
+  }
+  return { ok: true, amountPaise };
+}

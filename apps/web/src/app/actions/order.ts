@@ -101,8 +101,9 @@ export async function submitOrder(input: {
  */
 async function letGoOfBag(): Promise<void> {
   await forgetCart();
+  // Only the pages that render the bag; the header count is client-side.
   revalidatePath("/cart");
-  revalidatePath("/", "layout");
+  revalidatePath("/checkout");
 }
 
 /**

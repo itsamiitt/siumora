@@ -34,8 +34,16 @@ const PDP_TRUST = [
 ];
 
 export async function generateStaticParams() {
-  const products = await listProducts();
-  return products.map((product) => ({ handle: product.handle }));
+  // No backend configured (typegen, lint-only CI) or the catalog fetch failed:
+  // prerender nothing and let each handle render on demand instead of failing
+  // the whole build.
+  try {
+    const products = await listProducts();
+    return products.map((product) => ({ handle: product.handle }));
+  } catch (error) {
+    console.warn("[generateStaticParams] products: catalog unavailable, prerendering none", error);
+    return [];
+  }
 }
 
 export async function generateMetadata({

@@ -14,26 +14,32 @@ type Answer = { status: number; body: unknown };
 
 function scripted(routes: Record<string, Answer[]>) {
   const calls: string[] = [];
+  const bodies: Record<string, unknown> = {};
   const seen: Record<string, number> = {};
   const impl = (async (url: string | URL, init?: RequestInit) => {
     const key = `${init?.method ?? "GET"} ${new URL(String(url)).pathname.replace("/v1/external", "")}`;
     calls.push(key);
+    if (typeof init?.body === "string") bodies[key] = JSON.parse(init.body);
     const list = routes[key] ?? [{ status: 404, body: {} }];
     const answer = list[Math.min(seen[key] ?? 0, list.length - 1)]!;
     seen[key] = (seen[key] ?? 0) + 1;
     return { ok: answer.status < 300, status: answer.status, text: async () => JSON.stringify(answer.body) };
   }) as unknown as typeof fetch;
-  return { impl, calls };
+  return { impl, calls, bodies };
 }
 
 function fakePg() {
   const shipments = new Map<string, Record<string, unknown>>();
   const statuses = new Map<string, string>();
+  // The order's recorded payments (siumora-order/payment-method.ts).
+  const payments: Array<{ id: string; provider_id: string }> = [];
   return {
     shipments,
     statuses,
+    payments,
     async raw(sql: string, bindings: ReadonlyArray<unknown> = []) {
       if (sql.includes("siumora_settings")) throw new Error("no settings table in a unit test");
+      if (sql.includes("FROM order_payment_collection")) return { rows: payments };
       if (sql.includes("FROM siumora_order_identity")) return { rows: [{ order_number: "SIU-00042" }] };
       if (sql.startsWith("SELECT") && sql.includes("FROM siumora_shipments WHERE order_id")) {
         const row = shipments.get(String(bindings[0]));
@@ -157,4 +163,21 @@ test("without Shiprocket connected, the fulfilment goes through and says no cour
 test("a refused booking is a message the operator can act on", async () => {
   const { impl } = scripted({ ...LOGIN, "POST /orders/create/adhoc": [{ status: 422, body: { message: "bad pincode" } }] });
   await assert.rejects(provider(impl, fakePg()).createFulfillment({}, ITEMS, ORDER, {}), /Shiprocket refused the booking for SIU-00042/);
+});
+
+test("Prepaid vs COD follows the payment Medusa recorded, not the order's metadata", async () => {
+  // A Razorpay payment on the order: Prepaid — the courier collects nothing.
+  const paid = fakePg();
+  paid.payments.push({ id: "pay_1", provider_id: "pp_razorpay_razorpay" });
+  const prepaid = scripted({ ...LOGIN, ...CREATED, ...AWB_OK, ...PICKUP_OK });
+  await provider(prepaid.impl, paid).createFulfillment({}, ITEMS, ORDER, {});
+  assert.equal((prepaid.bodies["POST /orders/create/adhoc"] as { payment_method: string }).payment_method, "Prepaid");
+
+  // Metadata says UPI (shopper-writable once), but the payment is the system
+  // provider's: the courier must collect.
+  const cod = fakePg();
+  cod.payments.push({ id: "pay_2", provider_id: "pp_system_default" });
+  const forged = scripted({ ...LOGIN, ...CREATED, ...AWB_OK, ...PICKUP_OK });
+  await provider(forged.impl, cod).createFulfillment({}, ITEMS, ORDER, {});
+  assert.equal((forged.bodies["POST /orders/create/adhoc"] as { payment_method: string }).payment_method, "COD");
 });

@@ -19,7 +19,8 @@
  *   builds {@link createRedisRateLimiter} instead: same rules, same window
  *   arithmetic, one shared counter per bucket, and the in-process limiter as
  *   the fallback while Redis is unreachable.
- * - Keyed by client IP at this layer. The OTP endpoints additionally throttle
+ * - Keyed by client IP at this layer — the storefront-signed forwarded IP
+ *   when it verifies (src/lib/client-ip.ts), else req.ip. The OTP endpoints additionally throttle
  *   by phone number against the database — that limit is about a specific
  *   abuse and lives there, not here.
  * - The DISABLE_RATE_LIMITS escape hatch (E2E only), refused at boot in
@@ -30,9 +31,16 @@
  * is already the client behind one proxy hop.
  */
 
+import { clientIp } from "./client-ip.ts";
+
 export interface RateRule {
   /** Matched as a prefix of the pathname. */
   readonly prefix: string;
+  /**
+   * When set, the pathname must also match this — for routes with an id in
+   * the middle (/store/siumora/carts/:id/complete) that a prefix cannot name.
+   */
+  readonly pattern?: RegExp;
   readonly method?: string;
   readonly limit: number;
   readonly windowMs: number;
@@ -71,6 +79,17 @@ export const DEFAULT_RULES: readonly RateRule[] = [
   // Each checkout allocates an invoice number under a table lock, so a flood
   // here is contention on the hottest lock in the system.
   { prefix: "/store/siumora/checkout", method: "POST", limit: 12, windowMs: 60_000, bucket: "checkout" },
+  // The money doors share the checkout budget: prepare opens a Razorpay
+  // order per call, complete runs the completion workflow and the invoice
+  // lock. A shopper hits each a few times; a loop is what this stops.
+  {
+    prefix: "/store/siumora/carts/",
+    pattern: /^\/store\/siumora\/carts\/[^/]+\/(prepare|complete)\/?$/,
+    method: "POST",
+    limit: 12,
+    windowMs: 60_000,
+    bucket: "checkout",
+  },
   // Guessing an order access key. The key is a uuid so guessing is hopeless,
   // but a hopeless attempt still costs a query each time.
   { prefix: "/store/siumora/orders/", limit: 60, windowMs: 60_000, bucket: "orders" },
@@ -291,6 +310,7 @@ function ruleFor(
   return rules.find(
     (rule) =>
       path.startsWith(rule.prefix) &&
+      (rule.pattern === undefined || rule.pattern.test(path)) &&
       (rule.method === undefined || rule.method === method),
   );
 }
@@ -372,6 +392,7 @@ export interface LimiterRequest {
   originalUrl?: string;
   url: string;
   ip?: string;
+  headers?: Record<string, string | string[] | undefined>;
   socket?: { remoteAddress?: string };
 }
 
@@ -405,7 +426,9 @@ export function rateLimitMiddleware(limiter: RateLimiter | AsyncRateLimiter) {
 
     const url = req.originalUrl ?? req.url;
     const path = url.split("?")[0] ?? url;
-    const key = req.ip ?? req.socket?.remoteAddress ?? "unknown";
+    // The shopper's IP when the storefront vouched for it (lib/client-ip.ts);
+    // req.ip alone would put every shopper in the storefront server's bucket.
+    const key = clientIp(req) ?? "unknown";
 
     const answer = (decision: RateDecision): void => {
       if (decision.allowed) return next();

@@ -1,6 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
+import { settingsWritePermission } from "../../../../lib/operator";
 import { auditAction, requireOperator } from "../../../../lib/operator-gate";
 import { invalidateSettingsCache } from "../../../../modules/settings/cache";
 import { readSettings } from "../../../../modules/settings/read";
@@ -43,10 +44,15 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
 }
 
 export async function PATCH(req: MedusaRequest, res: MedusaResponse): Promise<void> {
-  const operator = await requireOperator(req, res, "settings:write");
-  if (!operator) return;
-
   const body = (req.body ?? {}) as { key?: unknown; value?: unknown; entries?: unknown };
+
+  // Sign-in limits and staff security ride this same route but are gated as
+  // auth:settings, which (unlike settings:write) demands two-step sign-in.
+  const keys = Array.isArray(body.entries)
+    ? body.entries.map((entry) => (entry as { key?: unknown } | null)?.key)
+    : [body.key];
+  const operator = await requireOperator(req, res, settingsWritePermission(keys));
+  if (!operator) return;
 
   if (body.entries !== undefined) {
     const result = await updateSettings(pg(req), body.entries);

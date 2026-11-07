@@ -11,8 +11,13 @@ import { getCartLines } from "@/lib/cart-store";
  * PDPs, which is exactly the tier the performance budget depends on.
  */
 export async function GET() {
-  const lines = await getCartLines();
-  const count = lines.reduce((sum, line) => sum + line.quantity, 0);
+  let count = 0;
+  try {
+    const lines = await getCartLines();
+    count = lines.reduce((sum, line) => sum + line.quantity, 0);
+  } catch {
+    // The badge is decoration: an outage reads as no count, never a 500.
+  }
 
   return NextResponse.json(
     { count },

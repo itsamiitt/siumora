@@ -169,8 +169,9 @@ export async function placeOrder(
     );
 
     // Kept so this browser can reopen the order later. A signed-in customer
-    // does not need it, but they may have placed this one as a guest.
-    await rememberOrderKey(result.orderNumber, result.accessKey);
+    // does not need it, but they may have placed this one as a guest. Null
+    // when the backend withheld it from an unproven replay.
+    if (result.accessKey) await rememberOrderKey(result.orderNumber, result.accessKey);
 
     return {
       ok: true,
@@ -203,7 +204,7 @@ export async function finishPayment(input: {
       { cartId, paymentMethod: input.paymentMethod, razorpay: input.razorpay },
       input.idempotencyKey,
     );
-    await rememberOrderKey(result.orderNumber, result.accessKey);
+    if (result.accessKey) await rememberOrderKey(result.orderNumber, result.accessKey);
     return { ok: true, orderNumber: result.orderNumber };
   } catch (error) {
     return refusal(error, "We could not confirm the order.");

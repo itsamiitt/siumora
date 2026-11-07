@@ -10,6 +10,7 @@ import {
   type OrderStatus,
   type ReturnLine,
 } from "../../../../../../modules/returns-ndr/lifecycle";
+import { orderSettlement, type RawClient } from "../../../../../../modules/siumora-order/payment-method";
 
 /**
  * POST /store/siumora/orders/:number/returns?key=<uuid> — request a return.
@@ -78,10 +79,13 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     now: new Date(),
     lines,
     body: parsed.value,
-    // The only orders this app can hold today came through the COD complete
-    // route (same posture as the sibling read's paymentMethod). Prepaid
-    // arrives with M3 Razorpay; core then routes refunds to the instrument.
-    paymentMethod: "cod",
+    // From the payment Medusa recorded, not metadata (security review, item
+    // 8): a Razorpay order refunds to the instrument (core's refundTo), a
+    // COD one is paid out to UPI by hand. Core's prepaid arm is "upi".
+    paymentMethod:
+      (await orderSettlement(found.pg as unknown as RawClient, found.orderId)) === "prepaid"
+        ? "upi"
+        : "cod",
   });
   if (!decision.ok) {
     res.status(decision.code).json({ error: decision.error, message: decision.message });

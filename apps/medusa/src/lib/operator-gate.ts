@@ -2,6 +2,7 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
 import { recordAudit, type SqlClient } from "../modules/audit/data";
+import { clientIp } from "./client-ip";
 import { verifiedPhone } from "./customer-signin";
 import { settingsCache } from "../modules/settings/cache";
 import { readSettings, type SqlClient as SettingsSqlClient } from "../modules/settings/read";
@@ -150,7 +151,7 @@ export async function auditAction(
     action,
     ...(options.subject ? { subject: options.subject } : {}),
     ...(options.detail !== undefined ? { detail: options.detail } : {}),
-    ip: req.ip,
+    ip: clientIp(req),
   });
   if (!result.recorded) {
     // eslint-disable-next-line no-console

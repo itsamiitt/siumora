@@ -1,5 +1,8 @@
 import "server-only";
 
+import { headers } from "next/headers";
+
+import { clientIpHeaders } from "./client-ip";
 import { createCommerceClient, type CommerceClient } from "./commerce-backend";
 
 /**
@@ -11,11 +14,24 @@ import { createCommerceClient, type CommerceClient } from "./commerce-backend";
  *
  * COMMERCE_BACKEND selects the transport (see commerce-backend.ts); a bad or
  * premature value throws here, at construction, on the first api() call.
+ *
+ * The one client serves every request, so the shopper's IP is read per call
+ * (the SDK calls the hook for uncached requests only): Medusa's per-IP limits
+ * and OTP caps then count the shopper, not this server (lib/client-ip.ts).
+ * Outside a request scope headers() throws, and the call goes without.
  */
 const globalForApi = globalThis as typeof globalThis & {
   __siumoraApi?: CommerceClient;
 };
 
+async function forwardedClientIp(): Promise<Record<string, string> | undefined> {
+  const secret = process.env.CLIENT_IP_SECRET;
+  if (!secret) return undefined;
+  return clientIpHeaders(await headers(), secret);
+}
+
 export function api(): CommerceClient {
-  return (globalForApi.__siumoraApi ??= createCommerceClient());
+  return (globalForApi.__siumoraApi ??= createCommerceClient(process.env, {
+    clientIpHeaders: forwardedClientIp,
+  }));
 }

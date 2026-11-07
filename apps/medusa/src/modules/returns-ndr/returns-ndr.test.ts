@@ -480,3 +480,26 @@ test("restockAdjustments merges per item, honours bundles, skips unmanaged varia
     { inventoryItemId: "iitem_b", locationId: "sloc_1", adjustment: 3 },
   ]);
 });
+
+test("decideInstrumentRefund: the returned lines, capped by what is left on the capture, once", async () => {
+  const { decideInstrumentRefund } = await import("./lifecycle.ts");
+  const lines = [
+    { variantId: "v1", totalPaise: 199_000 },
+    { variantId: "v2", totalPaise: 50_000 },
+  ];
+  const open = { payout_reference: null, variant_ids: ["v1"] };
+  const payment = { capturedPaise: 249_000, refundedPaise: 0 };
+  assert.deepEqual(decideInstrumentRefund({ openReturn: open, payment, lines }), { ok: true, amountPaise: 199_000 });
+  // Capped by what an earlier partial refund left.
+  assert.deepEqual(
+    decideInstrumentRefund({ openReturn: { ...open, variant_ids: ["v1", "v2"] }, payment: { capturedPaise: 249_000, refundedPaise: 100_000 }, lines }),
+    { ok: true, amountPaise: 149_000 },
+  );
+  assert.equal((decideInstrumentRefund({ openReturn: { ...open, payout_reference: "rzp:x" }, payment, lines }) as { error: string }).error, "already_paid");
+  assert.equal((decideInstrumentRefund({ openReturn: undefined, payment, lines }) as { code: number }).code, 404);
+  assert.equal((decideInstrumentRefund({ openReturn: open, payment: undefined, lines }) as { error: string }).error, "no_capture");
+  assert.equal(
+    (decideInstrumentRefund({ openReturn: open, payment: { capturedPaise: 1, refundedPaise: 1 }, lines }) as { error: string }).error,
+    "nothing_to_refund",
+  );
+});

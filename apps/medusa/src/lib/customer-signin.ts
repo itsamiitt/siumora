@@ -25,6 +25,7 @@ import {
   phoneKey,
   type SessionKind,
 } from "../modules/customer-session/session";
+import { clientIp } from "./client-ip";
 import { emailVerified } from "./email-verification";
 import { guestEmail, realEmail } from "./guest-email";
 
@@ -46,7 +47,7 @@ export function eventSecret(env: Record<string, string | undefined> = process.en
 /** Common fields every auth event from this request carries. */
 export function eventContext(req: MedusaRequest, phone?: string): Partial<AuthEventWrite> {
   return {
-    ip: coarseIp(req.ip),
+    ip: coarseIp(clientIp(req)),
     device: deviceLabel(String(req.headers["user-agent"] ?? "")),
     ...(phone ? { maskedPhone: maskPhone(phone), phoneKey: phoneKey(phone, eventSecret()) } : {}),
   };
@@ -186,7 +187,7 @@ export async function openSession(
     kind,
     device,
     userAgent,
-    ip: coarseIp(req.ip),
+    ip: coarseIp(clientIp(req)),
     now,
     ...(input.stepUp === false ? { stepUp: false } : {}),
   });

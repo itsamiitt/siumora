@@ -2,6 +2,7 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
 import { razorpayCredentials } from "../../../../modules/razorpay-payment/credentials";
+import { courierSimulationEnabled } from "../../../../modules/returns-ndr/lifecycle";
 import { settingsCache } from "../../../../modules/settings/cache";
 import { readSettings, type SqlClient } from "../../../../modules/settings/read";
 import { configEnvelope } from "../../../../modules/settings/settings";
@@ -27,6 +28,10 @@ import { configEnvelope } from "../../../../modules/settings/settings";
  * Medusa adds `checkout` beside the pinned pair (plan 16 Phase I): which
  * optional checkout pieces the operator switched on — the gift message and
  * the cart-reminder opt-in — so the storefront offers only what is live.
+ *
+ * `simulationEnabled` is the courier-simulation gate the status route itself
+ * enforces (hard-off when APP_ENV=production), so the order page shows its
+ * dev-only stand-ins exactly where they would work and nowhere else.
  */
 
 // One cache per process, shared with the admin settings PATCH (which
@@ -50,5 +55,6 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
       giftMessage: settings.giftMessageEnabled,
       cartReminders: settings.cartRecoveryEnabled,
     },
+    simulationEnabled: courierSimulationEnabled(process.env),
   });
 }

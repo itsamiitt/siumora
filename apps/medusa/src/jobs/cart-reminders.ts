@@ -1,9 +1,22 @@
 import type { MedusaContainer } from "@medusajs/framework/types";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 
+// @ts-ignore -- TS1479 until @siumora/core ships require-condition types
+import { normalisePhone } from "@siumora/core";
+
 import { issueToken, tokenSecret } from "../lib/signed-token";
-import { reminderDecision } from "../modules/outbox/compose";
-import { dueReminders, enqueueNotification, settleReminder, type SqlClient } from "../modules/outbox/data";
+import {
+  REMINDER_PHONE_COOLDOWN_MS,
+  reminderDecision,
+  reminderRecipientAllowed,
+} from "../modules/outbox/compose";
+import {
+  dueReminders,
+  enqueueNotification,
+  reminderSentToPhoneSince,
+  settleReminder,
+  type SqlClient,
+} from "../modules/outbox/data";
 import { readSettings, type SqlClient as SettingsSqlClient } from "../modules/settings/read";
 
 /**
@@ -17,6 +30,10 @@ import { readSettings, type SqlClient as SettingsSqlClient } from "../modules/se
  * reminderDecision). The event key is the cart, so a sweep that overlaps
  * another can only ever queue one message per cart. The link opens the
  * bag on whichever phone taps it, signed and good for seven days.
+ *
+ * Security review, item 7: the number must be one the cart vouches for —
+ * its delivery phone, or the signed-in account's own (reminderRecipientAllowed)
+ * — and a number gets at most one reminder a day, however many carts name it.
  */
 
 const RESUME_TTL_SECONDS = 7 * 24 * 3600;
@@ -25,6 +42,8 @@ interface CartRead {
   id: string;
   completed_at?: unknown;
   updated_at: string | Date;
+  shipping_address?: { phone?: string | null } | null;
+  customer?: { phone?: string | null; has_account?: boolean | null } | null;
   items?: Array<{
     title?: string | null;
     product_title?: string | null;
@@ -46,7 +65,15 @@ export default async function cartReminders(container: MedusaContainer): Promise
   const query = container.resolve(ContainerRegistrationKeys.QUERY);
   const { data } = await query.graph({
     entity: "cart",
-    fields: ["id", "completed_at", "updated_at", "items.*"],
+    fields: [
+      "id",
+      "completed_at",
+      "updated_at",
+      "items.*",
+      "shipping_address.phone",
+      "customer.phone",
+      "customer.has_account",
+    ],
     filters: { id: due.map((row) => row.cart_id) },
   });
   const carts = new Map((data as CartRead[]).map((cart) => [cart.id, cart]));
@@ -75,6 +102,22 @@ export default async function cartReminders(container: MedusaContainer): Promise
       if (decision.kind === "wait") continue;
       if (decision.kind === "skip") {
         await settleReminder(pg, row.id, "skipped", decision.reason);
+        continue;
+      }
+
+      const phoneOf = (value: string | null | undefined) =>
+        (normalisePhone(value ?? "") as string | undefined) ?? undefined;
+      const vouched = reminderRecipientAllowed(row.phone, {
+        cartPhone: phoneOf(cart?.shipping_address?.phone),
+        // A guest checkout's customer row carries no verified phone.
+        accountPhone: cart?.customer?.has_account ? phoneOf(cart.customer.phone) : undefined,
+      });
+      if (!vouched) {
+        await settleReminder(pg, row.id, "skipped", "phone not on cart");
+        continue;
+      }
+      if (await reminderSentToPhoneSince(pg, row.phone, new Date(now.getTime() - REMINDER_PHONE_COOLDOWN_MS))) {
+        await settleReminder(pg, row.id, "skipped", "phone reminded today");
         continue;
       }
 

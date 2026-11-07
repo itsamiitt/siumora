@@ -203,3 +203,34 @@ export function ownsOrder(
   if (!actorId) return false;
   return identity.customer_id === actorId || order.customer_id === actorId;
 }
+
+/**
+ * May this checkout response carry the guest access key (security review,
+ * item 9)? The key reads the order — name, phone, address — so it goes only
+ * to a request that has shown it is the buyer:
+ * - it completed the cart itself;
+ * - it replays the Idempotency-Key recorded by the request that did (only
+ *   entitled requests get their key recorded — see the complete route);
+ * - it carries a verified Checkout.js proof for this cart's own Razorpay
+ *   order (the webhook placed the order before the browser got back);
+ * - it is the signed-in owner of the order.
+ * A bare replay of an already-completed cart id gets the order number only.
+ */
+export function mayRevealAccessKey(input: {
+  completedHere: boolean;
+  keyReplay: boolean;
+  paymentProven: boolean;
+  ownerSignedIn: boolean;
+}): boolean {
+  return input.completedHere || input.keyReplay || input.paymentProven || input.ownerSignedIn;
+}
+
+/** The checkout envelope with the access key withheld unless {@link mayRevealAccessKey}. */
+export function guardedCompletionEnvelope(
+  identity: IdentityRow,
+  status: string,
+  reveal: boolean,
+): Omit<ReturnType<typeof completionEnvelope>, "accessKey"> & { accessKey: string | null } {
+  const envelope = completionEnvelope(identity, status);
+  return { ...envelope, accessKey: reveal ? envelope.accessKey : null };
+}
