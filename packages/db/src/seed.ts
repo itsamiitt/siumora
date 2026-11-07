@@ -132,7 +132,24 @@ const PINCODES = [
   { pincode: "781001", city: "Guwahati", stateCode: "18", codAvailable: false, estimatedDays: "5-7", rtoRateBps: 2200 },
 ];
 
+/**
+ * This seed DELETES every product, variant, collection and review before
+ * inserting the demo catalogue. Pointed at production by a stray env file it
+ * would wipe the live shop, so it refuses there unless SEED_FORCE=1 says the
+ * operator really means it.
+ */
+export function assertSeedAllowed(env: Record<string, string | undefined> = process.env): void {
+  const production = env.APP_ENV === "production" || env.NODE_ENV === "production";
+  if (production && env.SEED_FORCE !== "1") {
+    throw new Error(
+      "seed refused: APP_ENV/NODE_ENV is production and this seed deletes the whole catalogue. " +
+        "Set SEED_FORCE=1 only if you really mean to replace production data.",
+    );
+  }
+}
+
 export async function seed(databaseUrl?: string) {
+  assertSeedAllowed();
   const pool = createPool({
     connectionString: databaseUrl ?? connectionStringFromEnv(),
     ssl: process.env.DATABASE_SSL === "true",

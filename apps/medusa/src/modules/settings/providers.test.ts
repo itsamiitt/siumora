@@ -52,3 +52,33 @@ test("writes reject unsupported fields, unsafe endpoints, and missing encryption
   assert.equal(pg.rows.length, 0);
   assert.equal(validateSettingWrite("constructor", {}).ok, false);
 });
+
+test("an undecryptable row is logged as a money alert, not silently disabled", async (t) => {
+  const pg = database();
+  await saveProvider(pg, "email", { enabled: true, fields: {} }, env);
+  const errors: string[] = [];
+  t.mock.method(console, "error", (message: string) => { errors.push(message); });
+  await providerConfiguration(pg, { ...env, SETTINGS_ENCRYPTION_KEY: "a-different-key-longer-than-32-characters" });
+  assert.ok(errors.some((m) => m.includes("[money-alert] provider settings could not be decrypted")));
+});
+
+test("the process.env path caches decrypted rows and a save invalidates it", async () => {
+  const before = process.env.SETTINGS_ENCRYPTION_KEY;
+  process.env.SETTINGS_ENCRYPTION_KEY = env.SETTINGS_ENCRYPTION_KEY;
+  try {
+    const pg = database();
+    let reads = 0;
+    const counted = { rows: pg.rows, raw: (sql: string, bindings?: ReadonlyArray<string | number | boolean | null>) => {
+      if (sql.startsWith("SELECT") && !bindings) reads += 1;
+      return pg.raw(sql, bindings);
+    } };
+    await providerConfiguration(counted);
+    await providerConfiguration(counted);
+    assert.equal(reads, 1, "second read within the TTL is served from the cache");
+    await saveProvider(counted, "email", { enabled: true, fields: { RESEND_API_KEY: "fresh-secret" } });
+    assert.equal((await providerConfiguration(counted)).effective.RESEND_API_KEY, "fresh-secret");
+  } finally {
+    if (before === undefined) delete process.env.SETTINGS_ENCRYPTION_KEY;
+    else process.env.SETTINGS_ENCRYPTION_KEY = before;
+  }
+});

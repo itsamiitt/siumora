@@ -9,6 +9,7 @@ import {
   decideStaffMfa,
   insufficientRole,
   parseUserRoles,
+  settingsWritePermission,
 } from "./operator.ts";
 
 // The gate's decisions, pinned against the Fastify requirePermission ladder
@@ -146,15 +147,42 @@ test("staff without an authenticator are refused while the setting requires one"
   assert.deepEqual(decideStaffMfa({ actorType: "customer", mfaEnabled: false, required: true }), { ok: true });
 });
 
-test("owners can change settings without MFA while other roles remain denied", () => {
-  for (const permission of ["settings:write", "auth:settings"] as const) {
+test("owners can change general settings without MFA while other roles remain denied", () => {
+  for (const permission of ["settings:write", "auth:settings", "providers:write"] as const) {
     assert.ok(decidePermission("owner", permission).ok);
-    assert.ok(decideStaffMfa({ actorType: "user", mfaEnabled: false, required: true, permission }).ok);
     for (const role of ["viewer", "support", "operator"] as const) {
       assert.equal(decidePermission(role, permission).ok, false);
     }
   }
+  assert.ok(decideStaffMfa({ actorType: "user", mfaEnabled: false, required: true, permission: "settings:write" }).ok);
+  // Provider credentials and sign-in/staff security are not general settings:
+  // a stolen password alone must not repoint Razorpay or turn MFA off.
+  for (const permission of ["providers:write", "auth:settings"] as const) {
+    const refused = decideStaffMfa({ actorType: "user", mfaEnabled: false, required: true, permission });
+    assert.equal(!refused.ok && refused.refusal.body.error, "mfa_required", permission);
+    assert.ok(decideStaffMfa({ actorType: "user", mfaEnabled: true, required: true, permission }).ok);
+    assert.ok(decideStaffMfa({ actorType: "customer", mfaEnabled: false, required: true, permission }).ok);
+  }
   for (const permission of ["orders:write", "metrics:read", "audit:read"] as const) {
     assert.equal(decideStaffMfa({ actorType: "user", mfaEnabled: false, required: true, permission }).ok, false);
   }
+});
+
+test("a settings write touching any sign-in/staff-security key needs auth:settings", () => {
+  assert.equal(settingsWritePermission(["payments_enabled", "cod_fee"]), "settings:write");
+  // COD step-up lives on the store checkout card — a shop lever, not auth.
+  assert.equal(settingsWritePermission(["cod_requires_otp", "cod_step_up_above"]), "settings:write");
+  assert.equal(settingsWritePermission(["staff_mfa_required"]), "auth:settings");
+  assert.equal(settingsWritePermission(["cod_fee", "otp_max_attempts"]), "auth:settings");
+  assert.equal(settingsWritePermission([42, undefined]), "settings:write");
+});
+
+test("production never falls back to everyone-is-owner", () => {
+  const prod = decideRole({ actorType: "user", contact: "a@siumora.in" }, { APP_ENV: "production" });
+  assert.equal(prod.ok && prod.role, "viewer");
+  const listed = decideRole(
+    { actorType: "user", contact: "a@siumora.in" },
+    { APP_ENV: "production", ADMIN_USER_ROLES: "a@siumora.in:owner" },
+  );
+  assert.equal(listed.ok && listed.role, "owner");
 });

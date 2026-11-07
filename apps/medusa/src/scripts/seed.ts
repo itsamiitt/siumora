@@ -77,6 +77,17 @@ const MANUAL_PROVIDER = "manual_manual";
 const SHIPROCKET_PROVIDER = "shiprocket_shiprocket";
 
 export default async function seed({ container }: ExecArgs) {
+  // Not as harmless as "idempotent" sounds: re-running resets stock to the
+  // demo quantities and moves Standard Delivery back to Shiprocket. Refuse
+  // production unless SEED_FORCE=1 says the operator really means it.
+  const production = process.env.APP_ENV === "production" || process.env.NODE_ENV === "production";
+  if (production && process.env.SEED_FORCE !== "1") {
+    throw new Error(
+      "seed refused: APP_ENV/NODE_ENV is production and this seed resets stock levels and the " +
+        "Standard Delivery provider. Set SEED_FORCE=1 only if you really mean to overwrite production.",
+    );
+  }
+
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const query = container.resolve(ContainerRegistrationKeys.QUERY);
 

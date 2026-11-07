@@ -120,6 +120,9 @@ test("the ops lead (operator) blocks and merges; only the owner touches auth set
   assert.equal(can("operator", "customers:admin"), true);
   assert.equal(can("operator", "auth:settings"), false);
   assert.equal(can("owner", "auth:settings"), true);
+  // Provider credentials are owner-only, like the settings they split from.
+  assert.equal(can("operator", "providers:write"), false);
+  assert.equal(can("owner", "providers:write"), true);
   assert.equal(parseAdminRoles("9812345678:support").get("9812345678"), "support");
 });
 

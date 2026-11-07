@@ -47,6 +47,12 @@ export type Permission =
   | "audit:read"
   /** Flip the payments kill-switch and move the COD caps. */
   | "settings:write"
+  /**
+   * Change payment/courier/messaging provider credentials. Split from
+   * settings:write so it can demand two-step sign-in while general settings
+   * do not: whoever holds this can repoint where the money goes.
+   */
+  | "providers:write"
   /** Look a customer up — identity, devices, sign-in log — phone masked. */
   | "customers:read"
   /** Sign a customer's devices out (the lost-phone call). */
@@ -93,6 +99,9 @@ const GRANTS: Record<Role, readonly Permission[]> = {
     // The kill-switch stops revenue and the COD caps move money exposure —
     // owner-grade levers, not everyday ops.
     "settings:write",
+    // Razorpay keys and the courier account: owner-only, and MFA-gated in
+    // the Medusa operator gate (decideStaffMfa).
+    "providers:write",
   ],
 };
 
