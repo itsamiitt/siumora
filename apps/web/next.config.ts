@@ -1,4 +1,20 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs/config";
+
+/**
+ * The Sentry ingest origin, when a DSN is configured. The browser SDK posts
+ * events straight to it, so connect-src must name it — and only it.
+ */
+function sentryIngestOrigin(): string | null {
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN ?? process.env.SENTRY_DSN;
+  if (!dsn) return null;
+  try {
+    return new URL(dsn).origin;
+  } catch {
+    return null;
+  }
+}
+const SENTRY_ORIGIN = sentryIngestOrigin();
 
 /**
  * Content Security Policy.
@@ -33,7 +49,8 @@ const CSP = [
   "font-src 'self' data:",
   // lumberjack is Checkout.js's telemetry beacon; blocked, every payment
   // attempt logs a console error that reads like a failure.
-  "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://api.razorpay.com https://lumberjack.razorpay.com https://www.facebook.com",
+  // The Sentry ingest host joins only when a DSN is configured.
+  `connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://api.razorpay.com https://lumberjack.razorpay.com https://www.facebook.com${SENTRY_ORIGIN ? ` ${SENTRY_ORIGIN}` : ""}`,
   // The payment modal is an iframe to the provider; default-src 'self' would
   // refuse it and the Pay button would open nothing. Turnstile renders its
   // challenge in an iframe too.
@@ -124,11 +141,21 @@ const nextConfig: NextConfig = {
   // which the build had been warning about on every run.
   cacheComponents: true,
 
-  experimental: {
-    // Cross-route View Transitions, so the product plate travels from the grid
-    // to the detail page instead of cutting.
-    viewTransition: true,
-  },
+  // Cross-route View Transitions (the product plate travelling from the grid
+  // to the detail page) no longer need `experimental.viewTransition`: the
+  // flag was removed in Next 16.4, where React's <ViewTransition> is stable.
 };
 
-export default nextConfig;
+/**
+ * Sentry's build wrapper. It never needs credentials: source maps upload only
+ * when SENTRY_AUTH_TOKEN (plus SENTRY_ORG / SENTRY_PROJECT) is present, and the
+ * runtime SDK stays off entirely until a DSN is set (instrumentation*.ts).
+ */
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  silent: true,
+  telemetry: false,
+  sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
+});

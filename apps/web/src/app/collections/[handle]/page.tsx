@@ -29,8 +29,16 @@ interface PageProps {
 const PAGE_SIZE = 24;
 
 export async function generateStaticParams() {
-  const collections = await listCollections();
-  return collections.map((collection) => ({ handle: collection.handle }));
+  // No backend configured (typegen, lint-only CI) or the catalog fetch failed:
+  // prerender nothing and let each handle render on demand instead of failing
+  // the whole build.
+  try {
+    const collections = await listCollections();
+    return collections.map((collection) => ({ handle: collection.handle }));
+  } catch (error) {
+    console.warn("[generateStaticParams] collections: catalog unavailable, prerendering none", error);
+    return [];
+  }
 }
 
 export async function generateMetadata({

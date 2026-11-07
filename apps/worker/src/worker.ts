@@ -20,6 +20,8 @@ export interface WorkerOptions {
   readonly logMessages?: (report: MessageDrainReport) => void;
   /** Omitted, no messages are drained — the conversion queue still is. */
   readonly messages?: MessageTransport;
+  /** A failed pass, after it is logged — error tracking hooks in here. */
+  readonly onError?: (error: unknown) => void;
   /** Injected in tests, so a run is deterministic instead of timing-dependent. */
   readonly signal?: AbortSignal;
 }
@@ -63,6 +65,11 @@ export async function runWorker(
       // either reconnect or fail the same way, and exiting would need an
       // orchestrator to notice and restart.
       console.error("[worker] drain failed", error);
+      try {
+        options.onError?.(error);
+      } catch {
+        // Reporting must never stop the loop.
+      }
     }
 
     await sleep(interval, options.signal);

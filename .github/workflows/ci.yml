@@ -97,6 +97,11 @@ jobs:
           OTP_ECHO: "true"
           COURIER_SIMULATION: "true"
 
+      - name: Lint
+        run: pnpm turbo run lint
+
+      # Typecheck no longer builds the storefront: web's typecheck is
+      # `next typegen && tsc --noEmit`, which needs no backend.
       - name: Typecheck and test
         run: pnpm turbo run typecheck test
 
@@ -134,7 +139,7 @@ jobs:
   medusa:
     name: Medusa boots + contract
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -167,6 +172,10 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      # Server compile plus the admin bundle — the artifact production runs.
+      - name: Medusa build
+        run: pnpm --filter @siumora/medusa build
 
       - name: Medusa migrations
         run: pnpm --filter @siumora/medusa db:migrate

@@ -59,7 +59,7 @@
     },
     "@siumora/web#typecheck": {
       "dependsOn": [
-        "build"
+        "^build"
       ],
       "env": [
         "DATABASE_URL",

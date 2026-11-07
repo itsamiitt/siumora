@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/node";
 import { connectionStringFromEnv, createDb, createPool } from "@siumora/db";
 import { createTransport } from "@siumora/messaging";
 
@@ -5,6 +6,19 @@ import { medusaStore } from "./medusa-store.ts";
 import { drizzleStore } from "./store.ts";
 import { configuredDestinations, httpTransport } from "./transport.ts";
 import { runWorker } from "./worker.ts";
+
+// Error tracking, off unless SENTRY_DSN is set. Initialised before anything
+// else so a misconfigured boot (the throws below) is reported too.
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV,
+    release: process.env.SENTRY_RELEASE,
+    tracesSampleRate: 0,
+    // Outbox payloads carry phone numbers and emails; keep request data out.
+    dataCollection: { userInfo: false, cookies: false, httpBodies: [], urlQueryParams: false },
+  });
+}
 
 /**
  * Process entry point.
@@ -81,6 +95,9 @@ await runWorker(store, httpTransport(transportConfig), {
   intervalMs: Number(process.env.WORKER_INTERVAL_MS ?? 15_000),
   signal: controller.signal,
   messages,
+  onError: (error) => {
+    Sentry.captureException(error, { tags: { component: "worker-drain" } });
+  },
   log: (report) =>
     console.log(
       `[worker] conversions claimed=${report.claimed} sent=${report.sent} retrying=${report.retrying} failed=${report.failed} reclaimed=${report.reclaimed}`,
@@ -92,3 +109,5 @@ await runWorker(store, httpTransport(transportConfig), {
 });
 
 await pool.end();
+// Deliver anything still queued before the process exits.
+await Sentry.close(2_000);
