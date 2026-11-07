@@ -3,6 +3,7 @@ import "server-only";
 import { cookies } from "next/headers";
 
 import type { CartLine } from "@siumora/core";
+import { ApiError } from "@siumora/sdk";
 
 import { api } from "./api";
 
@@ -28,12 +29,14 @@ async function readCartId(): Promise<string | undefined> {
  * cookies during render.
  */
 async function ensureCartId(): Promise<string> {
-  const store = await cookies();
-  const existing = store.get(CART_COOKIE)?.value;
-  if (existing) return existing;
+  const existing = await readCartId();
+  return existing ?? startCart();
+}
 
+/** A fresh cart, pointed at by this browser from now on. */
+async function startCart(): Promise<string> {
   const id = await api().createCart();
-  store.set(CART_COOKIE, id, {
+  (await cookies()).set(CART_COOKIE, id, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -41,6 +44,15 @@ async function ensureCartId(): Promise<string> {
     maxAge: 60 * 60 * 24 * 30,
   });
   return id;
+}
+
+/**
+ * The cookie names a cart that is no more — expired, reset, or already an
+ * order (the transport answers a completed cart as 404 too). Such an id is
+ * useless forever, so it is dropped rather than retried.
+ */
+function cartIsGone(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
 }
 
 /**
@@ -75,9 +87,16 @@ export async function addLine(
   variantId: string,
   quantity = 1,
 ): Promise<{ ok: boolean; message?: string }> {
-  const id = await ensureCartId();
   try {
-    await api().addToCart(id, variantId, quantity);
+    const id = await ensureCartId();
+    try {
+      await api().addToCart(id, variantId, quantity);
+    } catch (error) {
+      if (!cartIsGone(error)) throw error;
+      // A stale cookie (the bag became an order, or expired): start a new
+      // bag and try the add once more, so the shopper never sees the seam.
+      await api().addToCart(await startCart(), variantId, quantity);
+    }
     return { ok: true };
   } catch (error) {
     return { ok: false, message: messageFor(error) };
@@ -88,11 +107,16 @@ export async function setQuantity(
   variantId: string,
   quantity: number,
 ): Promise<{ ok: boolean; message?: string }> {
-  const id = await ensureCartId();
   try {
+    const id = await ensureCartId();
     await api().setCartQuantity(id, variantId, quantity);
     return { ok: true };
   } catch (error) {
+    if (cartIsGone(error)) {
+      // Nothing to change on a bag that is gone; the next add starts afresh.
+      await forgetCart();
+      return { ok: false, message: "Your bag has expired. Add the piece again." };
+    }
     return { ok: false, message: messageFor(error) };
   }
 }
@@ -103,7 +127,14 @@ export async function removeLine(variantId: string): Promise<void> {
 
 export async function clearCart(): Promise<void> {
   const id = await readCartId();
-  if (id) await api().clearCart(id);
+  if (!id) return;
+  try {
+    await api().clearCart(id);
+  } catch (error) {
+    // A bag that is already gone is as empty as it gets.
+    if (!cartIsGone(error)) throw error;
+    await forgetCart();
+  }
 }
 
 /**
@@ -122,11 +153,15 @@ export async function currentCartId(): Promise<string | undefined> {
   return readCartId();
 }
 
-/** Surface the API's own message — "Only 2 left" is more use than a status. */
+/**
+ * Surface the API's own refusal — "Only 2 left" is more use than a status —
+ * but not a transport failure: "fetch failed" or a 5xx body means nothing
+ * to a shopper, and the bag is simply unreachable for a moment.
+ */
 function messageFor(error: unknown): string {
-  return error instanceof Error && error.message
+  return error instanceof ApiError && error.status < 500 && error.message
     ? error.message
-    : "Could not update the bag.";
+    : "We could not reach your bag just now. Please try again.";
 }
 
 /**

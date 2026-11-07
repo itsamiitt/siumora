@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { ApiError } from "@siumora/sdk";
 
+import { revalidateAccountSurfaces } from "@/lib/account-surfaces";
 import { apiAs } from "@/lib/session";
 
 /**
@@ -57,7 +58,7 @@ export async function changePhone(
 ): Promise<ActionResult & { maskedPhone?: string; signedOutDevices?: number }> {
   try {
     const result = await (await apiAs()).changePhone(phone, code);
-    revalidatePath("/", "layout");
+    revalidateAccountSurfaces();
     return { ok: true, maskedPhone: result.maskedPhone, signedOutDevices: result.signedOutDevices };
   } catch (error) {
     return refusal(error, "Could not change your number.");

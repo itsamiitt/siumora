@@ -794,3 +794,50 @@ test("coupons go through the Siumora route with the cart id and code in the body
   assert.deepEqual(calls[0]!.body, { cartId: "cart_1", code: "diwali10" });
   assert.equal(calls[1]!.method, "DELETE");
 });
+
+// ── Launch stability: one bad product, a closed cart, the dev-only flag ────
+
+test("one product without a gst_slab is skipped from listings, not fatal to them", async () => {
+  const broken = { ...PRODUCT_FIXTURE, id: "prod_bad", handle: "no-slab", metadata: { ...PRODUCT_FIXTURE.metadata, gst_slab: undefined } };
+  const client = new MedusaClient({ baseUrl: "http://example.test", publishableKey: "pk_test",
+    fetch: (async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/store/regions") return Response.json({ regions: [{ id: "in", currency_code: "inr" }] });
+      return Response.json({ count: 2, products: [broken, PRODUCT_FIXTURE] });
+    }) as typeof fetch,
+  });
+  const original = console.error;
+  const logged: unknown[] = [];
+  console.error = (...args: unknown[]) => { logged.push(args.join(" ")); };
+  try {
+    const products = await client.listProducts();
+    assert.deepEqual(products.map((product) => product.handle), ["petal-studs"]);
+    assert.match(String(logged[0]), /no-slab/);
+    // Its own page still refuses — the error belongs there.
+    await assert.rejects(client.getProduct("no-slab"), /gst_slab/);
+  } finally {
+    console.error = original;
+  }
+});
+
+test("a completed cart reads as gone, so the storefront can start a fresh one", async () => {
+  const { impl, calls } = scripted({
+    "GET /store/carts/cart_done": { cart: { id: "cart_done", completed_at: "2026-11-01T00:00:00Z", items: [CART_ITEM_FIXTURE] } },
+  });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  await assert.rejects(client.getCart("cart_done"), (error: unknown) =>
+    error instanceof ApiError && error.status === 404 && error.code === "cart_completed");
+  await assert.rejects(client.addToCart("cart_done", "variant_x"), (error: unknown) =>
+    error instanceof ApiError && error.status === 404);
+  assert.ok(calls.every((call) => call.method === "GET"), "nothing is written to a closed cart");
+  assert.match(calls[0]!.url, /completed_at/);
+});
+
+test("store config: simulationEnabled passes through, and a missing flag reads as off", async () => {
+  let envelope: Record<string, unknown> = { paymentsEnabled: true, razorpayConfigured: true, simulationEnabled: true };
+  const { impl } = scripted({ get "GET /store/siumora/config"() { return envelope; } });
+  const client = new MedusaClient({ baseUrl: "http://m", publishableKey: "pk", fetch: impl });
+  assert.equal((await client.getStoreConfig()).simulationEnabled, true);
+  envelope = { paymentsEnabled: true, razorpayConfigured: true };
+  assert.equal((await client.getStoreConfig()).simulationEnabled, false);
+});

@@ -83,7 +83,12 @@ export interface PlacedOrder {
   orderNumber: string;
   status: string;
   invoiceNumber: string | null;
-  accessKey: string;
+  /**
+   * The guest key that reads this order. Null when Medusa answers a replay
+   * that did not prove it is the buyer (an already-completed cart without
+   * the original Idempotency-Key or payment proof) — security review item 9.
+   */
+  accessKey: string | null;
   /** Order-first only: present when a provider order was created for the handoff. */
   razorpay?: RazorpayHandoff;
 }
@@ -842,15 +847,31 @@ export class SiumoraClient {
    * checkout served from a cache is a kill-switch that does not kill.
    */
   async getStoreConfig(): Promise<StoreConfig> {
-    return this.request("GET", "/config", undefined, { cache: "no-store" });
+    const config = await this.request<WireStoreConfig>(
+      "GET", "/config", undefined, { cache: "no-store" },
+    );
+    // Fastify does not report the courier-simulation gate: dev-only controls
+    // stay hidden rather than appear where nothing says they work.
+    return { ...config, simulationEnabled: config.simulationEnabled === true };
   }
 }
+
+/** The config envelope as a backend may send it — the simulation flag is newer. */
+export type WireStoreConfig = Omit<StoreConfig, "simulationEnabled"> & {
+  readonly simulationEnabled?: boolean;
+};
 
 export interface StoreConfig {
   readonly paymentsEnabled: boolean;
   readonly razorpayConfigured: boolean;
   /** Optional checkout pieces the operator switched on (Medusa, plan 16 Phase I). */
   readonly checkout?: { readonly giftMessage: boolean; readonly cartReminders: boolean };
+  /**
+   * Courier simulation and the other dev stand-ins (the COD "not connected"
+   * notice) are live. Never true in production; the order page shows those
+   * controls only when it is.
+   */
+  readonly simulationEnabled: boolean;
 }
 
 /**

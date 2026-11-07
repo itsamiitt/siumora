@@ -55,7 +55,9 @@ export default async function OrderPage({ params }: PageProps) {
 
   // Which truth to tell about a pending payment: "confirming automatically"
   // when the provider is live, "not connected" when it is not.
-  const { razorpayConfigured: paymentsLive } = await api().getStoreConfig();
+  // simulationEnabled gates the dev-only stand-ins (courier walk, the "not
+  // connected" COD note): never shown to customers in production.
+  const { razorpayConfigured: paymentsLive, simulationEnabled } = await api().getStoreConfig();
 
   const openReturn = await getReturnForOrder(order.number);
   const rows = hsnSummary(order.lines, { interState: order.interState });
@@ -100,7 +102,7 @@ export default async function OrderPage({ params }: PageProps) {
       </div>
 
       {order.status === "awaiting_cod_confirmation" && (
-        <ConfirmOrder orderNumber={order.number} />
+        <ConfirmOrder orderNumber={order.number} simulated={simulationEnabled} />
       )}
 
       {order.status === "ndr" && (
@@ -148,10 +150,12 @@ export default async function OrderPage({ params }: PageProps) {
         </div>
       )}
 
-      <OrderProgress
-        orderNumber={order.number}
-        next={nextStatuses(order.status)}
-      />
+      {simulationEnabled && (
+        <OrderProgress
+          orderNumber={order.number}
+          next={nextStatuses(order.status)}
+        />
+      )}
 
       <div className="mt-12 border border-[var(--color-rule)] p-6">
         <div className="flex flex-wrap items-baseline justify-between gap-3">

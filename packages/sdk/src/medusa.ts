@@ -45,6 +45,7 @@ import type {
   RazorpayHandoff,
   SessionInfo,
   StoreConfig,
+  WireStoreConfig,
 } from "./index.ts";
 
 /**
@@ -155,6 +156,8 @@ interface MedusaCartItem {
 
 interface MedusaCart {
   id: string;
+  /** Set once the cart became an order; such a cart is closed for good. */
+  completed_at?: string | null;
   items?: MedusaCartItem[] | null;
   promotions?: Array<{ code?: string | null } | null> | null;
 }
@@ -288,6 +291,24 @@ function mapImage(image: MedusaImage, productTitle: string) {
   };
 }
 
+/**
+ * mapProduct for a listing: one product with bad admin data (no gst_slab, a
+ * broken price) is left out loudly rather than failing the whole catalogue —
+ * home, shop and every collection would otherwise go down with it. Its own
+ * PDP still fails, which is the honest place for the error to surface.
+ */
+function listable(product: MedusaProduct): Product[] {
+  try {
+    return [mapProduct(product)];
+  } catch (error) {
+    console.error(
+      `[catalog] skipped product ${product.handle}:`,
+      error instanceof Error ? error.message : error,
+    );
+    return [];
+  }
+}
+
 /** Medusa product → core Product, revalidated through core's schema. */
 export function mapProduct(product: MedusaProduct): Product {
   const metadata = product.metadata ?? {};
@@ -396,6 +417,17 @@ export interface MedusaClientOptions {
   fetch?: typeof globalThis.fetch;
   /** The opaque session token from verifyOtp, sent as a bearer. */
   token?: string;
+  /**
+   * Headers naming the shopper's IP for this request — the storefront's
+   * `x-siumora-client-ip` + `x-siumora-client-ip-sig` (HMAC under the shared
+   * CLIENT_IP_SECRET; Medusa's src/lib/client-ip.ts verifies it). Called per
+   * uncached request, inside the caller's request scope; a throw or
+   * undefined sends nothing extra. Server-side callers only.
+   */
+  clientIpHeaders?: () =>
+    | Record<string, string>
+    | undefined
+    | Promise<Record<string, string> | undefined>;
 }
 
 /**
@@ -412,7 +444,7 @@ const PRODUCT_FIELDS =
   "*variants.calculated_price";
 
 const CART_FIELDS =
-  "id,*items,*items.variant,*items.variant.metadata," +
+  "id,completed_at,*items,*items.variant,*items.variant.metadata," +
   "*items.variant.product.metadata,*items.variant.product.images," +
   // Coupons (plan 16 B19): each line's adjustments and the codes applied.
   "*items.adjustments,promotions.code";
@@ -431,6 +463,7 @@ export class MedusaClient implements PublicSurface {
   private readonly timeoutMs: number;
   private readonly doFetch: typeof globalThis.fetch;
   private readonly token: string | undefined;
+  private readonly clientIpHeaders: MedusaClientOptions["clientIpHeaders"];
   private regionId: Promise<string> | undefined;
 
   constructor(options: MedusaClientOptions) {
@@ -439,6 +472,7 @@ export class MedusaClient implements PublicSurface {
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.doFetch = options.fetch ?? globalThis.fetch;
     this.token = options.token;
+    this.clientIpHeaders = options.clientIpHeaders;
   }
 
   /** Same contract as SiumoraClient.withToken: a new instance, never mutation. */
@@ -448,6 +482,7 @@ export class MedusaClient implements PublicSurface {
       publishableKey: this.publishableKey,
       timeoutMs: this.timeoutMs,
       fetch: this.doFetch,
+      ...(this.clientIpHeaders ? { clientIpHeaders: this.clientIpHeaders } : {}),
       ...(token ? { token } : {}),
     });
   }
@@ -465,6 +500,14 @@ export class MedusaClient implements PublicSurface {
     } = {},
   ): Promise<T> {
     const bearer = options.bearer ?? this.token;
+    // Per-shopper calls carry the shopper's IP, signed, so Medusa's per-IP
+    // limits and OTP caps count the shopper rather than this server. A
+    // cached read (revalidate) is shared by every shopper, so it carries
+    // none — and asking for request headers there would make it dynamic.
+    const forwarded =
+      options.revalidate === undefined && this.clientIpHeaders
+        ? await (async () => this.clientIpHeaders!())().catch(() => undefined)
+        : undefined;
     // revalidate opts the read into Next's data cache — without it a Cache
     // Components prerender aborts the fetch as uncached IO, which is
     // exactly how the storefront's static shell 500s (AbortError,
@@ -477,6 +520,7 @@ export class MedusaClient implements PublicSurface {
         "x-publishable-api-key": this.publishableKey,
         ...(body !== undefined ? { "content-type": "application/json" } : {}),
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+        ...forwarded,
         ...options.headers,
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -548,7 +592,7 @@ export class MedusaClient implements PublicSurface {
         undefined,
         options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
       );
-      products.push(...data.products.map(mapProduct));
+      products.push(...data.products.flatMap(listable));
       offset += data.products.length;
       if (!data.products.length || (options?.limit && products.length >= options.limit) ||
         (data.count !== undefined ? offset >= data.count : data.products.length < limit)) break;
@@ -655,6 +699,12 @@ export class MedusaClient implements PublicSurface {
       "GET",
       `/store/carts/${encodeURIComponent(cartId)}?fields=${encodeURIComponent(CART_FIELDS)}`,
     );
+    // A completed cart is an order now: reading it would show the bought
+    // lines as still in the bag, and adding to it fails. Same answer as a
+    // cart that is gone, so the storefront drops the cookie and starts fresh.
+    if (data.cart.completed_at) {
+      throw new ApiError(404, "cart_completed", "That bag has already been checked out.");
+    }
     return data.cart;
   }
 
@@ -1357,7 +1407,9 @@ export class MedusaClient implements PublicSurface {
   }
 
   async getStoreConfig(): Promise<StoreConfig> {
-    return this.request("GET", "/store/siumora/config");
+    const config = await this.request<WireStoreConfig>("GET", "/store/siumora/config");
+    // A backend without the flag reads as off: dev-only controls fail hidden.
+    return { ...config, simulationEnabled: config.simulationEnabled === true };
   }
 
   // ── Not yet ported — each names the phase that delivers it ──
@@ -1454,6 +1506,7 @@ export class MedusaClient implements PublicSurface {
  */
 export function createMedusaClient(
   env: Record<string, string | undefined> = process.env,
+  extra: Pick<MedusaClientOptions, "clientIpHeaders"> = {},
 ): MedusaClient {
   const baseUrl = env.MEDUSA_URL;
   const publishableKey = env.MEDUSA_PUBLISHABLE_KEY;
@@ -1463,7 +1516,11 @@ export function createMedusaClient(
         "Point them at the Medusa store API and the key the seed prints.",
     );
   }
-  return new MedusaClient({ baseUrl, publishableKey });
+  return new MedusaClient({
+    baseUrl,
+    publishableKey,
+    ...(extra.clientIpHeaders ? { clientIpHeaders: extra.clientIpHeaders } : {}),
+  });
 }
 
 /** The checkout's analytics identity, without unset keys. */
