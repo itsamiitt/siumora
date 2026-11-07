@@ -180,3 +180,22 @@ export function itemsPhrase(items: ReadonlyArray<{ readonly title: string; reado
   const lead = first.quantity > 1 ? `${first.quantity} × ${first.title.trim()}` : first.title.trim();
   return rest === 0 ? lead : `${lead} and ${rest} more ${rest === 1 ? "piece" : "pieces"}`;
 }
+
+/**
+ * Whose phone may a cart reminder go to (security review, item 7)? Only a
+ * number the cart itself vouches for: the signed-in account's own phone
+ * (verified by the OTP that made the account, and not editable through
+ * Medusa's profile route) or the delivery phone checkout put on the cart.
+ * The opt-in body alone is not enough — the route takes a phone and a cart
+ * id from anyone, and the message is a paid WhatsApp to a stranger.
+ * Numbers compare normalised (10 digits).
+ */
+export function reminderRecipientAllowed(
+  phone: string,
+  cart: { cartPhone?: string | undefined; accountPhone?: string | undefined },
+): boolean {
+  return phone === cart.cartPhone || phone === cart.accountPhone;
+}
+
+/** One cart reminder per phone per day, however many carts name it. */
+export const REMINDER_PHONE_COOLDOWN_MS = 24 * 3_600_000;

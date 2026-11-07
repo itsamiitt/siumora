@@ -21,12 +21,13 @@ export type CommerceClient = SiumoraClient | MedusaClient;
 
 export function createCommerceClient(
   env: Record<string, string | undefined> = process.env,
+  medusa: Parameters<typeof createMedusaClient>[1] = {},
 ): CommerceClient {
   const backend = env.COMMERCE_BACKEND ?? "medusa";
   if (backend === "medusa") {
     // Throws its own named error when MEDUSA_URL / MEDUSA_PUBLISHABLE_KEY
     // are missing — misconfiguration fails at construction, not mid-render.
-    return createMedusaClient(env);
+    return createMedusaClient(env, medusa);
   }
   if (backend !== "fastify") {
     throw new Error(`COMMERCE_BACKEND must be fastify|medusa, got "${backend}"`);

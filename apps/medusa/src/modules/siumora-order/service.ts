@@ -1,6 +1,7 @@
 import { MedusaService } from "@medusajs/framework/utils";
 
 import { SiumoraOrderIdentity } from "./models/siumora-order-identity";
+import { SiumoraRazorpayOrder } from "./models/siumora-razorpay-order";
 
 /**
  * Generated CRUD over the identity table (listSiumoraOrderIdentities etc.).
@@ -11,6 +12,6 @@ import { SiumoraOrderIdentity } from "./models/siumora-order-identity";
  * shared pg connection; this service exists so the module owns its model,
  * its migrations, and any future admin reads.
  */
-class SiumoraOrderModuleService extends MedusaService({ SiumoraOrderIdentity }) {}
+class SiumoraOrderModuleService extends MedusaService({ SiumoraOrderIdentity, SiumoraRazorpayOrder }) {}
 
 export default SiumoraOrderModuleService;

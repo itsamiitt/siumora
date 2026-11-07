@@ -271,3 +271,16 @@ export async function settleReminder(
     [status, reason ?? null, id],
   );
 }
+
+/**
+ * Whether a cart reminder already went to this phone since `since` (security
+ * review, item 7): one per phone per day, however many carts name it.
+ */
+export async function reminderSentToPhoneSince(client: SqlClient, phone: string, since: Date): Promise<boolean> {
+  const result = await client.raw(
+    `SELECT 1 FROM siumora_cart_reminders
+      WHERE phone = ? AND status = 'queued' AND updated_at >= ? AND deleted_at IS NULL LIMIT 1`,
+    [phone, since],
+  );
+  return result.rows.length > 0;
+}

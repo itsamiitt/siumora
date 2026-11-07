@@ -7,6 +7,7 @@ import {
   messageFor,
   purchasePayload,
   reminderDecision,
+  reminderRecipientAllowed,
   type OrderFacts,
 } from "./compose.ts";
 
@@ -102,4 +103,12 @@ test("a checked-out, emptied or missing cart is never reminded", () => {
   assert.equal(reminderDecision({ ...base, items: [] }, input).kind, "skip");
   assert.equal(reminderDecision(undefined, input).kind, "skip");
   assert.equal(itemsPhrase([{ title: "Petal Studs", quantity: 2 }]), "2 × Petal Studs");
+});
+
+test("a cart reminder goes only to a number the cart vouches for", () => {
+  assert.equal(reminderRecipientAllowed("9876543210", { cartPhone: "9876543210" }), true);
+  assert.equal(reminderRecipientAllowed("9876543210", { accountPhone: "9876543210" }), true);
+  // Any other number — a stranger's, typed into someone else's cart — is refused.
+  assert.equal(reminderRecipientAllowed("9123456780", { cartPhone: "9876543210", accountPhone: "9876543211" }), false);
+  assert.equal(reminderRecipientAllowed("9123456780", {}), false);
 });

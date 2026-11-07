@@ -31,6 +31,7 @@ import { Modules } from "@medusajs/framework/utils";
 // @ts-ignore -- TS1479 until @siumora/core ships require-condition types
 import { normalisePhone } from "@siumora/core";
 
+import { clientIp } from "../../../../lib/client-ip";
 import { underCap } from "../../../../lib/counters";
 import { eventSecret, logAuthEvent, pgOf } from "../../../../lib/customer-signin";
 import { sharedCounters } from "../../../../lib/redis";
@@ -64,7 +65,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   }
   const channel = body.channel === "sms" || body.channel === "whatsapp" ? body.channel : undefined;
 
-  const turnstile = await verifyTurnstile(body.turnstileToken, req.ip, process.env, fetch, (error) =>
+  // The shopper's IP, as the storefront vouched for it (lib/client-ip.ts) —
+  // req.ip is the storefront server for every shopper.
+  const shopperIp = clientIp(req);
+  const turnstile = await verifyTurnstile(body.turnstileToken, shopperIp, process.env, fetch, (error) =>
     console.error("turnstile unreachable, failing open:", error instanceof Error ? error.message : error),
   );
   if (!turnstile.ok) {
@@ -83,7 +87,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   // The exact address, as the Fastify cap keys it — not the /24 the event
   // log keeps. Indian mobile carriers put many shoppers behind one CGNAT
   // block, and a cap per /24 would lock a whole neighbourhood out.
-  const origin = req.ip ?? "unknown";
+  const origin = shopperIp ?? "unknown";
 
   const perIp = await underCap(counters, `otp:ip:${origin}`, settings.otpMaxSendsPerIpHour, HOUR_MS);
   if (!perIp.allowed) {

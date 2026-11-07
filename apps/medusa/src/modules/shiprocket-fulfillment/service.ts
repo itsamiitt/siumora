@@ -23,6 +23,7 @@ import { initialSiumoraStatus } from "../returns-ndr/lifecycle.ts";
 import { createShiprocketClient, type ShiprocketClient } from "./client.ts";
 import { shiprocketCredentials, type SettingsPg } from "./credentials.ts";
 import { shipmentFor, trackingUrl, type BookableOrder } from "./decide.ts";
+import { orderSettlement, type SettlementKind } from "../siumora-order/payment-method.ts";
 
 /**
  * Shiprocket as a Medusa fulfillment provider (plan 16 Phase F, B14) —
@@ -131,19 +132,23 @@ export class ShiprocketFulfillmentProviderService extends AbstractFulfillmentPro
     return row.order_number;
   }
 
-  /** What is being shipped: the fulfilment's items at the order's own prices. */
+  /**
+   * What is being shipped: the fulfilment's items at the order's own prices.
+   * COD vs Prepaid comes from the payment Medusa recorded, never the order's
+   * metadata — that began as shopper-writable cart metadata, and a parcel
+   * booked Prepaid is one the courier hands over without collecting.
+   */
   protected bookable(
     number: string,
     order: Partial<FulfillmentOrderDTO>,
     items: Partial<Omit<FulfillmentItemDTO, "fulfillment">>[],
+    settlement: SettlementKind,
   ): BookableOrder {
     const orderItems = order.items ?? [];
     return {
       number,
       placedAt: new Date(order.created_at ?? Date.now()),
-      paymentMethod: typeof order.metadata?.siumora_payment_method === "string"
-        ? order.metadata.siumora_payment_method
-        : "cod",
+      paymentMethod: settlement,
       address: order.shipping_address ?? {},
       lines: items.map((item) => {
         const line = orderItems.find((candidate) => candidate.id === item.line_item_id);
@@ -179,7 +184,8 @@ export class ShiprocketFulfillmentProviderService extends AbstractFulfillmentPro
     if (shipment?.awb) return this.result(shipment.courier_order_id, shipment.shipment_id, shipment.awb, shipment.courier);
 
     if (!shipment?.shipment_id) {
-      const input = shipmentFor(this.bookable(number, order, items), { pickupLocation });
+      const settlement = await orderSettlement(pg, order.id);
+      const input = shipmentFor(this.bookable(number, order, items, settlement), { pickupLocation });
       if ("error" in input) {
         throw new MedusaError(MedusaError.Types.INVALID_DATA, `Cannot book ${number}: ${input.error}.`);
       }

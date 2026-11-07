@@ -31,6 +31,7 @@ import {
   readPayments,
   verifyWebhookSignature,
 } from "./decide.ts";
+import { recordLedgerOrder } from "../siumora-order/razorpay-ledger.ts";
 
 /**
  * Razorpay as a Medusa payment provider (plan 16 Phase B, B10) —
@@ -65,7 +66,7 @@ interface InjectedDependencies {
   logger?: { warn(message: string): void; error(message: string): void };
   /** Registered in every module container; absent in unit tests. */
   __pg_connection__?: SettingsPg & {
-    raw(sql: string, bindings?: ReadonlyArray<string>): Promise<{ rows: unknown[] }>;
+    raw(sql: string, bindings?: ReadonlyArray<unknown>): Promise<{ rows: unknown[] }>;
   };
 }
 
@@ -133,6 +134,28 @@ export class RazorpayPaymentProviderService extends AbstractPaymentProvider<Razo
         MedusaError.Types.UNEXPECTED_STATE,
         "Online payment could not be started. Nothing was charged — try again.",
       );
+    }
+    // Ledger first (security review, item 2): this order stays payable after
+    // a later prepare supersedes it, and only the ledger remembers it then.
+    // Nothing is charged yet, so a ledger that cannot be written refuses the
+    // payment rather than opening an order recon could never find.
+    const pg = this.deps_.__pg_connection__;
+    if (pg) {
+      try {
+        await recordLedgerOrder(pg, {
+          razorpayOrderId: created.orderId,
+          amountPaise,
+          sessionId: sessionId ?? null,
+        });
+      } catch (error) {
+        this.deps_.logger?.error(
+          `razorpay order ${created.orderId} not written to the ledger: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        throw new MedusaError(
+          MedusaError.Types.UNEXPECTED_STATE,
+          "Online payment could not be started. Nothing was charged — try again.",
+        );
+      }
     }
     return {
       razorpay_order_id: created.orderId,
@@ -284,7 +307,17 @@ export class RazorpayPaymentProviderService extends AbstractPaymentProvider<Razo
     if (event.kind === "ignored") return { action: "not_supported" };
 
     const sessionId = event.sessionId ?? (await this.sessionForOrder(event.razorpayOrderId));
-    if (!sessionId) return { action: "not_supported" };
+    if (!sessionId) {
+      // A superseded Razorpay order (no live session names it): nothing here
+      // can complete a cart with it. The ledger sweep in payment-recon finds
+      // it after the grace period and refunds the capture.
+      if (event.kind === "captured") {
+        this.deps_.logger?.warn(
+          `razorpay ${event.razorpayOrderId} paid with no live session — ledger recon will refund`,
+        );
+      }
+      return { action: "not_supported" };
+    }
 
     return {
       action: event.kind,

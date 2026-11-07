@@ -286,7 +286,10 @@ async function placeCodOrder() {
     paymentMethod: "cod",
     eventId: crypto.randomUUID(),
   });
-  return { placed, variantId };
+  // A fresh completion always carries its key; null is only for replays
+  // that are not entitled to it.
+  assert.ok(placed.accessKey, "a fresh COD completion returns its access key");
+  return { placed: { ...placed, accessKey: placed.accessKey }, variantId };
 }
 
 // ── Auth ──────────────────────────────────────────────────────

@@ -6,6 +6,15 @@ import { createRazorpayClient } from "../modules/razorpay-payment/client";
 import { razorpayCredentials } from "../modules/razorpay-payment/credentials";
 import { majorFromPaise, readPayments, reconAction } from "../modules/razorpay-payment/decide";
 import { RAZORPAY_PROVIDER_ID } from "../modules/razorpay-payment/index";
+import {
+  LEDGER_GRACE_MS,
+  ledgerAction,
+  ledgerContext,
+  openLedgerOrders,
+  refundPaise,
+  settleLedgerOrder,
+  type RawClient,
+} from "../modules/siumora-order/razorpay-ledger";
 
 /**
  * Payment reconciliation (plan 16 Phase B, B13) — every 15 minutes, 48-hour
@@ -91,6 +100,62 @@ export default async function paymentRecon(container: MedusaContainer): Promise<
   // Silent when there was nothing to do, same as the Fastify sweep.
   if (open.length > 0) {
     logger.info(`payment recon: checked ${open.length}, replayed ${replayed}`);
+  }
+
+  await sweepLedger(pg as unknown as RawClient, client, logger);
+}
+
+/**
+ * The ledger sweep (security review, item 2): every Razorpay order we
+ * created, not just the ones a live session still names. A capture on an
+ * order that no Medusa payment recorded and nothing can complete any more
+ * (superseded by a later prepare, or its cart completed another way) is
+ * refunded — the shopper paid for an order that will never exist.
+ */
+async function sweepLedger(
+  pg: RawClient,
+  client: ReturnType<typeof createRazorpayClient>,
+  logger: { warn(message: string): void; error(message: string): void },
+): Promise<void> {
+  const now = Date.now();
+  const rows = await openLedgerOrders(pg, new Date(now - LEDGER_GRACE_MS));
+  for (const row of rows) {
+    try {
+      const listed = await client.fetchOrderPayments(row.razorpay_order_id);
+      if (!listed.ok) {
+        logger.warn(`payment recon: could not read ${row.razorpay_order_id} — next sweep retries (${listed.error})`);
+        continue;
+      }
+      const reading = readPayments(listed.payments, row.amount_paise);
+      const action = ledgerAction({
+        reading,
+        ...(await ledgerContext(pg, row)),
+        ageMs: now - new Date(row.created_at).getTime(),
+      });
+      if (action === "wait") continue;
+      if (action !== "refund") {
+        await settleLedgerOrder(pg, row.razorpay_order_id, action);
+        continue;
+      }
+      if (reading.state !== "captured" && reading.state !== "mismatch") continue;
+      const amountPaise = refundPaise(reading, row);
+      const refund = await client.refundPayment(reading.paymentId, {
+        amountPaise,
+        notes: { reason: "order_not_placed", razorpay_order_id: row.razorpay_order_id },
+      });
+      await settleLedgerOrder(pg, row.razorpay_order_id, refund.ok ? "refunded" : "refund_failed");
+      logger.error(
+        refund.ok
+          ? `[money-alert] auto-refund: razorpay ${row.razorpay_order_id} payment ${reading.paymentId} ` +
+              `(cart ${row.cart_id ?? "unknown"}) captured with no order — refunded ${amountPaise} paise`
+          : `[money-alert] REFUND FAILED: razorpay ${row.razorpay_order_id} payment ${reading.paymentId} ` +
+              `(cart ${row.cart_id ?? "unknown"}) ${amountPaise} paise — ${refund.error}; retried next sweep`,
+      );
+    } catch (error) {
+      logger.error(
+        `payment recon: ledger row ${row.razorpay_order_id} failed — ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 }
 

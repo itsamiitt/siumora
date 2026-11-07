@@ -15,6 +15,12 @@ import { createRazorpayClient } from "../modules/razorpay-payment/client";
 import { razorpayCredentials, type RazorpayCredentials } from "../modules/razorpay-payment/credentials";
 import { readPayments, type PaymentReading } from "../modules/razorpay-payment/decide";
 import { RAZORPAY_PROVIDER_ID } from "../modules/razorpay-payment/index";
+import {
+  findLedgerOrder,
+  ledgerContext,
+  settleLedgerOrder,
+  type RawClient as LedgerRawClient,
+} from "../modules/siumora-order/razorpay-ledger";
 import { findPincode, type SqlClient as PincodeSqlClient } from "../modules/serviceability/lookup";
 import { computeQuote } from "../modules/serviceability/serviceability";
 import type { Settings } from "../modules/settings/settings";
@@ -419,8 +425,50 @@ export async function refundUnplaced(
     notes: { reason: "order_not_placed", session_id: session.id },
   });
   logger.error(
-    `paid_not_placed: session ${session.id} payment ${reading.paymentId} — ` +
-      (refund.ok ? `refunded ${amountPaise} paise` : `REFUND FAILED: ${refund.error}`),
+    `[money-alert] paid_not_placed: session ${session.id} payment ${reading.paymentId} — ` +
+      (refund.ok ? `auto-refunded ${amountPaise} paise` : `REFUND FAILED: ${refund.error}`),
   );
+  // The ledger row (security review, item 2) is settled so the recon sweep
+  // does not refund it twice; a failure is left open for the sweep to retry.
+  const orderId = session.data?.razorpay_order_id;
+  if (refund.ok && typeof orderId === "string") {
+    const pg = req.scope.resolve(ContainerRegistrationKeys.PG_CONNECTION) as unknown as LedgerRawClient;
+    await settleLedgerOrder(pg, orderId, "refunded").catch(() => undefined);
+  }
   return refund.ok ? "refunded" : "refund_failed";
+}
+
+/**
+ * The payment_mismatch case (security review, item 2): a genuinely signed
+ * payment for a Razorpay order that is not this bag's live one — a
+ * superseded order paid from a stale modal or a second tab. Refunded now,
+ * through refundUnplaced, when the ledger knows the order and nothing else
+ * can complete with it: no Medusa payment records it and no live session
+ * (this cart's or another's) still names it. Otherwise left alone — the
+ * recon sweep settles it — and the answer says so honestly.
+ */
+export async function refundSuperseded(
+  req: MedusaRequest,
+  razorpayOrderId: string,
+): Promise<"refunded" | "nothing_taken" | "refund_failed" | "not_ours"> {
+  const pg = req.scope.resolve(ContainerRegistrationKeys.PG_CONNECTION) as unknown as LedgerRawClient;
+  const row = await findLedgerOrder(pg, razorpayOrderId);
+  if (!row) {
+    // Signed with our key but unknown to the ledger (created before it
+    // existed): nothing will sweep it, so a person must look.
+    const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER) as { error(message: string): void };
+    logger.error(`[money-alert] payment_mismatch: razorpay ${razorpayOrderId} is not in the ledger — check it by hand`);
+    return "not_ours";
+  }
+  const context = await ledgerContext(pg, row);
+  if (context.recorded || context.liveSession) return "not_ours";
+  return refundUnplaced(req, {
+    // Not the session id: that session may since name a newer order with a
+    // recorded payment. A ledger id makes the recorded-capture probe find
+    // nothing, so refundUnplaced asks Razorpay about this order directly.
+    id: `ledger:${row.id}`,
+    status: "superseded",
+    provider_id: RAZORPAY_PROVIDER_ID,
+    data: { razorpay_order_id: row.razorpay_order_id, amount_paise: Number(row.amount_paise) },
+  });
 }
