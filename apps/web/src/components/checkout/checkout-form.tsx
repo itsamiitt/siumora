@@ -14,6 +14,7 @@ import { Button, TrustRow } from "@siumora/ui";
 import { saveReminderChoice } from "@/app/actions/checkout";
 import { completePayment, submitOrder } from "@/app/actions/order";
 import { SignInSheet } from "@/components/auth/auth-sheet";
+import { notifyCartChanged } from "@/components/cart-badge";
 import {
   FIELD_ID,
   analyticsItems,
@@ -36,7 +37,9 @@ import { useCheckoutQuote } from "./use-checkout-quote";
  * Single-page checkout, mobile-first (plan 16 Phase C).
  *
  * Three steps in the order the Indian one-click checkouts use — phone, then
- * address, then pay — each collapsing to a line once done. The summary and
+ * address, then pay — each collapsing to a line once done. One button, pinned
+ * to the bottom on a phone, carries the page: Continue, Continue to payment,
+ * then Pay; Enter does the same, never jumping ahead to Pay. The summary and
  * the Pay label always show the server's total for the chosen method
  * (rule R6): the COD fee and inter-state GST appear when they apply, never
  * after Pay. Pay is never a dead grey button: pressed with something
@@ -239,28 +242,51 @@ export function CheckoutForm({
   function continueFromContact() {
     touch("phone");
     if (errors.phone) return focusField("phone");
+    setError(null);
     // Recorded now, not at Pay: the reminder is for the shopper who never
     // gets there. Unticked sends a withdrawal, so changing one's mind works.
     if (remindersOffered) void saveReminderChoice(phone, remindMe);
     setStep(2);
   }
 
-  /** What stops the order, or nothing. Delivery problems first, then the method. */
-  function blocker(): { message: string; field?: CheckoutField } | undefined {
+  /** What stops the shopper leaving the delivery step, or nothing. */
+  function deliveryBlocker(): { message: string; field?: CheckoutField } | undefined {
     const field = firstInvalid(errors);
     if (field) return { message: errors[field]!, field };
     if (quote && !quote.serviceable) return { message: `We don't deliver to ${draft.pincode} yet.`, field: "pincode" };
     if (business && !isValidGstin(gstin)) return { message: "Check the GSTIN, or untick buying for a business." };
+    return undefined;
+  }
+
+  /** What stops the order: delivery first, then the method. */
+  function blocker(): { message: string; field?: CheckoutField } | undefined {
+    const stop = deliveryBlocker();
+    if (stop) return stop;
     if (method === "cod" && cod && !cod.available) return { message: cod.reason ?? "Cash on delivery is not available here." };
     return undefined;
   }
 
   function continueFromDelivery() {
     touch("phone", "name", "pincode", "stateCode", "city", "line1");
-    const stop = blocker();
+    const stop = deliveryBlocker();
     if (stop?.field) return focusField(stop.field);
+    if (stop) {
+      // The GSTIN has no CheckoutField of its own; say it here, not at Pay.
+      setError(stop.message);
+      document.getElementById("gstin")?.focus();
+      return;
+    }
+    setError(null);
     deliveryDone();
     setStep(3);
+  }
+
+  /** The one action: Continue, Continue to payment, then Pay. Enter does the same. */
+  function primaryAction() {
+    if (placing) return;
+    if (step === 1) continueFromContact();
+    else if (step === 2) continueFromDelivery();
+    else placeNow();
   }
 
   function pickSaved(address: SavedAddress | null) {
@@ -309,6 +335,9 @@ export function CheckoutForm({
       // pixel and the server-side send share one id and dedupe. It is also
       // the idempotency key: a double tap cannot place two orders.
       const eventId = mintEventId();
+      // A saved address starts on Payment and never passes through
+      // "Continue to payment" — the funnel step still happened.
+      deliveryDone();
       track("add_payment_info", {
         event_id: mintEventId(),
         currency: "INR",
@@ -353,6 +382,7 @@ export function CheckoutForm({
         if (outcome.kind === "paid") {
           const placed = await completePayment({ paymentMethod: method, razorpay: outcome.proof, eventId });
           if (placed.ok && placed.orderNumber) {
+            notifyCartChanged(0);
             router.push(`/orders/${placed.orderNumber}`);
           } else {
             setError(placed.message ?? "We could not confirm the order.");
@@ -377,6 +407,7 @@ export function CheckoutForm({
             ...(draft.name.trim() ? { name: draft.name.trim() } : {}),
           });
         }
+        notifyCartChanged(0);
         router.push(`/orders/${result.orderNumber}`);
       } else if (result.error === "verify_phone") {
         // COD needs the delivery number verified; once it is, carry on
@@ -401,12 +432,18 @@ export function CheckoutForm({
     });
   }
 
-  const stop = touched.size > 0 ? blocker() : undefined;
-  const payLabel = placing
+  // The bar speaks only for the step in front of the shopper: field errors
+  // sit under their fields, and a later step's problems wait for that step.
+  const barMessage = error ?? (step === 3 && touched.size > 0 ? blocker()?.message : undefined);
+  const actionLabel = placing
     ? "Placing…"
-    : method === "cod"
-      ? `Place order · ${formatPaise(totals.total)}`
-      : `Pay ${formatPaise(totals.total)}`;
+    : step === 1
+      ? "Continue"
+      : step === 2
+        ? "Continue to payment"
+        : method === "cod"
+          ? `Place order · ${formatPaise(totals.total)}`
+          : `Pay ${formatPaise(totals.total)}`;
   const stepState = (n: Step) => (step === n ? "open" : step > n ? "done" : "upcoming");
 
   return (
@@ -434,7 +471,7 @@ export function CheckoutForm({
             noValidate
             onSubmit={(event) => {
               event.preventDefault();
-              if (!placing) placeNow();
+              primaryAction();
             }}
           >
             <ContactStep
@@ -449,8 +486,10 @@ export function CheckoutForm({
               verified={verified}
               onVerify={() => setSheet("verify")}
               {...(remindersOffered ? { reminders: { checked: remindMe, onChange: setRemindMe } } : {})}
-              onContinue={continueFromContact}
-              onEdit={() => setStep(1)}
+              onEdit={() => {
+                setError(null);
+                setStep(1);
+              }}
             />
             <DeliveryStep
               state={stepState(2)}
@@ -486,8 +525,10 @@ export function CheckoutForm({
                     },
                   }
                 : {})}
-              onContinue={continueFromDelivery}
-              onEdit={() => setStep(2)}
+              onEdit={() => {
+                setError(null);
+                setStep(2);
+              }}
             />
             <PaymentStep
               state={stepState(3)}
@@ -499,34 +540,35 @@ export function CheckoutForm({
               onEdit={() => setStep(3)}
             />
 
-            {/* Pinned to the bottom of a phone screen while the form scrolls,
-                so the total and the one action are always in reach. */}
-            <div className="sticky bottom-0 z-10 -mx-5 border-t border-[var(--color-rule)] bg-ground px-5 pb-4 pt-3 lg:static lg:mx-0 lg:mt-8 lg:border-0 lg:p-0">
-              {(error ?? stop?.message) && (
-                <p aria-live="polite" className="mb-2 text-sm text-accent-ink">
-                  {error ?? stop?.message}
-                </p>
-              )}
+            {/* The one action, pinned to the bottom of a phone screen while
+                the form scrolls — thumb's reach, clear of the home indicator.
+                Its label follows the step; there is never a second button. */}
+            <div className="sticky bottom-0 z-10 -mx-5 border-t border-[var(--color-rule)] bg-ground px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 lg:static lg:mx-0 lg:mt-8 lg:border-0 lg:p-0">
+              <p aria-live="polite" className={barMessage ? "mb-2 text-sm text-accent-ink" : "sr-only"}>
+                {barMessage}
+              </p>
               <Button size="lg" type="submit" className="w-full" disabled={placing}>
-                {payLabel}
+                {actionLabel}
               </Button>
-              <TrustRow
-                className="mt-3 justify-center"
-                items={[
-                  {
-                    label:
-                      method === "cod"
-                        ? "Pay when it arrives"
-                        : paymentFlow === "order-first" && !razorpayConfigured
-                          ? "Razorpay not connected — no payment is taken"
-                          : "Secured by Razorpay",
-                  },
-                  { label: "GST invoice" },
-                  { label: "7-day returns" },
-                  { label: "Gift-wrapped" },
-                ]}
-              />
             </div>
+            {/* Out of the sticky bar: on a phone it would wrap to two lines
+                and eat the screen the keyboard has not already taken. */}
+            <TrustRow
+              className="mt-4 justify-center"
+              items={[
+                {
+                  label:
+                    method === "cod"
+                      ? "Pay when it arrives"
+                      : paymentFlow === "order-first" && !razorpayConfigured
+                        ? "Razorpay not connected — no payment is taken"
+                        : "Secured by Razorpay",
+                },
+                { label: "GST invoice" },
+                { label: "7-day returns" },
+                { label: "Gift-wrapped" },
+              ]}
+            />
           </form>
         </div>
 

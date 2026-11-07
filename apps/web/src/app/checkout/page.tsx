@@ -112,13 +112,13 @@ async function CheckoutPageContents() {
  */
 export default function CheckoutPage() {
   return (
-    <div className="mx-auto max-w-6xl px-5 pb-16 pt-8 lg:pt-12">
+    <div className="mx-auto max-w-6xl px-5 pb-10 pt-5 lg:pb-16 lg:pt-12">
       <style>{FOCUS_CSS}</style>
-      <div className="mb-6 flex items-baseline justify-between gap-6 lg:mb-10">
+      <div className="mb-4 flex items-center justify-between gap-6 lg:mb-10">
         <Display as="h1" size="sm">
           Checkout
         </Display>
-        <Link href="/cart" className="min-h-11 transition-colors hover:text-accent-ink">
+        <Link href="/cart" className="flex min-h-11 items-center transition-colors hover:text-accent-ink">
           <MicroLabel>← Back to bag</MicroLabel>
         </Link>
       </div>

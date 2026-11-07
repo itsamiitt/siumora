@@ -11,7 +11,7 @@ import {
   normalisePincodeInput,
   stateByCode,
 } from "@siumora/in-locale";
-import { Button, CheckoutStep, Field, RadioCard, TextInput, cn, inputClassName } from "@siumora/ui";
+import { CheckoutStep, Field, RadioCard, TextInput, cn, inputClassName } from "@siumora/ui";
 
 import { checkPincode, type QuoteResult } from "@/app/actions/checkout";
 import { arrivalBy, formatArrival, type CheckoutField, type FieldErrors } from "@/lib/checkout-rules";
@@ -53,7 +53,6 @@ export function DeliveryStep({
   gstin,
   onGstin,
   gift,
-  onContinue,
   onEdit,
 }: {
   state: "open" | "done" | "upcoming";
@@ -72,7 +71,6 @@ export function DeliveryStep({
   onGstin: (value: string) => void;
   /** The gift message (plan 16 B21) — present only when the store offers it. */
   gift?: { message: string; onMessage: (value: string) => void; error?: string | undefined };
-  onContinue: () => void;
   onEdit: () => void;
 }) {
   const [showAllSaved, setShowAllSaved] = useState(false);
@@ -331,10 +329,6 @@ export function DeliveryStep({
       </div>
 
       {gift && <GiftMessage {...gift} />}
-
-      <Button variant="secondary" className="mt-6" onClick={onContinue}>
-        Continue to payment
-      </Button>
     </CheckoutStep>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, CheckoutStep, Field, TextInput } from "@siumora/ui";
+import { CheckoutStep, Field, TextInput } from "@siumora/ui";
 
 /**
  * Step 1 — the phone, first (plan 16 Phase C; the Kwik order).
@@ -19,7 +19,6 @@ export function ContactStep({
   verified,
   onVerify,
   reminders,
-  onContinue,
   onEdit,
 }: {
   state: "open" | "done" | "upcoming";
@@ -31,7 +30,6 @@ export function ContactStep({
   onVerify: () => void;
   /** The cart-reminder opt-in (plan 16 B22) — present only when the store offers it. */
   reminders?: { checked: boolean; onChange: (checked: boolean) => void };
-  onContinue: () => void;
   onEdit: () => void;
 }) {
   const valid = /^[6-9]\d{9}$/.test(phone);
@@ -70,6 +68,7 @@ export function ContactStep({
             onBlur={onBlur}
             inputMode="numeric"
             autoComplete="tel-national"
+            enterKeyHint="next"
             placeholder="98765 43210"
             invalid={Boolean(error)}
             hasMessage
@@ -91,24 +90,21 @@ export function ContactStep({
         </label>
       )}
 
-      <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3">
-        <Button variant="secondary" onClick={onContinue}>
-          Continue
-        </Button>
-        {verified ? (
-          <span className="text-sm text-accent-ink">This number is verified.</span>
-        ) : (
-          valid && (
-            <button
-              type="button"
-              onClick={onVerify}
-              className="min-h-11 text-left text-sm text-content-muted underline-offset-4 hover:text-accent-ink hover:underline"
-            >
-              Verify with a code — unlocks cash on delivery and your saved addresses
-            </button>
-          )
-        )}
-      </div>
+      {/* Continue lives in the page's one pinned button; verifying is
+          optional, so it is a quiet line here, not a second button. */}
+      {verified ? (
+        <p className="mt-3 text-sm text-accent-ink">This number is verified.</p>
+      ) : (
+        valid && (
+          <button
+            type="button"
+            onClick={onVerify}
+            className="mt-2 min-h-11 text-left text-sm text-content-muted underline underline-offset-4 hover:text-accent-ink"
+          >
+            Verify to unlock cash on delivery
+          </button>
+        )
+      )}
     </CheckoutStep>
   );
 }

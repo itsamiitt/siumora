@@ -12,9 +12,13 @@ import { cn } from "./cn.ts";
  * found most sites mark neither, and shoppers guess wrong both ways.
  */
 
-/** The one input look: 48px, the ground behind it, a hairline that turns mulberry on focus. */
+/**
+ * The one input look: 48px, the ground behind it, a hairline that turns
+ * mulberry on focus. 16px type: below that, iOS Safari zooms the page on
+ * focus and leaves the shopper pinching back out mid-checkout.
+ */
 export const inputClassName =
-  "h-12 w-full border border-content/20 bg-ground px-3 text-[15px] text-content outline-none " +
+  "h-12 w-full border border-content/20 bg-ground px-3 text-base text-content outline-none " +
   "transition-colors duration-200 ease-[var(--ease-siumora)] placeholder:text-content-faint " +
   "focus:border-accent-ink focus:ring-1 focus:ring-inset focus:ring-accent-ink " +
   "aria-[invalid=true]:border-accent-ink disabled:opacity-60";

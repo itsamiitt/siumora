@@ -29,7 +29,7 @@ export function CheckoutStep({
 }) {
   const headingId = `checkout-step-${step}`;
   return (
-    <section aria-labelledby={headingId} className="border-b border-[var(--color-rule)] py-6 first:pt-0">
+    <section aria-labelledby={headingId} className="border-b border-[var(--color-rule)] py-5 first:pt-0 lg:py-6">
       <div className="flex items-baseline gap-3">
         <span
           aria-hidden
@@ -64,7 +64,7 @@ export function CheckoutStep({
       {state === "done" && summary && (
         <div className="mt-1 pl-7 text-sm text-content-muted">{summary}</div>
       )}
-      {state === "open" && <div className="mt-5">{children}</div>}
+      {state === "open" && <div className="mt-4 lg:mt-5">{children}</div>}
     </section>
   );
 }
