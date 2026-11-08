@@ -97,7 +97,27 @@ interface MedusaVariant {
   title: string | null;
   metadata?: { mrp_paise?: unknown; price_paise?: unknown } | null;
   inventory_quantity?: number;
+  /** false: Medusa does not track stock for this variant — always available. */
+  manage_inventory?: boolean | null;
+  allow_backorder?: boolean | null;
   calculated_price?: { calculated_amount: number | null } | null;
+}
+
+/**
+ * Stock offered for a variant Medusa does not count (inventory tracking off,
+ * or backorders allowed). Large enough never to cap a bag or show "Only N
+ * left"; small enough to stay a plain integer.
+ */
+export const UNTRACKED_STOCK = 9999;
+
+/**
+ * Units a shopper may buy. A variant created in the dashboard with "Manage
+ * inventory" off has no inventory_quantity at all; reading that as 0 made
+ * the product show sold out and refused every add to the bag.
+ */
+export function variantStock(variant: Pick<MedusaVariant, "inventory_quantity" | "manage_inventory" | "allow_backorder">): number {
+  if (variant.manage_inventory === false || variant.allow_backorder === true) return UNTRACKED_STOCK;
+  return Math.max(0, variant.inventory_quantity ?? 0);
 }
 
 interface MedusaProduct {
@@ -109,6 +129,7 @@ interface MedusaProduct {
   thumbnail?: string | null;
   material?: string | null;
   collection?: { id: string; handle: string } | null;
+  categories?: Array<{ id: string; handle: string } | null> | null;
   metadata?: {
     hsn?: unknown;
     gst_slab?: unknown;
@@ -297,17 +318,23 @@ function mapImage(image: MedusaImage, productTitle: string) {
  * home, shop and every collection would otherwise go down with it. Its own
  * PDP still fails, which is the honest place for the error to surface.
  */
-function listable(product: MedusaProduct): Product[] {
+function listable(product: MedusaProduct, onSkip?: SkippedProductHook): Product[] {
   try {
     return [mapProduct(product)];
   } catch (error) {
-    console.error(
-      `[catalog] skipped product ${product.handle}:`,
-      error instanceof Error ? error.message : error,
-    );
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`[catalog] skipped product ${product.handle}:`, reason);
+    try {
+      onSkip?.({ handle: product.handle, reason });
+    } catch {
+      // Reporting must never take the listing down with it.
+    }
     return [];
   }
 }
+
+/** Told about each published product a listing had to leave out, and why. */
+export type SkippedProductHook = (skipped: { handle: string; reason: string }) => void;
 
 /** Medusa product → core Product, revalidated through core's schema. */
 export function mapProduct(product: MedusaProduct): Product {
@@ -340,9 +367,10 @@ export function mapProduct(product: MedusaProduct): Product {
       sku: variant.sku,
       title: variant.title,
       price: variantPrice(variant),
-      inventory: variant.inventory_quantity ?? 0,
+      inventory: variantStock(variant),
     })),
     collections: product.collection ? [product.collection.handle] : [],
+    categories: (product.categories ?? []).flatMap((category) => (category?.handle ? [category.handle] : [])),
   });
 }
 
@@ -428,6 +456,12 @@ export interface MedusaClientOptions {
     | Record<string, string>
     | undefined
     | Promise<Record<string, string> | undefined>;
+  /**
+   * Called for each published product a listing leaves out (no price, no
+   * GST slab). A server log line alone is a product the operator believes is
+   * live and no shopper can see; the storefront sends it to Sentry.
+   */
+  onSkippedProduct?: SkippedProductHook;
 }
 
 /**
@@ -438,16 +472,28 @@ export interface MedusaClientOptions {
  * allow-list (400). Any path here or in CART_FIELDS outside Medusa's defaults
  * must also be added to allowFields() in apps/medusa/src/api/middlewares.ts.
  */
-const PRODUCT_FIELDS =
+export const PRODUCT_FIELDS =
   "id,handle,title,subtitle,description,thumbnail,material,metadata,*collection," +
-  "*images,*variants,*variants.metadata,+variants.inventory_quantity," +
+  "*categories,*images,*variants,*variants.metadata,+variants.inventory_quantity," +
   "*variants.calculated_price";
 
-const CART_FIELDS =
+/**
+ * Medusa also caps how deep a store `fields` path may reach
+ * (http.storeRelationsLimit, default 3) and answers 400 past it. A `*` prefix
+ * counts every segment as a relation, so metadata — a column — is read
+ * without one, and the line's image comes from the item's own thumbnail
+ * snapshot rather than items.variant.product.images (four deep). Pinned by
+ * medusa.test.ts.
+ */
+export const CART_FIELDS =
   "id,completed_at,*items,*items.variant,*items.variant.metadata," +
-  "*items.variant.product.metadata,*items.variant.product.images," +
+  "items.variant.product.metadata," +
   // Coupons (plan 16 B19): each line's adjustments and the codes applied.
   "*items.adjustments,promotions.code";
+
+export const STOCK_FIELDS = "id,*variants,+variants.inventory_quantity";
+
+export const COLLECTION_FIELDS = "id,handle,title,metadata";
 
 /** Bound each request, not the size of the visible catalog. */
 const CATALOG_PAGE = 100;
@@ -464,6 +510,7 @@ export class MedusaClient implements PublicSurface {
   private readonly doFetch: typeof globalThis.fetch;
   private readonly token: string | undefined;
   private readonly clientIpHeaders: MedusaClientOptions["clientIpHeaders"];
+  private readonly onSkippedProduct: SkippedProductHook | undefined;
   private regionId: Promise<string> | undefined;
 
   constructor(options: MedusaClientOptions) {
@@ -473,6 +520,7 @@ export class MedusaClient implements PublicSurface {
     this.doFetch = options.fetch ?? globalThis.fetch;
     this.token = options.token;
     this.clientIpHeaders = options.clientIpHeaders;
+    this.onSkippedProduct = options.onSkippedProduct;
   }
 
   /** Same contract as SiumoraClient.withToken: a new instance, never mutation. */
@@ -483,6 +531,7 @@ export class MedusaClient implements PublicSurface {
       timeoutMs: this.timeoutMs,
       fetch: this.doFetch,
       ...(this.clientIpHeaders ? { clientIpHeaders: this.clientIpHeaders } : {}),
+      ...(this.onSkippedProduct ? { onSkippedProduct: this.onSkippedProduct } : {}),
       ...(token ? { token } : {}),
     });
   }
@@ -576,7 +625,7 @@ export class MedusaClient implements PublicSurface {
   }
 
   private async fetchCatalog(
-    options?: { revalidate?: number; limit?: number; categoryId?: string; collectionId?: string },
+    options?: { revalidate?: number; limit?: number; categoryIds?: readonly string[]; collectionId?: string },
   ): Promise<Product[]> {
     const regionId = await this.region();
     const products: Product[] = [];
@@ -587,12 +636,12 @@ export class MedusaClient implements PublicSurface {
         "GET",
         `/store/products?fields=${encodeURIComponent(PRODUCT_FIELDS)}` +
           `&region_id=${encodeURIComponent(regionId)}&limit=${limit}&offset=${offset}&order=-created_at` +
-          (options?.categoryId ? `&category_id[]=${encodeURIComponent(options.categoryId)}` : "") +
+          (options?.categoryIds ?? []).map((id) => `&category_id[]=${encodeURIComponent(id)}`).join("") +
           (options?.collectionId ? `&collection_id[]=${encodeURIComponent(options.collectionId)}` : ""),
         undefined,
         options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
       );
-      products.push(...data.products.flatMap(listable));
+      products.push(...data.products.flatMap((product) => listable(product, this.onSkippedProduct)));
       offset += data.products.length;
       if (!data.products.length || (options?.limit && products.length >= options.limit) ||
         (data.count !== undefined ? offset >= data.count : data.products.length < limit)) break;
@@ -652,7 +701,9 @@ export class MedusaClient implements PublicSurface {
     while (true) {
       const data = await this.request<{ collections: MedusaCollection[]; count?: number }>(
         "GET",
-        `/store/collections?limit=${CATALOG_PAGE}&offset=${collections.length}&order=created_at`,
+        // metadata is not in the store route's default fields; without it the
+        // description (metadata.description) silently read as "" everywhere.
+        `/store/collections?fields=${encodeURIComponent(COLLECTION_FIELDS)}&limit=${CATALOG_PAGE}&offset=${collections.length}&order=created_at`,
         undefined,
         options?.revalidate !== undefined ? { revalidate: options.revalidate } : {},
       );
@@ -678,8 +729,9 @@ export class MedusaClient implements PublicSurface {
     return categories;
   }
 
-  async listProductsInCategory(categoryId: string, options?: { revalidate?: number }): Promise<Product[]> {
-    return this.fetchCatalog({ ...options, categoryId });
+  /** Products in any of the given categories — pass a category's whole branch to include its children. */
+  async listProductsInCategory(categoryIds: string | readonly string[], options?: { revalidate?: number }): Promise<Product[]> {
+    return this.fetchCatalog({ ...options, categoryIds: typeof categoryIds === "string" ? [categoryIds] : categoryIds });
   }
 
   // ── Cart ────────────────────────────────────────────────────
@@ -750,17 +802,17 @@ export class MedusaClient implements PublicSurface {
     if (productIds.length === 0) return onHand;
     try {
       const data = await this.request<{
-        products: Array<{ variants?: Array<{ id: string; inventory_quantity?: number }> | null }>;
+        products: Array<{ variants?: Array<Pick<MedusaVariant, "id" | "inventory_quantity" | "manage_inventory" | "allow_backorder">> | null }>;
       }>(
         "GET",
-        `/store/products?fields=${encodeURIComponent("id,*variants,+variants.inventory_quantity")}` +
+        `/store/products?fields=${encodeURIComponent(STOCK_FIELDS)}` +
           `&limit=${productIds.length}` +
           productIds.map((id) => `&id[]=${encodeURIComponent(id!)}`).join(""),
       );
       for (const product of data.products) {
         for (const variant of product.variants ?? []) {
-          if (typeof variant.inventory_quantity === "number") {
-            onHand.set(variant.id, variant.inventory_quantity);
+          if (typeof variant.inventory_quantity === "number" || variant.manage_inventory === false || variant.allow_backorder === true) {
+            onHand.set(variant.id, variantStock(variant));
           }
         }
       }
@@ -1506,7 +1558,7 @@ export class MedusaClient implements PublicSurface {
  */
 export function createMedusaClient(
   env: Record<string, string | undefined> = process.env,
-  extra: Pick<MedusaClientOptions, "clientIpHeaders"> = {},
+  extra: Pick<MedusaClientOptions, "clientIpHeaders" | "onSkippedProduct"> = {},
 ): MedusaClient {
   const baseUrl = env.MEDUSA_URL;
   const publishableKey = env.MEDUSA_PUBLISHABLE_KEY;
@@ -1520,6 +1572,7 @@ export function createMedusaClient(
     baseUrl,
     publishableKey,
     ...(extra.clientIpHeaders ? { clientIpHeaders: extra.clientIpHeaders } : {}),
+    ...(extra.onSkippedProduct ? { onSkippedProduct: extra.onSkippedProduct } : {}),
   });
 }
 

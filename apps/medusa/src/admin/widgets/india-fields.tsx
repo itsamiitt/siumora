@@ -7,6 +7,7 @@ import { useState } from "react";
 import { CardSkeleton, EditDrawer, FormField, KeyValueRow, SectionHeader, inr } from "../components/kit";
 import { GST_SLABS, missingFields, paiseToRupees, parseMrp, parseProductFields } from "../lib/india-fields";
 import { opsFetch } from "../lib/ops";
+import { missingPublishFields, type PublishCandidate } from "../../lib/product-publish-guard";
 
 /**
  * India tax, in the product page's side column (made native in plan 16
@@ -30,6 +31,52 @@ interface Product {
   metadata?: Record<string, unknown> | null;
   variants?: VariantRow[] | null;
 }
+
+/**
+ * Whether shoppers can see this product, by the same rules the publish
+ * guard enforces — so "published in admin, missing on the site" is visible
+ * here instead of only in the storefront's logs.
+ */
+const StorefrontVisibility = ({ productId }: { productId: string }) => {
+  const visibility = useQuery({
+    queryKey: ["siumora", "storefront-visibility", productId],
+    queryFn: async () => {
+      const [{ product }, { api_keys }] = await Promise.all([
+        opsFetch<{ product: PublishCandidate }>(
+          `/admin/products/${productId}?fields=id,status,metadata,*variants,*variants.prices,*sales_channels`,
+        ),
+        opsFetch<{ api_keys: Array<{ revoked_at?: string | null; sales_channels?: Array<{ id: string }> | null }> }>(
+          "/admin/api-keys?type=publishable&fields=id,revoked_at,*sales_channels&limit=50",
+        ),
+      ]);
+      const live = api_keys.filter((key) => !key.revoked_at);
+      const channels = live.length
+        ? new Set(live.flatMap((key) => (key.sales_channels ?? []).map((channel) => channel.id)))
+        : undefined;
+      // Judge it as if published: a draft shows what still stands in the way.
+      return { status: product.status, blockers: missingPublishFields({ ...product, status: "published" }, channels) };
+    },
+  });
+  if (!visibility.data) return null;
+  const { status, blockers } = visibility.data;
+  const visible = status === "published" && blockers.length === 0;
+  return (
+    <div className="flex flex-col gap-1 px-6 py-4">
+      <div className="flex items-center justify-between">
+        <Text size="small" weight="plus">Storefront</Text>
+        <StatusBadge color={visible ? "green" : status === "published" ? "red" : "grey"}>
+          {visible ? "Visible to shoppers" : "Not visible on storefront"}
+        </StatusBadge>
+      </div>
+      {!visible && (
+        <Text size="small" className="text-ui-fg-subtle">
+          {status !== "published" ? `Status is ${status ?? "unknown"}. ` : ""}
+          {blockers.length ? `Needs ${blockers.join(", ")}.` : status !== "published" ? "Publish it to show it." : ""}
+        </Text>
+      )}
+    </div>
+  );
+};
 
 const IndiaFieldsWidget = ({ data }: { data: { id: string } }) => {
   const client = useQueryClient();
@@ -116,6 +163,7 @@ const IndiaFieldsWidget = ({ data }: { data: { id: string } }) => {
         }
         actions={[[{ label: "Edit", icon: <PencilSquare />, onClick: open }]]}
       />
+      <StorefrontVisibility productId={p.id} />
       {missing.length > 0 && (
         <div className="px-6 py-4">
           <Text size="small" className="text-ui-fg-error">

@@ -1,5 +1,6 @@
 import "server-only";
 
+import * as Sentry from "@sentry/nextjs";
 import { cookies } from "next/headers";
 
 import type { CartLine } from "@siumora/core";
@@ -65,9 +66,30 @@ export async function getCartView(): Promise<{ lines: CartLine[]; coupons: strin
   try {
     const cart = await api().getCart(id);
     return { lines: cart.lines, coupons: cart.coupons ?? [] };
-  } catch {
-    return { lines: [], coupons: [] };
+  } catch (error) {
+    return { lines: goneOrThrow(error), coupons: [] };
   }
+}
+
+/**
+ * The bag could not be read, and not because it is gone. Thrown rather than
+ * read as empty: an "empty bag" over a failing read is how a 400 on every
+ * cart read (Medusa's relation-depth limit, 2026-11) went unnoticed while no
+ * shopper could add anything. Callers show "couldn't load", never "empty".
+ */
+export class CartUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("The bag could not be read.", { cause });
+    this.name = "CartUnavailableError";
+  }
+}
+
+/** A cart the API no longer knows (expired, reset) is empty; anything else is reported and thrown. */
+function goneOrThrow(error: unknown): CartLine[] {
+  if (cartIsGone(error)) return [];
+  Sentry.captureException(error, { tags: { area: "cart-read" } });
+  console.error("[cart] read failed:", error instanceof Error ? error.message : error);
+  throw new CartUnavailableError(error);
 }
 
 export async function getCartLines(): Promise<CartLine[]> {
@@ -76,10 +98,8 @@ export async function getCartLines(): Promise<CartLine[]> {
 
   try {
     return (await api().getCart(id)).lines;
-  } catch {
-    // A cart the API no longer knows about — expired, or a database reset —
-    // reads as empty rather than breaking the page.
-    return [];
+  } catch (error) {
+    return goneOrThrow(error);
   }
 }
 
@@ -99,8 +119,16 @@ export async function addLine(
     }
     return { ok: true };
   } catch (error) {
+    reportUnexpected(error, "cart-add");
     return { ok: false, message: messageFor(error) };
   }
+}
+
+/** A refusal the shopper can act on (out of stock) is not an incident; anything else is. */
+function reportUnexpected(error: unknown, area: string): void {
+  if (error instanceof ApiError && (error.status === 404 || error.status === 409)) return;
+  Sentry.captureException(error, { tags: { area } });
+  console.error(`[cart] ${area} failed:`, error instanceof Error ? error.message : error);
 }
 
 export async function setQuantity(
@@ -117,6 +145,7 @@ export async function setQuantity(
       await forgetCart();
       return { ok: false, message: "Your bag has expired. Add the piece again." };
     }
+    reportUnexpected(error, "cart-quantity");
     return { ok: false, message: messageFor(error) };
   }
 }

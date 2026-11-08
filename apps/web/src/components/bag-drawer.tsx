@@ -28,7 +28,7 @@ import { StoreIcon } from "./store-icon";
  */
 export function BagDrawer() {
   const [open, setOpen] = useState(false);
-  const [bag, setBag] = useState<{ lines: CartLine[]; subtotal: number; count: number } | null>(null);
+  const [bag, setBag] = useState<{ lines: CartLine[]; subtotal: number; count: number; unavailable?: boolean } | null>(null);
   const [added, setAdded] = useState<string | undefined>();
   const [, startLoading] = useTransition();
   const openRef = useRef(false);
@@ -104,6 +104,14 @@ export function BagDrawer() {
                 </div>
               </div>
             ))}
+          </div>
+        ) : bag.unavailable ? (
+          <div className="py-16 text-center" role="alert">
+            <p className="font-display text-2xl font-light">We couldn&apos;t load your bag.</p>
+            <p className="mt-2 text-sm text-content-muted">Your pieces are safe. Please try again in a moment.</p>
+            <button type="button" onClick={load} className={buttonClassName({ variant: "secondary", className: "mt-6" })}>
+              Try again
+            </button>
           </div>
         ) : bag.lines.length === 0 ? (
           <div className="py-16 text-center">

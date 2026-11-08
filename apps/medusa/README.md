@@ -74,6 +74,27 @@ and serve from the backend. Production is Cloudflare R2 through the
 S3-compatible provider: the module block in `medusa-config.ts` engages only
 when `S3_FILE_URL` is set (see `.env.example`).
 
+## Getting a product onto the storefront
+
+Publishing is refused (400, naming what is missing) unless the product has:
+an HSN code and GST slab (India tax card), an **INR price on every variant**,
+and at least one sales channel behind a live publishable key (the default
+channel, unless you've added others). Save as draft, fill these in, then
+publish. The product page's India tax card shows **Storefront: Visible to
+shoppers** or what still blocks it.
+
+- Changes reach the storefront within ~5 seconds (catalogue reads are
+  revalidated on that interval) — no deploy or restart.
+- Categories show in the header/footer only once they are active, not
+  internal, and hold at least one published product (directly or in a child
+  category). Children appear on their parent's `/shop?category=` page, and a
+  parent's page lists its children's products too.
+- A collection's intro line is the **Storefront description** card on the
+  collection page (stored as `metadata.description`).
+- A published product the storefront still has to leave out (e.g. a price
+  removed later) is logged as `[catalog] skipped product …` and reported to
+  Sentry as a warning per product.
+
 ## Seed vs hand-edited products
 
 `seed.ts` is create-if-missing and **converges inventory for the four

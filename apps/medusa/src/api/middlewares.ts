@@ -145,7 +145,6 @@ export default defineMiddlewares({
         allowFields(
           "items.variant.metadata",
           "items.variant.product.metadata",
-          "items.variant.product.images",
           // Coupons (plan 16 B19) — the cart read shows what each code takes off.
           "items.adjustments",
           "promotions.code",
@@ -154,7 +153,7 @@ export default defineMiddlewares({
     },
     {
       matcher: "/store/products",
-      middlewares: [rateLimit, allowFields("variants.metadata")],
+      middlewares: [rateLimit, allowFields("variants.metadata", "categories")],
     },
   ],
 });
