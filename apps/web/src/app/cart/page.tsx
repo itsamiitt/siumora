@@ -30,6 +30,23 @@ const TRUST = [
 ] as const;
 
 /** An empty bag offers somewhere to go, not just a sentence (plan 16 Phase D). */
+/** The read failed (reported in cart-store) — never claim the bag is empty. */
+function BagUnavailable() {
+  return (
+    <div className="mx-auto max-w-6xl px-5 py-20">
+      <div className="mx-auto flex max-w-md flex-col items-center text-center" role="alert">
+        <Display as="h1" size="sm">
+          We couldn&apos;t load your bag.
+        </Display>
+        <p className="mt-4 text-content-muted">Your pieces are safe. Please refresh in a moment.</p>
+        <Link href="/cart" className={buttonClassName({ variant: "secondary", className: "mt-8" })}>
+          Try again
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 async function EmptyBag() {
   const products = await listRecentProducts(4).catch(() => []);
   return (
@@ -60,7 +77,12 @@ async function EmptyBag() {
 }
 
 async function CartPageContents() {
-  const lines = await getCartLines();
+  let lines: Awaited<ReturnType<typeof getCartLines>>;
+  try {
+    lines = await getCartLines();
+  } catch {
+    return <BagUnavailable />;
+  }
   if (lines.length === 0) return <EmptyBag />;
 
   const subtotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);

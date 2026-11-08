@@ -65,6 +65,8 @@ export const productSchema = z.object({
   images: z.array(imageSchema).min(1),
   variants: z.array(variantSchema).min(1),
   collections: z.array(handle),
+  /** Category handles (Medusa only); filter against the store's live categories before showing. */
+  categories: z.array(handle).default([]),
 });
 
 export const collectionSchema = z.object({

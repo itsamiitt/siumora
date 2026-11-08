@@ -24,6 +24,11 @@ import {
   mapCartLine,
   mapCollection,
   mapProduct,
+  CART_FIELDS,
+  PRODUCT_FIELDS,
+  STOCK_FIELDS,
+  COLLECTION_FIELDS,
+  UNTRACKED_STOCK,
 } from "./medusa.ts";
 
 /**
@@ -451,10 +456,10 @@ liveTest("live: cart lifecycle with Fastify-shaped envelopes", async () => {
   assert.equal(added.count, 2);
 
   const cart = await client.getCart(cartId);
-  assert.deepEqual(Object.keys(cart).sort(), ["cartId", "lines", "totals"]);
+  assert.deepEqual(Object.keys(cart).sort(), ["cartId", "coupons", "lines", "totals"]);
   assert.deepEqual(
     Object.keys(cart.totals).sort(),
-    ["codFee", "gst", "itemCount", "mrpTotal", "savings", "shipping", "subtotal", "total"],
+    ["codFee", "discount", "gst", "itemCount", "mrpTotal", "savings", "shipping", "subtotal", "total"],
   );
   assert.equal(cart.totals.itemCount, 2);
   assert.equal(cart.lines[0]!.unitPrice, variant.price.selling);
@@ -840,4 +845,46 @@ test("store config: simulationEnabled passes through, and a missing flag reads a
   assert.equal((await client.getStoreConfig()).simulationEnabled, true);
   envelope = { paymentsEnabled: true, razorpayConfigured: true };
   assert.equal((await client.getStoreConfig()).simulationEnabled, false);
+});
+
+/**
+ * Medusa 2.21's own depth rule (framework/dist/http/utils/relations-limit.js,
+ * getRelationsDepth): a `*`-prefixed or `.*`-suffixed path counts every
+ * segment as a relation, a plain path all but its last (the column). Store
+ * routes refuse anything deeper than http.storeRelationsLimit — 3 unless
+ * medusa-config raises it, which it does not. Fake fetches never enforce
+ * this, so the bag broke on every read while this suite stayed green.
+ */
+function relationsDepth(field: string): number {
+  const star = field.startsWith("*") || field.endsWith(".*");
+  const segments = field.replace(/(^\*|\.\*$)/, "").split(".").length;
+  return star ? segments : segments - 1;
+}
+
+test("every store fields clause stays inside Medusa's relation-depth limit", () => {
+  // Pin the mirror against the two paths that actually broke the cart.
+  assert.equal(relationsDepth("*items.variant.product.metadata"), 4);
+  assert.equal(relationsDepth("items.variant.product.metadata"), 3);
+  for (const [name, clause] of Object.entries({ PRODUCT_FIELDS, CART_FIELDS, STOCK_FIELDS, COLLECTION_FIELDS })) {
+    for (const field of clause.split(",")) {
+      const path = field.replace(/^[+-]/, "");
+      assert.ok(relationsDepth(path) <= 3, `${name}: "${field}" expands ${relationsDepth(path)} relations (max 3)`);
+    }
+  }
+});
+
+test("a product's categories map to their handles; none reads as []", () => {
+  const withCategory = mapProduct({ ...PRODUCT_FIXTURE, categories: [{ id: "pcat_1", handle: "rings" }] } as never);
+  assert.deepEqual(withCategory.categories, ["rings"]);
+  assert.deepEqual(mapProduct({ ...PRODUCT_FIXTURE, categories: undefined } as never).categories, []);
+});
+
+test("a variant Medusa does not count (tracking off, or backorders) is buyable, not sold out", () => {
+  const variant = PRODUCT_FIXTURE.variants[0]!;
+  const untracked = mapProduct({ ...PRODUCT_FIXTURE, variants: [{ ...variant, inventory_quantity: undefined, manage_inventory: false }] } as never);
+  assert.equal(untracked.variants[0]!.inventory, UNTRACKED_STOCK);
+  const backorder = mapProduct({ ...PRODUCT_FIXTURE, variants: [{ ...variant, inventory_quantity: 0, allow_backorder: true }] } as never);
+  assert.equal(backorder.variants[0]!.inventory, UNTRACKED_STOCK);
+  const tracked = mapProduct({ ...PRODUCT_FIXTURE, variants: [{ ...variant, inventory_quantity: 0, manage_inventory: true }] } as never);
+  assert.equal(tracked.variants[0]!.inventory, 0);
 });

@@ -2,6 +2,10 @@ import "server-only";
 
 import type { Collection, Product, Review, Variant } from "@siumora/core";
 
+import type { CatalogCategory } from "@siumora/sdk/medusa";
+
+import { categoryBranch, nonEmptyCategories } from "@/components/site-navigation";
+
 import { api } from "./api";
 
 /**
@@ -75,15 +79,30 @@ export async function findVariant(
   return undefined;
 }
 
-/** Only expose categories actually supported by the selected backend. */
-export async function listCategories() {
+/**
+ * Every active, public category the store API returns (Medusa only),
+ * including empty ones — for resolving a /shop?category= link.
+ */
+export async function listAllCategories(): Promise<CatalogCategory[]> {
   const client = api();
   return "listCategories" in client
     ? client.listCategories({ revalidate: CATALOG_REVALIDATE_SECONDS }) : [];
 }
 
-export async function listProductsInCategory(categoryId: string): Promise<Product[]> {
+/** Categories worth a navigation link: those with a listable product in or beneath them. */
+export async function listCategories(): Promise<CatalogCategory[]> {
+  const categories = await listAllCategories();
+  if (categories.length === 0) return categories;
+  return nonEmptyCategories(categories, await listProducts());
+}
+
+/** Products in a category and everything beneath it. */
+export async function listProductsInCategory(
+  category: Pick<CatalogCategory, "id">,
+  categories: readonly CatalogCategory[],
+): Promise<Product[]> {
   const client = api();
   return "listProductsInCategory" in client
-    ? client.listProductsInCategory(categoryId, { revalidate: CATALOG_REVALIDATE_SECONDS }) : [];
+    ? client.listProductsInCategory(categoryBranch(categories, category.id), { revalidate: CATALOG_REVALIDATE_SECONDS })
+    : [];
 }

@@ -40,7 +40,9 @@ function revalidateCartSurfaces() {
 }
 
 async function currentCount(): Promise<number> {
-  const lines = await getCartLines();
+  // The mutation already landed; a failed re-read (reported in cart-store)
+  // must not turn it into a crashed action.
+  const lines = await getCartLines().catch(() => []);
   return lines.reduce((sum, line) => sum + line.quantity, 0);
 }
 
@@ -75,8 +77,13 @@ export async function removeFromCart(
  * render, so the header can stay static (the LCP budget the badge already
  * protects) and the drawer always shows the server's lines.
  */
-export async function readBag(): Promise<{ lines: CartLine[]; subtotal: number; count: number }> {
-  const lines = await getCartLines();
+export async function readBag(): Promise<{ lines: CartLine[]; subtotal: number; count: number; unavailable?: boolean }> {
+  let lines: CartLine[];
+  try {
+    lines = await getCartLines();
+  } catch {
+    return { lines: [], subtotal: 0, count: 0, unavailable: true };
+  }
   return {
     lines,
     subtotal: lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0),

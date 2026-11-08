@@ -1,5 +1,6 @@
 import "server-only";
 
+import * as Sentry from "@sentry/nextjs";
 import { headers } from "next/headers";
 
 import { clientIpHeaders } from "./client-ip";
@@ -30,8 +31,22 @@ async function forwardedClientIp(): Promise<Record<string, string> | undefined> 
   return clientIpHeaders(await headers(), secret);
 }
 
+/**
+ * A published product the storefront had to leave out — live in the admin,
+ * invisible to every shopper. Fingerprinted per product so Sentry raises
+ * one issue each instead of one event per page render.
+ */
+function reportSkippedProduct({ handle, reason }: { handle: string; reason: string }): void {
+  Sentry.captureMessage(`Product "${handle}" is hidden from the storefront: ${reason}`, {
+    level: "warning",
+    fingerprint: ["catalog-skipped-product", handle],
+    tags: { area: "catalog", product: handle },
+  });
+}
+
 export function api(): CommerceClient {
   return (globalForApi.__siumoraApi ??= createCommerceClient(process.env, {
     clientIpHeaders: forwardedClientIp,
+    onSkippedProduct: reportSkippedProduct,
   }));
 }
