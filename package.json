@@ -15,7 +15,7 @@
   },
   "devDependencies": {
     "tsup": "^8.5.1",
-    "turbo": "^2.10.7",
+    "turbo": "^2.11.10",
     "typescript": "^5.9.3"
   },
   "pnpm": {
