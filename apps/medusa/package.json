@@ -24,7 +24,7 @@
     "@siumora/analytics": "workspace:*",
     "@siumora/core": "workspace:*",
     "@siumora/messaging": "workspace:*",
-    "awilix": "^8.0.1",
+    "awilix": "^13.0.5",
     "ioredis": "^5.11.1",
     "pg": "^8.22.0"
   },
