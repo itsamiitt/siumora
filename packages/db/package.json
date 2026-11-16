@@ -24,13 +24,13 @@
   },
   "dependencies": {
     "@siumora/core": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "pg": "^8.22.0"
+    "drizzle-orm": "^0.45.4",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@siumora/config-ts": "workspace:*",
     "@types/node": "^22.19.0",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.9.3"
   }
 }
