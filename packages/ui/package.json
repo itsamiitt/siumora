@@ -13,7 +13,7 @@
   "dependencies": {
     "@siumora/in-locale": "workspace:*",
     "clsx": "^2.1.1",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.7.0"
   },
   "peerDependencies": {
     "react": "^19.2.0"
