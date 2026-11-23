@@ -162,9 +162,15 @@ test("mobile menu exposes collections and utilities, then closes on Escape and n
   const mobileTheme = menu.getByRole("button", { name: "Switch between light and dark" });
   await mobileTheme.click();
   const nextThemeLabel = await mobileTheme.textContent();
+  // Close the menu before widening: an open menu still carries its own
+  // toggle, and the footer's must show the same theme. Naming the footer's
+  // keeps the check about shared state, not about which one rendered first.
+  await page.keyboard.press("Escape");
+  await expect(nav).toBeHidden();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(page.getByRole("button", { name: "Switch between light and dark" }))
-    .toHaveText(nextThemeLabel?.trim() ?? "");
+  await expect(
+    page.getByRole("contentinfo").getByRole("button", { name: "Switch between light and dark" }),
+  ).toHaveText(nextThemeLabel?.trim() ?? "");
 });
 
 test("mobile collection filters are keyboard accessible and shareable", async ({ page }) => {
