@@ -1,0 +1,21 @@
+# Build context for apps/medusa/Dockerfile and apps/worker/Dockerfile.
+**/node_modules
+**/.next
+**/.next-e2e
+**/.medusa
+**/dist
+**/.turbo
+**/coverage
+**/test-results
+**/playwright-report
+apps/medusa/public/admin
+.git
+.github
+.claude
+brand-kit
+plan
+docs
+track-d
+**/.env
+**/.env.*
+!.env.example

@@ -301,3 +301,55 @@ jobs:
           name: e2e-medusa-traces
           path: apps/e2e/test-results/
           if-no-files-found: ignore
+
+  # Plan 18 L2.2: the deployable images. Both must build, and the Medusa image
+  # must migrate and answer /health against a real Postgres — a deploy that
+  # finds a broken image finds it here first, not on the host.
+  images:
+    name: Docker images build and boot
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: siumora
+          POSTGRES_PASSWORD: siumora
+          POSTGRES_DB: siumora_medusa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U siumora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the Medusa image
+        run: docker build -f apps/medusa/Dockerfile -t siumora-medusa:ci .
+
+      - name: Build the worker image
+        run: docker build -f apps/worker/Dockerfile -t siumora-worker:ci .
+
+      # APP_ENV=staging: the image runs NODE_ENV=production, and the boot guard
+      # refuses that without an APP_ENV — staging boots without production
+      # secrets, which this smoke test does not have.
+      - name: Migrate and boot the Medusa image
+        run: |
+          ENV="-e APP_ENV=staging -e MEDUSA_DATABASE_URL=postgresql://siumora:siumora@localhost:5432/siumora_medusa"
+          docker run --rm --network host $ENV siumora-medusa:ci npx medusa db:migrate
+          docker run -d --name medusa --network host $ENV siumora-medusa:ci
+          for attempt in $(seq 1 120); do
+            if curl -sf http://localhost:9000/health > /dev/null; then
+              echo "medusa image up after ${attempt}s"
+              curl -sf -o /dev/null -w "admin: %{http_code}\n" http://localhost:9000/app
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "medusa image did not come up"
+          docker logs medusa
+          exit 1
