@@ -3,8 +3,12 @@
 How Siumora is built, deployed, migrated, rolled back and restored. The
 topology and the per-service secrets are in
 [`plan/18-production-launch.md`](../plan/18-production-launch.md) §L2.1 and
-§L2.4. Host-specific commands are marked **(host)** — fill them in once the
-hosting decision (plan 18, D1) is made.
+§L2.4. Hosting is AWS Mumbai (ECS Fargate, RDS, ElastiCache) plus Vercel
+(plan 18, D1). The infrastructure is Terraform in
+[`infra/aws`](../infra/aws/README.md); the deploy is
+[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml), which does
+the steps below automatically — staging after every green CI on `main`,
+production by hand with reviewer approval.
 
 ## What runs where
 
@@ -25,11 +29,13 @@ Medusa one against Postgres on every PR.
 From the repository root:
 
 ```bash
-docker build -f apps/medusa/Dockerfile -t ghcr.io/itsamiitt/siumora-medusa:$(git rev-parse --short HEAD) .
-docker build -f apps/worker/Dockerfile -t ghcr.io/itsamiitt/siumora-worker:$(git rev-parse --short HEAD) .
+docker build -f apps/medusa/Dockerfile -t <ECR_MEDUSA>:$(git rev-parse HEAD) .
+docker build -f apps/worker/Dockerfile -t <ECR_WORKER>:$(git rev-parse HEAD) .
 ```
 
-Tag with the git SHA, never `latest`: a rollback names the tag it returns to.
+Tag with the full git SHA, never `latest`: the ECR repositories are
+immutable, and a rollback names the tag it returns to. The deploy workflow
+builds and pushes these itself.
 
 ## A deploy, in order
 
@@ -40,8 +46,10 @@ build time, so Medusa must be up and current before the web build.
    database (direct connection string, not the pooler):
    `docker run --rm --env-file <env> <medusa-image> npx medusa db:migrate`.
    If it fails, stop: nothing else has changed yet.
-2. **Medusa server**, then **Medusa worker**, then **outbox worker** — roll
-   each to the new tag **(host)**. Wait for `/health` on the server.
+2. **Medusa server**, then **Medusa worker**, then **outbox worker** — a new
+   task definition revision with the new image, then `aws ecs update-service`
+   and `aws ecs wait services-stable`. The deployment circuit breaker rolls a
+   service that cannot start back to its previous revision by itself.
 3. **Storefront:** Vercel deploy of the same commit (production: promote).
 4. **Smoke:**
    ```bash
@@ -76,8 +84,11 @@ Fastest first:
    ([incident-runbook.md](incident-runbook.md)).
 2. **`SITE_PHASE=coming-soon`** on the storefront and redeploy — closes the
    shop behind the coming-soon page.
-3. **Previous version:** Vercel instant rollback for the storefront; roll
-   the containers back to the previous SHA tag **(host)**.
+3. **Previous version:** Vercel instant rollback for the storefront. For the
+   containers, Actions → Deploy → Run workflow at the previous good commit,
+   or by hand: `aws ecs update-service --cluster siumora-<env> --service
+   <service> --task-definition <family>:<previous revision>` for each of the
+   three services.
 4. **Restore the database** — only for data corruption, below.
 
 **Migrations are forward-only.** A rollback to an older image runs against
@@ -91,13 +102,18 @@ Point-in-time recovery is on (plan 18 L2.6) and a nightly `pg_dump` lands
 in a separate R2 bucket for 30 days.
 
 1. Pull the kill-switch and set `SITE_PHASE=coming-soon`.
-2. Restore to a **new** database at the chosen time **(host)** — never over
-   the live one.
+2. Restore to a **new** database at the chosen time — never over the live
+   one: `aws rds restore-db-instance-to-point-in-time
+   --source-db-instance-identifier siumora-<env> --target-db-instance-identifier
+   siumora-<env>-restore --restore-time <UTC time>` (same subnet group and
+   security group).
 3. Boot one Medusa server against it with `APP_ENV=staging` and check:
    recent orders, the GST invoice series (`gst-recon` on demand), the audit
    log.
-4. Repoint `MEDUSA_DATABASE_URL` on all three services to it, restart,
-   smoke, reopen.
+4. Repoint `MEDUSA_DATABASE_URL` in the `siumora-<env>/generated` secret to
+   it, force a new deployment of all three services, smoke, reopen. Then
+   bring Terraform in line (import the restored instance or rename) before
+   the next apply.
 
 Record how long the staging drill took here: **(not yet run)**.
 

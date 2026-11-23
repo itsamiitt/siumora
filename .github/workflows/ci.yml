@@ -353,3 +353,22 @@ jobs:
           echo "medusa image did not come up"
           docker logs medusa
           exit 1
+
+  # Plan 18 L2.1: the AWS infrastructure code must parse, be formatted, and
+  # validate against the provider schemas. No credentials and no state —
+  # applying it is a person's job (infra/aws/README.md).
+  terraform:
+    name: Terraform validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/aws
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+      - run: terraform fmt -check -recursive -diff
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate

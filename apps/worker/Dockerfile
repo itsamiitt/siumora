@@ -18,6 +18,10 @@ RUN pnpm turbo run build --filter=@siumora/worker
 
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
+# AWS's RDS certificate bundle, so Postgres TLS verifies (MEDUSA_DATABASE_SSL=
+# verify, the worker's DATABASE_SSL=true) instead of trusting blindly.
+ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/certs/rds-global-bundle.pem
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/rds-global-bundle.pem
 WORKDIR /repo
 COPY --from=build --chown=node:node /repo /repo
 USER node

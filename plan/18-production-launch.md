@@ -30,7 +30,7 @@ This plan sits on top of the existing launch documents. It does not replace them
 
 | # | Decision | Recommendation | Blocks |
 |---|---|---|---|
-| D1 | Hosting providers | Follow plan 11. Storefront on **Vercel** (functions in `bom1`). Medusa server, Medusa worker and `apps/worker` as containers on **DigitalOcean App Platform, Bangalore**. **Supabase Postgres** in `ap-south-1` with PITR. **Upstash Redis** in Mumbai. **Cloudflare R2** for images. **Cloudflare** DNS and WAF in front. | Track 2 |
+| D1 | Hosting providers | **Decided 23 Nov 2026: AWS Mumbai + Vercel.** Medusa server, Medusa worker and the outbox worker on **ECS Fargate** in ap-south-1, **RDS Postgres 16** (PITR, Multi-AZ in production), **ElastiCache Redis** (TLS), **S3 + CloudFront** for images, ALB + ACM. Storefront on **Vercel** (`bom1`). Terraform in `infra/aws`, deploys by `.github/workflows/deploy.yml`. Supersedes the DigitalOcean/Supabase/Upstash/R2 topology in L2.1. | Track 2 |
 | D2 | Phone-OTP operators (`ADMIN_PHONES`) in production | **Turn the path off in production.** Operators use the Medusa dashboard at `/app`, which has staff MFA. The web `/admin` readout redirects there. This closes the README's "operator access has no second factor" gap without building TOTP. | L1.3 |
 | D3 | Launch mode | **Soft launch COD-only, then turn on prepaid** once Razorpay live KYC clears. The kill-switch and `razorpayConfigured` already hide prepaid when keys are absent (plan 16 Phase C). Opening sale no longer waits on KYC. | Track 6 |
 | D4 | Launch date | Set it only after the founder track has dates for GSTIN and DLT. These are the long poles (§8). | Track 6 |
@@ -175,6 +175,10 @@ Both runbooks still describe Fastify endpoints and phone-OTP owner sign-in. Afte
 ## Track 2 — Infrastructure and deploy pipeline (4–5 days)
 
 ### L2.1 Topology (from decision D1)
+
+> **Superseded by the D1 decision (AWS Mumbai + Vercel).** The built version
+> is `infra/aws` (Terraform) and `.github/workflows/deploy.yml`; see
+> `infra/aws/README.md`. The diagram below is the original proposal.
 
 ```
 Cloudflare (DNS, WAF, bot rules, TLS)

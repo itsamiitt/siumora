@@ -31,6 +31,7 @@ export interface MedusaBootEnv {
   S3_ACCESS_KEY_ID?: string;
   S3_SECRET_ACCESS_KEY?: string;
   S3_BUCKET?: string;
+  S3_AUTHENTICATION_METHOD?: string;
   STOREFRONT_URL?: string;
   STORE_CORS?: string;
   ADMIN_CORS?: string;
@@ -139,7 +140,13 @@ export function assertMedusaBootSafety(env: MedusaBootEnv): {
     // Without S3 the file module falls back to local disk and stamps
     // http://localhost into every uploaded image URL — broken on the
     // storefront and lost on the next redeploy.
-    for (const key of ["S3_FILE_URL", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_BUCKET"] as const) {
+    // On AWS the task role grants the bucket (S3_AUTHENTICATION_METHOD=
+    // s3-iam-role) and there are no keys; anywhere else they are required.
+    const iamRole = env.S3_AUTHENTICATION_METHOD === "s3-iam-role";
+    const s3Keys = iamRole
+      ? (["S3_FILE_URL", "S3_BUCKET"] as const)
+      : (["S3_FILE_URL", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_BUCKET"] as const);
+    for (const key of s3Keys) {
       if (!env[key]) refuse(`${key} is not set (product images need object storage)`);
     }
     // These default to localhost in medusa-config.ts: unset, the storefront

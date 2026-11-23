@@ -59,6 +59,18 @@ export default defineConfig({
     databaseUrl:
       process.env.MEDUSA_DATABASE_URL ??
       "postgresql://postgres:postgres@localhost:5432/siumora_medusa",
+    // TLS to a managed Postgres that enforces it (RDS 16+ sets
+    // rds.force_ssl). "verify" checks the server certificate — the images
+    // trust AWS's RDS CA bundle through NODE_EXTRA_CA_CERTS. "no-verify"
+    // encrypts without checking, for a host whose CA is not bundled. Unset:
+    // plain connection (local, CI).
+    ...(process.env.MEDUSA_DATABASE_SSL === "verify" || process.env.MEDUSA_DATABASE_SSL === "no-verify"
+      ? {
+          databaseDriverOptions: {
+            connection: { ssl: { rejectUnauthorized: process.env.MEDUSA_DATABASE_SSL === "verify" } },
+          },
+        }
+      : {}),
     // No redisUrl locally: dev runs on the in-memory event bus / workflow
     // engine. Production sets MEDUSA_REDIS_URL (Upstash Mumbai) — a
     // checkout-path dependency, priced in the design doc, and required by
@@ -119,6 +131,12 @@ export default defineConfig({
                 id: "s3",
                 options: {
                   file_url: process.env.S3_FILE_URL,
+                  // On AWS the ECS task role grants the bucket
+                  // (S3_AUTHENTICATION_METHOD=s3-iam-role): no keys to store
+                  // or rotate. R2 and local S3 keep access keys.
+                  ...(process.env.S3_AUTHENTICATION_METHOD === "s3-iam-role"
+                    ? { authentication_method: "s3-iam-role" as const }
+                    : {}),
                   access_key_id: process.env.S3_ACCESS_KEY_ID,
                   secret_access_key: process.env.S3_SECRET_ACCESS_KEY,
                   region: process.env.S3_REGION ?? "auto",

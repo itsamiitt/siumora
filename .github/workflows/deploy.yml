@@ -1,0 +1,170 @@
+name: Deploy
+
+# Plan 18 L2.5 — AWS Mumbai (ECS Fargate) + Vercel. Order matters:
+#   images → migrate → Medusa server, Medusa worker, outbox worker → storefront
+# The storefront prerenders product pages from Medusa at build time, so it
+# deploys last, against the API it will talk to.
+#
+# staging:    automatically after CI passes on main.
+# production: by hand (Actions → Deploy → Run workflow), through the
+#             `production` GitHub Environment, whose required reviewers gate it.
+#
+# Off until the repository variable AWS_DEPLOY_ENABLED is "true" — set it once
+# `infra/aws` has been applied and each GitHub Environment holds:
+#   secrets:   AWS_DEPLOY_ROLE_ARN, VERCEL_TOKEN
+#   variables: the `deploy_settings` Terraform output (AWS_REGION, ECS_CLUSTER,
+#              ECR_MEDUSA, ECR_WORKER, MIGRATION_SUBNETS, MIGRATION_SECURITY_GP,
+#              TASK_FAMILY_SERVER, TASK_FAMILY_WORKER, TASK_FAMILY_OUTBOX,
+#              API_URL), plus VERCEL_ORG_ID, VERCEL_PROJECT_ID and, for
+#              staging, VERCEL_ALIAS (e.g. staging.siumora.com).
+# docs/deploy-runbook.md has the whole procedure.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Where to deploy
+        type: choice
+        options: [staging, production]
+        default: staging
+
+# One deploy per environment at a time; a newer one waits rather than racing.
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'staging' }}
+    if: >-
+      vars.AWS_DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    env:
+      APP_ENV: ${{ github.event.inputs.environment || 'staging' }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Repositories are immutable: a SHA already pushed (a re-run, or the
+      # production promotion of what staging ran) is reused, never rebuilt.
+      - name: Build and push images
+        run: |
+          set -euo pipefail
+          push() {
+            local repo="$1" dockerfile="$2"
+            if aws ecr describe-images --repository-name "${repo##*/}" --image-ids imageTag="$SHA" >/dev/null 2>&1; then
+              echo "$repo:$SHA already pushed"
+              return
+            fi
+            docker build -f "$dockerfile" -t "$repo:$SHA" .
+            docker push "$repo:$SHA"
+          }
+          push "${{ vars.ECR_MEDUSA }}" apps/medusa/Dockerfile
+          push "${{ vars.ECR_WORKER }}" apps/worker/Dockerfile
+
+      # Terraform owns each task definition's shape (env, secrets, size); this
+      # takes the family's latest revision and swaps in the new image only.
+      - name: Register task definitions
+        id: taskdefs
+        run: |
+          set -euo pipefail
+          revise() {
+            local family="$1" image="$2"
+            aws ecs describe-task-definition --task-definition "$family" --query taskDefinition \
+              | jq --arg image "$image" '.containerDefinitions[0].image = $image
+                  | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                        .compatibilities, .registeredAt, .registeredBy)' > td.json
+            aws ecs register-task-definition --cli-input-json file://td.json \
+              --query taskDefinition.taskDefinitionArn --output text
+          }
+          echo "server=$(revise "${{ vars.TASK_FAMILY_SERVER }}" "${{ vars.ECR_MEDUSA }}:$SHA")" >> "$GITHUB_OUTPUT"
+          echo "worker=$(revise "${{ vars.TASK_FAMILY_WORKER }}" "${{ vars.ECR_MEDUSA }}:$SHA")" >> "$GITHUB_OUTPUT"
+          echo "outbox=$(revise "${{ vars.TASK_FAMILY_OUTBOX }}" "${{ vars.ECR_WORKER }}:$SHA")" >> "$GITHUB_OUTPUT"
+
+      # A one-off of the new server image. A failed migration stops the
+      # deploy before any service moves.
+      - name: Migrate the database
+        run: |
+          set -euo pipefail
+          task=$(aws ecs run-task --cluster "$ECS_CLUSTER" --launch-type FARGATE \
+            --task-definition "${{ steps.taskdefs.outputs.server }}" \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ vars.MIGRATION_SUBNETS }}],securityGroups=[${{ vars.MIGRATION_SECURITY_GP }}],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"medusa","command":["npx","medusa","db:migrate"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migration task $task"
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$task"
+          code=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migration exit code: $code"
+          if [ "$code" != "0" ]; then
+            aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task" \
+              --query 'tasks[0].{stopped:stoppedReason,container:containers[0].reason}'
+            exit 1
+          fi
+
+      - name: Roll out the services
+        run: |
+          set -euo pipefail
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service medusa-server \
+            --task-definition "${{ steps.taskdefs.outputs.server }}" >/dev/null
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service medusa-worker \
+            --task-definition "${{ steps.taskdefs.outputs.worker }}" >/dev/null
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service outbox-worker \
+            --task-definition "${{ steps.taskdefs.outputs.outbox }}" >/dev/null
+          # The circuit breaker rolls a failing service back by itself; this
+          # wait turns that into a red deploy instead of a silent one.
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" \
+            --services medusa-server medusa-worker outbox-worker
+
+      - name: API smoke
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 5 --retry-delay 5 "${{ vars.API_URL }}/health"
+          echo
+
+      - name: Deploy the storefront
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          npm install --global vercel@41.7.3 >/dev/null
+          if [ "$APP_ENV" = "production" ]; then
+            vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
+            vercel build --prod --token "$VERCEL_TOKEN"
+            url=$(vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN")
+          else
+            vercel pull --yes --environment=preview --token "$VERCEL_TOKEN"
+            vercel build --token "$VERCEL_TOKEN"
+            url=$(vercel deploy --prebuilt --token "$VERCEL_TOKEN")
+            if [ -n "${{ vars.VERCEL_ALIAS }}" ]; then
+              vercel alias set "$url" "${{ vars.VERCEL_ALIAS }}" --token "$VERCEL_TOKEN"
+            fi
+          fi
+          echo "storefront: $url"
+          curl -fsS -o /dev/null -w "storefront home: %{http_code}\n" "$url"

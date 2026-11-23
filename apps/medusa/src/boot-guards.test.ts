@@ -156,6 +156,21 @@ test("production refuses phone-OTP operators unless the break-glass is named", (
   assert.doesNotThrow(() => assertMedusaBootSafety({ APP_ENV: "staging", ADMIN_PHONES: "9000000001" }));
 });
 
+test("on AWS the task role replaces the S3 keys; elsewhere they stay required", () => {
+  const iam = {
+    ...PROD_OK,
+    S3_AUTHENTICATION_METHOD: "s3-iam-role",
+    S3_ACCESS_KEY_ID: undefined,
+    S3_SECRET_ACCESS_KEY: undefined,
+  };
+  assert.doesNotThrow(() => assertMedusaBootSafety(iam));
+  assert.throws(() => assertMedusaBootSafety({ ...iam, S3_BUCKET: undefined }), /S3_BUCKET/);
+  assert.throws(
+    () => assertMedusaBootSafety({ ...iam, S3_AUTHENTICATION_METHOD: undefined }),
+    /S3_ACCESS_KEY_ID/,
+  );
+});
+
 test("phone operators are allowed everywhere but production", () => {
   assert.equal(phoneOperatorsAllowed({}), true);
   assert.equal(phoneOperatorsAllowed({ APP_ENV: "staging" }), true);
