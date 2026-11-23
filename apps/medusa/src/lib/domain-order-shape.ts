@@ -9,7 +9,7 @@ import {
   type OrderLineWire,
 } from "../modules/siumora-order/identity.ts";
 import { initialSiumoraStatus } from "../modules/returns-ndr/lifecycle.ts";
-import { codFeeOf, paymentMethodOf } from "../modules/siumora-order/checkout-rules.ts";
+import { codFeeOf, conversionEventId, paymentMethodOf } from "../modules/siumora-order/checkout-rules.ts";
 
 /**
  * Pure assembly of core's domain Order from Medusa wire shapes — the Medusa
@@ -137,9 +137,7 @@ export function toDomainOrder(wire: OrderWire, sidecars: OrderSidecars): Order {
     address,
     interState,
     placedAt: new Date(wire.created_at).toISOString(),
-    // No analytics outbox on this stack yet (M2 wave B outbox port); the
-    // order id is a stable stand-in, never served to a tag.
-    eventId: wire.id,
+    eventId: conversionEventId(wire.metadata, wire.id),
     deliveryAttempts: sidecars.ndrAttempts,
     ...(ndrReason ? { ndrReason: ndrReason as Order["ndrReason"] } : {}),
     ...(sidecars.invoice ? { invoiceNumber: sidecars.invoice.invoice_number } : {}),

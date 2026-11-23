@@ -198,6 +198,8 @@ interface SiumoraOrderWire {
     number: string;
     status: string;
     paymentMethod: string;
+    /** The analytics dedup id the server-side conversion also carries. */
+    eventId?: string;
     placedAt: string;
     address: { province?: string | null } | null;
     subtotal: number;

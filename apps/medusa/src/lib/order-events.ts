@@ -9,7 +9,7 @@ import { emit } from "@siumora/analytics/server";
 import { conversionEventFor, messageFor, purchasePayload } from "../modules/outbox/compose";
 import { enqueueNotification, recordTrackingEvent, type SqlClient } from "../modules/outbox/data";
 import { getShipment, type SqlClient as StatusSqlClient } from "../modules/returns-ndr/data";
-import { paymentMethodOf } from "../modules/siumora-order/checkout-rules";
+import { conversionEventId, paymentMethodOf } from "../modules/siumora-order/checkout-rules";
 import { toDomainOrder, type OrderWire } from "./domain-order-shape";
 
 /**
@@ -94,7 +94,7 @@ export async function orderMoved(container: MedusaContainer, orderId: string, st
     const event = conversionEventFor(method, status);
     if (!event) return;
 
-    const eventId = typeof metadata.siumora_event_id === "string" ? metadata.siumora_event_id : orderId;
+    const eventId = conversionEventId(metadata, orderId);
     const gaClientId = typeof metadata.siumora_ga_client_id === "string" ? metadata.siumora_ga_client_id : undefined;
     const payload = purchasePayload({
       eventId,

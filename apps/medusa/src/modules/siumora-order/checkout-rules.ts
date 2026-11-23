@@ -90,6 +90,21 @@ export function paymentMethodOf(
     : "cod";
 }
 
+/**
+ * The analytics dedup id of an order: the one the checkout's browser pixel
+ * used (cart metadata, copied to the order), else the order id. The purchase
+ * the browser fires on the order page and the server-side GA4/Meta CAPI
+ * conversion must carry the same value, or the sale counts twice — so every
+ * reader (the order card, the conversion, the domain order) uses this.
+ */
+export function conversionEventId(
+  metadata: Record<string, unknown> | null | undefined,
+  orderId: string,
+): string {
+  const value = metadata?.siumora_event_id;
+  return typeof value === "string" && value.length > 0 ? value : orderId;
+}
+
 // ── Refusals ───────────────────────────────────────────────────────────────
 
 export interface CheckoutRefusal {

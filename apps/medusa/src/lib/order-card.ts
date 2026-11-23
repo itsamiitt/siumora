@@ -9,7 +9,7 @@ import {
   type SqlClient as StatusSqlClient,
 } from "../modules/returns-ndr/data";
 import { returnEnvelope } from "../modules/returns-ndr/lifecycle";
-import { codFeeOf, paymentMethodOf } from "../modules/siumora-order/checkout-rules";
+import { codFeeOf, conversionEventId, paymentMethodOf } from "../modules/siumora-order/checkout-rules";
 import {
   lineDiscountPaise,
   linePaise,
@@ -172,6 +172,9 @@ export async function orderCard(
       number: identity.order_number,
       status: statusRow?.status ?? siumoraOrderStatus(order.status),
       paymentMethod: paymentMethodOf(order.metadata),
+      // The purchase the order page fires must carry the id the server-side
+      // conversion uses, or GA4 and Meta count the sale twice.
+      eventId: conversionEventId(order.metadata, order.id),
       placedAt: order.created_at,
       address: order.shipping_address ?? null,
       subtotal,

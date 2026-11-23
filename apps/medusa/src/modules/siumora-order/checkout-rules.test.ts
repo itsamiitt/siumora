@@ -13,6 +13,7 @@ import {
   foldCodFee,
   paiseToMajor,
   parseCompleteBody,
+  conversionEventId,
   paymentMethodOf,
   quoteTotals,
   validateCheckoutAddress,
@@ -333,4 +334,13 @@ test("cleanGiftMessage: tidied, bounded, and dropped when switched off", () => {
   const long = cleanGiftMessage("x".repeat(151), true);
   assert.equal(long.ok, false);
   assert.match((long as { refusal: { body: { fields: { giftMessage: string } } } }).refusal.body.fields.giftMessage, /150/);
+});
+
+test("the conversion event id is the checkout's pixel id, else the order id", () => {
+  // The browser purchase and the server-side conversion read this one rule;
+  // two different answers would count the sale twice in GA4 and Meta.
+  assert.equal(conversionEventId({ siumora_event_id: "ev_123" }, "order_1"), "ev_123");
+  assert.equal(conversionEventId({ siumora_event_id: "" }, "order_1"), "order_1");
+  assert.equal(conversionEventId({ siumora_event_id: 42 }, "order_1"), "order_1");
+  assert.equal(conversionEventId(null, "order_1"), "order_1");
 });

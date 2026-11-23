@@ -74,13 +74,18 @@ const MEDUSA_PORTED = new Set<string>([
   "preparePayment: payment-first, refused honestly without Razorpay keys",
   "confirmOrder and advanceOrder ride the simulation",
   "requestReturn on a delivered order",
-  "wishlist toggle and read",
+  "wishlist toggle, read, and idempotent remove",
   "getStoreConfig: the kill-switch card",
   "invoicePdf: bytes for the key-holder, 404 for anyone else",
   // M2 wave B: the ops routes (/admin/siumora/*) behind the dual-actor
   // operator gate — the operator signs in by phone OTP, so the live
   // instance needs ADMIN_PHONES to include the operator number.
   "admin reads: metrics, audit, remittances, gstr1",
+  // Auth plan phases 1-2 (2026-10-10): revocable sessions, profile, the
+  // account's own orders, and the data-principal rights all ported.
+  "signOut, signOutEverywhere, updateProfile",
+  "listOrders: the signed-in customer's own orders",
+  "exportMyData and requestErasure",
 ]);
 
 /**
@@ -230,6 +235,20 @@ function assertExactKeys(value: unknown, expected: string[], label: string) {
   assert.deepEqual(Object.keys(value as object).sort(), [...expected].sort(), label);
 }
 
+/**
+ * Exact shape where the SDK types a field optional (a Medusa-only addition,
+ * or one present only in some states): every `required` key must be there,
+ * and nothing outside `required` + `optional` may be. An unnamed key is
+ * still a contract break.
+ */
+function assertKeys(value: unknown, required: string[], optional: string[], label: string) {
+  assert.ok(value && typeof value === "object", `${label} is not an object`);
+  const keys = Object.keys(value as object);
+  const missing = required.filter((key) => !keys.includes(key));
+  const unexpected = keys.filter((key) => !required.includes(key) && !optional.includes(key));
+  assert.deepEqual({ missing, unexpected }, { missing: [], unexpected: [] }, label);
+}
+
 const ADDRESS = {
   name: "Asha Menon",
   phone: CUSTOMER_PHONE,
@@ -248,7 +267,7 @@ async function signedInClient(phone: string) {
   const actual = testPhone(phone);
   const issued = await client.requestOtp(actual);
   const verified = await client.verifyOtp(actual, issued.code!);
-  return { client: client.withToken(verified.token), verified };
+  return { client: client.withToken(verified.token), verified, phone: actual };
 }
 
 /**
@@ -278,11 +297,24 @@ async function cartWithItem(quantity = 1) {
   return { cartId, variantId };
 }
 
+/**
+ * Who places a COD order. Medusa withholds cash on delivery from a delivery
+ * number nobody has verified (`cod_requires_otp`, on by default, plan 16
+ * Phase C): the buyer signs in with that number first, exactly as the
+ * storefront's verify sheet does. Fastify (frozen) places it as a guest.
+ */
+async function codBuyer(): Promise<{ buyer: ContractClient; address: typeof ADDRESS }> {
+  if (usingFastify) return { buyer: client, address: ADDRESS };
+  const { client: buyer, phone } = await signedInClient(CUSTOMER_PHONE);
+  return { buyer, address: { ...ADDRESS, phone } };
+}
+
 async function placeCodOrder() {
   const { cartId, variantId } = await cartWithItem();
-  const placed = await client.checkout({
+  const { buyer, address } = await codBuyer();
+  const placed = await buyer.checkout({
     cartId,
-    address: ADDRESS,
+    address,
     paymentMethod: "cod",
     eventId: crypto.randomUUID(),
   });
@@ -296,7 +328,7 @@ async function placeCodOrder() {
 
 contract("requestOtp: envelope, and the echo-mode code", async () => {
   const issued = await client.requestOtp(testPhone(CUSTOMER_PHONE));
-  assertExactKeys(issued, ["ok", "maskedPhone", "expiresAt", "delivery", "code"], "requestOtp");
+  assertKeys(issued, ["ok", "maskedPhone", "expiresAt", "delivery", "code"], ["channel", "channels"], "requestOtp");
   assert.equal(issued.ok, true);
   assert.match(issued.code!, /^\d{6}$/);
   assert.ok(["sent", "not_configured"].includes(issued.delivery));
@@ -306,14 +338,16 @@ contract("verifyOtp: token, admin flag, and the customer card", async () => {
   const phone = testPhone(CUSTOMER_PHONE);
   const issued = await client.requestOtp(phone);
   const verified = await client.verifyOtp(phone, issued.code!);
-  assertExactKeys(
+  assertKeys(
     verified,
     ["ok", "token", "expiresAt", "isAdmin", "claimedOrders", "customer"],
+    ["claimableOrders"],
     "verifyOtp",
   );
-  assertExactKeys(
+  assertKeys(
     verified.customer,
     ["id", "phone", "maskedPhone", "name", "email"],
+    ["emailVerified"],
     "verifyOtp.customer",
   );
   assert.equal(verified.isAdmin, false);
@@ -326,13 +360,16 @@ contract("getSession: both arms of the union", async () => {
 
   const { client: signed } = await signedInClient(CUSTOMER_PHONE);
   const session = await signed.getSession();
-  assertExactKeys(session, ["signedIn", "isAdmin", "customer"], "getSession");
+  assertKeys(session, ["signedIn", "isAdmin", "customer"], ["session"], "getSession");
 });
 
 contract("signOut, signOutEverywhere, updateProfile", async () => {
   const { client: signed } = await signedInClient(CUSTOMER_PHONE);
 
-  const profile = await signed.updateProfile({ name: "Asha M", email: "asha@example.com" });
+  // A fresh address per run: Medusa's instance is shared across the run and
+  // an email may sit on one account only (409 email_in_use).
+  const email = usingFastify ? "asha@example.com" : `asha.${crypto.randomUUID().slice(0, 8)}@example.com`;
+  const profile = await signed.updateProfile({ name: "Asha M", email });
   assertExactKeys(profile, ["ok", "customer"], "updateProfile");
   assert.equal(profile.customer.name, "Asha M");
 
@@ -393,10 +430,12 @@ contract("cart lifecycle: create, add, read, requantify, clear", async () => {
   assertExactKeys(added, ["ok", "count"], "addToCart");
 
   const cart = await client.getCart(cartId);
-  assertExactKeys(cart, ["cartId", "lines", "totals"], "getCart");
-  assertExactKeys(
+  assertKeys(cart, ["cartId", "lines", "totals"], ["coupons"], "getCart");
+  assertKeys(
     cart.totals,
     ["mrpTotal", "subtotal", "savings", "shipping", "codFee", "total", "gst", "itemCount"],
+    // Coupon paise off the lines (plan 16 B19), from core's calculateTotals.
+    ["discount"],
     "getCart.totals",
   );
   assert.equal(cart.totals.itemCount, 2);
@@ -424,9 +463,11 @@ contract("quoteCheckout: the risk card", async () => {
   const riskCard = ["serviceable", "estimatedDays", "addressQuality", "rto", "cod", "phoneVerified"];
   // Plan 16 B8: Medusa also quotes the totals the order will carry. Fastify
   // is frozen (plan 16 R7) and keeps the bare risk card.
-  assertExactKeys(
+  assertKeys(
     quote,
     usingFastify ? riskCard : [...riskCard, "totals", "cartVersion", "codNeedsVerification"],
+    // Coupons applied to the cart (plan 16 B19).
+    usingFastify ? [] : ["coupons"],
     "quoteCheckout",
   );
   assertExactKeys(quote.addressQuality, ["score", "issues", "needsReview"], "addressQuality");
@@ -434,9 +475,10 @@ contract("quoteCheckout: the risk card", async () => {
   if (!usingFastify) {
     assert.ok(quote.totals, "a seeded cart quotes totals");
     assertExactKeys(quote.totals, ["prepaid", "cod", "interState"], "totals");
-    assertExactKeys(
+    assertKeys(
       quote.totals.prepaid,
       ["subtotal", "shipping", "codFee", "total", "gst"],
+      ["discount"],
       "totals.prepaid",
     );
     if (quote.totals.cod) {
@@ -507,15 +549,16 @@ contract("checkout: COD envelope, order number format, access key", async () => 
 
 contract("checkout: the same idempotency key returns the same order", async () => {
   const { cartId } = await cartWithItem();
+  const { buyer, address } = await codBuyer();
   const key = crypto.randomUUID();
   const input = {
     cartId,
-    address: ADDRESS,
+    address,
     paymentMethod: "cod" as const,
     eventId: crypto.randomUUID(),
   };
-  const first = await client.checkout(input, key);
-  const second = await client.checkout(input, key);
+  const first = await buyer.checkout(input, key);
+  const second = await buyer.checkout(input, key);
   assert.equal(second.orderNumber, first.orderNumber);
 });
 
@@ -540,13 +583,14 @@ contract("getOrder: guest key gets the card, no key gets undefined", async () =>
 });
 
 contract("listOrders: the signed-in customer's own orders", async () => {
-  const { client: signed } = await signedInClient(CUSTOMER_PHONE);
+  const { client: signed, phone } = await signedInClient(CUSTOMER_PHONE);
   const cartId = await signed.createCart();
   const products = await signed.listProducts();
   await signed.addToCart(cartId, products[0]!.variants[0]!.id);
   await signed.checkout({
     cartId,
-    address: ADDRESS,
+    // The verified number delivers: Medusa withholds COD from any other.
+    address: { ...ADDRESS, phone },
     paymentMethod: "cod",
     eventId: crypto.randomUUID(),
   });
@@ -645,7 +689,9 @@ contract("admin reads: metrics, audit, remittances, gstr1", async () => {
 
 contract("getStoreConfig: the kill-switch card", async () => {
   const config = await client.getStoreConfig();
-  assertExactKeys(config, ["paymentsEnabled", "razorpayConfigured"], "getStoreConfig");
+  // simulationEnabled is always there (the SDK fills it in for a backend
+  // that predates it); checkout's optional pieces are Medusa's (plan 16 I).
+  assertKeys(config, ["paymentsEnabled", "razorpayConfigured", "simulationEnabled"], ["checkout"], "getStoreConfig");
   assert.equal(typeof config.paymentsEnabled, "boolean");
 });
 
