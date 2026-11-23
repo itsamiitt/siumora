@@ -23,6 +23,7 @@ A production‑grade, AI‑ready architecture for a single‑vendor e‑commerce
 | [13-complete-functional-roadmap.md](13-complete-functional-roadmap.md) | Current route-by-route functionality, admin parity, speed and UI acceptance, and cutover gates |
 | [16-cart-checkout-experience.md](16-cart-checkout-experience.md) | **Master plan v3:** cart & checkout UX, Medusa-only backend (payments, shipping, messaging, Fastify retirement), native-Medusa admin, timeline |
 | [17-one-backend.md](17-one-backend.md) | Two backends (Fastify + Medusa): options compared, plugin vs port research, recommendation to finish Medusa and retire Fastify before launch |
+| [18-production-launch.md](18-production-launch.md) | Production launch plan: fix red CI, close code gaps, infra and deploy pipeline, staging launch-gate checks, Fastify retirement, founder/compliance track, go-live and rollback |
 
 ## Stack at a glance
 
