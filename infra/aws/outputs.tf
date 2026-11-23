@@ -16,7 +16,26 @@ output "certificate_validation_records" {
 
 output "images_url" {
   description = "S3_FILE_URL: where product images are served from."
-  value       = "https://${aws_cloudfront_distribution.images.domain_name}"
+  value       = local.images_url
+}
+
+output "images_dns" {
+  description = "With images_domain set: CNAME it to `target`, and add the certificate validation records."
+  value = local.custom_images ? {
+    target = aws_cloudfront_distribution.images.domain_name
+    certificate_validation = [
+      for option in aws_acm_certificate.images[0].domain_validation_options : {
+        name  = option.resource_record_name
+        type  = option.resource_record_type
+        value = option.resource_record_value
+      }
+    ]
+  } : null
+}
+
+output "alerts_topic_arn" {
+  description = "Subscribe more endpoints (SMS, Slack via Chatbot) here."
+  value       = aws_sns_topic.alerts.arn
 }
 
 output "ecr_repositories" {

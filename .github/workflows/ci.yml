@@ -242,14 +242,13 @@ jobs:
   # Plan 16 Phase J: the browser suite against Medusa — the launch path. Its
   # own fresh Medusa database, Medusa on :9123 and the storefront built with
   # COMMERCE_BACKEND=medusa (apps/e2e/setup/prepare-medusa.ts and
-  # playwright.config.ts). Non-blocking until it has been seen green once;
-  # then drop continue-on-error and run scripts/retire-fastify.mjs, which
-  # makes this the only E2E job.
+  # playwright.config.ts). Blocking since 23 Nov 2026 (plan 18 L0.5), after
+  # two consecutive green runs. scripts/retire-fastify.mjs, run after the
+  # staging launch checks, makes this the only E2E job.
   e2e-medusa:
     name: E2E (medusa)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    continue-on-error: true
 
     services:
       postgres:

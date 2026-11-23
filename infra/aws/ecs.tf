@@ -107,7 +107,7 @@ locals {
     { name = "ADMIN_CORS", value = local.api_origin },
     { name = "AUTH_CORS", value = "${local.cors_origins},${local.api_origin}" },
     { name = "ADMIN_USER_ROLES", value = var.admin_user_roles },
-    { name = "S3_FILE_URL", value = "https://${aws_cloudfront_distribution.images.domain_name}" },
+    { name = "S3_FILE_URL", value = local.images_url },
     { name = "S3_BUCKET", value = aws_s3_bucket.images.bucket },
     { name = "S3_REGION", value = var.region },
     { name = "S3_AUTHENTICATION_METHOD", value = "s3-iam-role" },

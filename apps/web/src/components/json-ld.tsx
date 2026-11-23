@@ -13,7 +13,6 @@ export function JsonLdScript({ data }: { data: JsonLd | JsonLd[] }) {
   return (
     <script
       type="application/ld+json"
-      // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: json }}
     />
   );

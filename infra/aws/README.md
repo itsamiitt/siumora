@@ -18,6 +18,8 @@ Vercel). One root module, applied once per environment — `staging` and
 | Secrets | Secrets Manager `siumora-<env>/generated` (Terraform) and `/providers` (you) | Injected into tasks by key |
 | CI access | GitHub OIDC role trusted only by this repo's `<env>` GitHub Environment | No AWS keys in GitHub |
 | Logs | CloudWatch `/siumora/<env>/*`, 14 / 90 days | |
+| Firewall | AWS WAF on the ALB: IP reputation, known bad inputs, common rules; rate ceilings on sign-in, coupons and direct floods | Counts per shopper by the storefront's signed `x-siumora-client-ip`, not by Vercel's IP |
+| Alarms | SNS topic emailed to `alert_email`: any `[money-alert]` log line, API 5xx / unhealthy / p95, a service with no running task, Postgres CPU / storage / connections, Redis memory | Confirm the subscription email once |
 
 Not here, by design: the storefront (Vercel), DNS (Cloudflare), and
 Razorpay/Shiprocket credentials (saved encrypted in the Medusa dashboard,
@@ -39,7 +41,9 @@ aws s3api put-public-access-block --bucket siumora-terraform-state \
 ## Apply an environment
 
 Edit `env/<env>.tfvars` first: `admin_user_roles` (real staff, at least one
-`email:owner`) and, for production, the `seller` block.
+`email:owner`), `alert_email`, and, for production, the `seller` block.
+`images_domain` is optional (e.g. `images.siumora.com`); set it and the
+`images_dns` output lists the CNAME and certificate records to add.
 
 ```bash
 cd infra/aws

@@ -17,6 +17,9 @@ export function PreviewUnlock() {
   useEffect(() => {
     if (!open) return;
     const modal = dialog.current;
+    // The button that opened the dialog, captured now: focus returns to it
+    // on close, and the ref may point elsewhere by cleanup time.
+    const opener = trigger.current;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     modal?.showModal();
@@ -25,7 +28,7 @@ export function PreviewUnlock() {
       request.current?.abort();
       modal?.close();
       document.body.style.overflow = previousOverflow;
-      trigger.current?.focus();
+      opener?.focus();
     };
   }, [open]);
 
@@ -46,6 +49,9 @@ export function PreviewUnlock() {
       const result: { message?: string } = await response.json();
       if (controller.signal.aborted) return;
       if (response.ok) {
+        // A full load on purpose: the preview cookie was just set HttpOnly,
+        // and the server-rendered storefront must be requested with it.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
         window.location.assign("/");
         return;
       }

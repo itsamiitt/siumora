@@ -11,3 +11,8 @@ seller = {
   email      = "care@siumora.com"
   phone      = ""
 }
+
+# Alarms go here; confirm the subscription email AWS sends once.
+alert_email = ""
+# Optional custom image host (needs a CNAME + certificate records, see outputs).
+images_domain = ""

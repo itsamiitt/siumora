@@ -106,3 +106,15 @@ variable "create_github_oidc_provider" {
   type        = bool
   default     = true
 }
+
+variable "alert_email" {
+  description = "Where alarms are emailed (confirm the SNS subscription mail once). Empty: alarms fire with nobody subscribed."
+  type        = string
+  default     = ""
+}
+
+variable "images_domain" {
+  description = "Custom hostname for product images, e.g. images.siumora.com. Empty keeps the *.cloudfront.net name."
+  type        = string
+  default     = ""
+}

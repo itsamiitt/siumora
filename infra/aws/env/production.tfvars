@@ -20,3 +20,8 @@ redis_replicas    = 1
 server_count      = 2
 # The staging apply created the account-wide GitHub OIDC provider.
 create_github_oidc_provider = false
+
+# Alarms go here; confirm the subscription email AWS sends once.
+alert_email = ""
+# Optional custom image host (needs a CNAME + certificate records, see outputs).
+images_domain = ""

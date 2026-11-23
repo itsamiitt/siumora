@@ -39,8 +39,30 @@ data "aws_cloudfront_cache_policy" "optimized" {
   name = "Managed-CachingOptimized"
 }
 
+locals {
+  custom_images = var.images_domain != ""
+  images_url    = local.custom_images ? "https://${var.images_domain}" : "https://${aws_cloudfront_distribution.images.domain_name}"
+}
+
+resource "aws_acm_certificate" "images" {
+  count             = local.custom_images ? 1 : 0
+  provider          = aws.us_east_1
+  domain_name       = var.images_domain
+  validation_method = "DNS"
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_acm_certificate_validation" "images" {
+  count           = local.custom_images ? 1 : 0
+  provider        = aws.us_east_1
+  certificate_arn = aws_acm_certificate.images[0].arn
+}
+
 resource "aws_cloudfront_distribution" "images" {
   enabled         = true
+  aliases         = local.custom_images ? [var.images_domain] : []
   comment         = "Siumora ${var.environment} product images"
   price_class     = "PriceClass_200" # includes India edge locations
   is_ipv6_enabled = true
@@ -66,12 +88,14 @@ resource "aws_cloudfront_distribution" "images" {
     }
   }
 
-  # The default *.cloudfront.net name; a custom images.siumora.com needs a
-  # us-east-1 certificate and can be added later without changing Medusa
-  # beyond S3_FILE_URL (already-uploaded rows keep the old URL, which keeps
-  # working).
+  # The *.cloudfront.net name until var.images_domain is set. Switching
+  # later changes S3_FILE_URL for new uploads only; rows already uploaded
+  # keep the cloudfront.net URL, which keeps working.
   viewer_certificate {
-    cloudfront_default_certificate = true
+    cloudfront_default_certificate = local.custom_images ? null : true
+    acm_certificate_arn            = local.custom_images ? aws_acm_certificate_validation.images[0].certificate_arn : null
+    ssl_support_method             = local.custom_images ? "sni-only" : null
+    minimum_protocol_version       = local.custom_images ? "TLSv1.2_2021" : null
   }
 }
 

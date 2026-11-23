@@ -12,6 +12,21 @@ This plan sits on top of the existing launch documents. It does not replace them
 
 ---
 
+## Progress (updated 23 Nov 2026)
+
+| Track | State | Where |
+|---|---|---|
+| 0 · Green `main` | ✅ Done. All CI jobs green, including the Medusa contract suite and the Medusa E2E for the first time since October. The Medusa E2E is now blocking (L0.5). Dependabot majors held (L0.6). | `023b999`, `ed298f1`, `5044bc2` |
+| 1 · Code gaps | ✅ Done. GST recon job, refund audit rows, phone operators off in production, storefront launch guards, `seed-store.ts`, runbooks. Live check of the recon job pending (Track 3). | `bd9920b` |
+| 2 · Infra + deploy | ✅ Code done for AWS Mumbai + Vercel (D1): Dockerfiles (built and booted in CI), Terraform in `infra/aws` (validated in CI) with WAF, CloudWatch alarms (incl. every `[money-alert]`), PITR backups and an optional image domain; `deploy.yml`. **Waiting on:** an AWS account, `terraform apply`, Vercel project, GitHub Environments. | `cbe210f`, `e98eea1`, this commit |
+| 3 · Tooling for the checks | ✅ `tooling/load/checkout.k6.js` (G10) and `docs/launch-gate-results.md` (the evidence sheet; G2 recorded). | this commit |
+| 3 · Staging checks | ⬜ Needs Track 2 applied and provider test accounts (F3, F5, F6). | — |
+| 4 · Retire Fastify | ⬜ After Track 3, by decision. | — |
+| 5 · Founder track | ⬜ Not started from the code side. | §Track 5 |
+| 6 · Go-live | ⬜ | — |
+
+Found and fixed along the way: on Medusa the order page's `purchase` event had no `event_id`, so GA4/Meta would have counted every sale twice (`ed298f1`).
+
 ## 0. Where we are (checked 23 Nov 2026)
 
 | Area | State | Evidence |

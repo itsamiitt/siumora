@@ -81,7 +81,9 @@ export function DeliveryStep({
   // The lookup answers later than the keystroke that asked: compare against
   // what is in the fields when it lands, not when it was sent.
   const latest = useRef(draft);
-  latest.current = draft;
+  useEffect(() => {
+    latest.current = draft;
+  });
 
   const { pincode } = draft;
   useEffect(() => {
@@ -104,7 +106,9 @@ export function DeliveryStep({
     return () => {
       cancelled = true;
     };
-    // Looked up when the pincode changes; the draft is read, not watched.
+    // Looked up when the pincode changes; the draft is read (through
+    // `latest`), not watched, and onDraft is the parent's setter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pincode, savedId]);
 
   const serviceable = quote ? quote.serviceable : lookup?.pincode === pincode ? lookup.serviceable : undefined;

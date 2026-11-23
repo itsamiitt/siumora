@@ -19,6 +19,21 @@ terraform {
   backend "s3" {}
 }
 
+# CloudFront certificates must live in us-east-1 (only used when
+# var.images_domain is set).
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project     = "siumora"
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
+}
+
 provider "aws" {
   region = var.region
 
