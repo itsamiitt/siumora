@@ -1,7 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { DEV_SECRET, DEV_TOKEN_SECRET, assertMedusaBootSafety, resolveAppEnv, resolveWorkerMode } from "./boot-guards.ts";
+import {
+  DEV_SECRET,
+  DEV_TOKEN_SECRET,
+  TAX_ORIGIN_STATE_CODE,
+  assertMedusaBootSafety,
+  phoneOperatorsAllowed,
+  resolveAppEnv,
+  resolveWorkerMode,
+} from "./boot-guards.ts";
 
 const PROD_OK = {
   APP_ENV: "production",
@@ -133,4 +141,35 @@ test("worker mode defaults to shared and refuses unknown values", () => {
   assert.equal(resolveWorkerMode({ MEDUSA_WORKER_MODE: "worker" }), "worker");
   assert.equal(assertMedusaBootSafety({ MEDUSA_WORKER_MODE: "server" }).workerMode, "server");
   assert.throws(() => resolveWorkerMode({ MEDUSA_WORKER_MODE: "both" }), /MEDUSA_WORKER_MODE/);
+});
+
+test("production refuses phone-OTP operators unless the break-glass is named", () => {
+  assert.throws(
+    () => assertMedusaBootSafety({ ...PROD_OK, ADMIN_PHONES: "9000000001" }),
+    /ADMIN_PHONES is set/,
+  );
+  assert.doesNotThrow(() =>
+    assertMedusaBootSafety({ ...PROD_OK, ADMIN_PHONES: "9000000001", SIUMORA_PHONE_OPERATORS: "allow" }),
+  );
+  assert.doesNotThrow(() => assertMedusaBootSafety({ ...PROD_OK, ADMIN_PHONES: "  " }));
+  // Staging and development keep the phone path.
+  assert.doesNotThrow(() => assertMedusaBootSafety({ APP_ENV: "staging", ADMIN_PHONES: "9000000001" }));
+});
+
+test("phone operators are allowed everywhere but production", () => {
+  assert.equal(phoneOperatorsAllowed({}), true);
+  assert.equal(phoneOperatorsAllowed({ APP_ENV: "staging" }), true);
+  assert.equal(phoneOperatorsAllowed({ APP_ENV: "production" }), false);
+  assert.equal(phoneOperatorsAllowed({ APP_ENV: "production", SIUMORA_PHONE_OPERATORS: "yes" }), false);
+  assert.equal(phoneOperatorsAllowed({ APP_ENV: "production", SIUMORA_PHONE_OPERATORS: "allow" }), true);
+});
+
+test("production refuses a seller state the tax split does not use", () => {
+  assert.doesNotThrow(() => assertMedusaBootSafety({ ...PROD_OK, SELLER_STATE_CODE: "27" }));
+  assert.throws(() => assertMedusaBootSafety({ ...PROD_OK, SELLER_STATE_CODE: "29" }), /SELLER_STATE_CODE is 29/);
+});
+
+test("the tax origin mirror agrees with core", async () => {
+  const core = await import("@siumora/core");
+  assert.equal(TAX_ORIGIN_STATE_CODE, core.ORIGIN_STATE_CODE);
 });

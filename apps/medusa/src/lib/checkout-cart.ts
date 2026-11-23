@@ -11,6 +11,7 @@ import {
 // @ts-ignore -- TS1479 until @siumora/core ships require-condition types
 import { normalisePhone } from "@siumora/core";
 
+import type { SqlClient as AuditSqlClient } from "../modules/audit/data";
 import { createRazorpayClient } from "../modules/razorpay-payment/client";
 import { razorpayCredentials, type RazorpayCredentials } from "../modules/razorpay-payment/credentials";
 import { readPayments, type PaymentReading } from "../modules/razorpay-payment/decide";
@@ -42,6 +43,7 @@ import {
 } from "../modules/siumora-order/identity";
 import { customerSignals } from "./checkout-context";
 import { codGate, type CheckoutAddress } from "./checkout-identity";
+import { auditUnplacedRefund } from "./payment-audit";
 
 /**
  * Getting a cart ready to pay — shared by the prepare route (prepaid, before
@@ -431,8 +433,17 @@ export async function refundUnplaced(
   // The ledger row (security review, item 2) is settled so the recon sweep
   // does not refund it twice; a failure is left open for the sweep to retry.
   const orderId = session.data?.razorpay_order_id;
+  const pg = req.scope.resolve(ContainerRegistrationKeys.PG_CONNECTION) as unknown as LedgerRawClient;
+  await auditUnplacedRefund(pg as unknown as AuditSqlClient, {
+    source: "checkout",
+    razorpayOrderId: typeof orderId === "string" ? orderId : undefined,
+    paymentId: reading.paymentId,
+    amountPaise,
+    sessionId: session.id,
+    ok: refund.ok,
+    ...(refund.ok ? { refundId: refund.refundId } : { error: refund.error }),
+  });
   if (refund.ok && typeof orderId === "string") {
-    const pg = req.scope.resolve(ContainerRegistrationKeys.PG_CONNECTION) as unknown as LedgerRawClient;
     await settleLedgerOrder(pg, orderId, "refunded").catch(() => undefined);
   }
   return refund.ok ? "refunded" : "refund_failed";

@@ -5,6 +5,13 @@ import * as Sentry from "@sentry/nextjs";
  * is set, so local dev, CI and preview builds send nothing.
  */
 export async function register() {
+  // The same launch guards next.config.ts runs at build, again at server
+  // start — an env changed on the host after the build is caught too.
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { assertLaunchReady } = await import("./lib/launch-guards");
+    assertLaunchReady(process.env);
+  }
+
   const dsn = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
   if (!dsn) return;
 

@@ -5,6 +5,11 @@
  *
  *   npx medusa exec ./src/scripts/seed.ts
  *
+ * This is the DEMO seed: the store setup (seedStore, below) plus the four
+ * demo products with placeholder art and demo stock. Development, CI, E2E
+ * and staging only — production refuses it. Production runs
+ * src/scripts/seed-store.ts, the store setup alone (plan 18 L1.5).
+ *
  * Idempotent by create-if-missing, not wipe-and-reinsert. The Fastify seed
  * (packages/db/src/seed.ts) clears its tables first; here that would tear
  * through cross-module links (sales channels, price sets, inventory), so
@@ -76,18 +81,15 @@ const MANUAL_PROVIDER = "manual_manual";
 /** Shiprocket (plan 16 Phase F; module id "shiprocket" → "shiprocket_shiprocket"). */
 const SHIPROCKET_PROVIDER = "shiprocket_shiprocket";
 
-export default async function seed({ container }: ExecArgs) {
-  // Not as harmless as "idempotent" sounds: re-running resets stock to the
-  // demo quantities and moves Standard Delivery back to Shiprocket. Refuse
-  // production unless SEED_FORCE=1 says the operator really means it.
-  const production = process.env.APP_ENV === "production" || process.env.NODE_ENV === "production";
-  if (production && process.env.SEED_FORCE !== "1") {
-    throw new Error(
-      "seed refused: APP_ENV/NODE_ENV is production and this seed resets stock levels and the " +
-        "Standard Delivery provider. Set SEED_FORCE=1 only if you really mean to overwrite production.",
-    );
-  }
-
+/**
+ * The store itself — sales channel, India region (INR, Razorpay + system
+ * payment), tax region, warehouse, shipping profile, Standard Delivery on
+ * Shiprocket, store defaults and the storefront's publishable key. No
+ * products and no stock: safe to run against production, where it is the
+ * whole seed (src/scripts/seed-store.ts, plan 18 L1.5). Convergent: a second
+ * run changes nothing.
+ */
+export async function seedStore(container: ExecArgs["container"]) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const query = container.resolve(ContainerRegistrationKeys.QUERY);
 
@@ -397,6 +399,25 @@ export default async function seed({ container }: ExecArgs) {
     });
     logger.info("seed: linked publishable API key to sales channel");
   }
+
+  return { logger, query, region, salesChannel, stockLocation, shippingProfile, apiKey };
+}
+
+export default async function seed({ container }: ExecArgs) {
+  // Not as harmless as "idempotent" sounds: re-running resets stock to the
+  // demo quantities and moves Standard Delivery back to Shiprocket. Refuse
+  // production unless SEED_FORCE=1 says the operator really means it.
+  const production = process.env.APP_ENV === "production" || process.env.NODE_ENV === "production";
+  if (production && process.env.SEED_FORCE !== "1") {
+    throw new Error(
+      "seed refused: APP_ENV/NODE_ENV is production and this is the demo seed (placeholder products, " +
+        "demo stock levels). Production runs ./src/scripts/seed-store.ts. Set SEED_FORCE=1 only if you " +
+        "really mean to put the demo catalog on production.",
+    );
+  }
+
+  const { logger, query, region, salesChannel, stockLocation, shippingProfile, apiKey } =
+    await seedStore(container);
 
   // ── Collections ───────────────────────────────────────────────────────
   const collectionHandles = COLLECTIONS.map((c) => c.handle);

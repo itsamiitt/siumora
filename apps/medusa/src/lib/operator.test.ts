@@ -186,3 +186,11 @@ test("production never falls back to everyone-is-owner", () => {
   );
   assert.equal(listed.ok && listed.role, "owner");
 });
+
+test("production refuses a listed phone operator unless the break-glass is named", () => {
+  const phoneOperator = { actorType: "customer", contact: "9000000001" } as const;
+  const env = { ADMIN_PHONES: "9000000001:owner", APP_ENV: "production" };
+  assert.equal(decideRole(phoneOperator, env).ok, false);
+  assert.equal(decideRole(phoneOperator, { ...env, SIUMORA_PHONE_OPERATORS: "allow" }).ok, true);
+  assert.equal(decideRole(phoneOperator, { ...env, APP_ENV: "staging" }).ok, true);
+});

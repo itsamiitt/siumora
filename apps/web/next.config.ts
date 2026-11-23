@@ -1,6 +1,13 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
 
+import { assertLaunchReady } from "./src/lib/launch-guards.ts";
+
+// Production storefront guards (plan 18 L1.4): with APP_ENV=production a
+// misconfigured deploy fails at build, so the previous one keeps serving.
+// Without APP_ENV (CI, E2E, previews) this checks nothing.
+assertLaunchReady(process.env);
+
 /**
  * The Sentry ingest origin, when a DSN is configured. The browser SDK posts
  * events straight to it, so connect-src must name it — and only it.

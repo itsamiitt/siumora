@@ -14,12 +14,13 @@ moved (design doc, OV-2).
 2. The order reaches `returned`. The customer's VPA is on the return request
    (`refund_to`).
 3. **Pay the order's total** to that VPA from the business account (UPI).
-4. **Record it, immediately**, with the UPI/UTR reference:
+4. **Record it, immediately**, with the UPI/UTR reference: open the order in
+   the dashboard (`/app/orders/<id>`, or search by SIU number), the Siumora
+   card → menu → **Record COD payout** → paste the UTR → confirm. The API
+   behind it, for scripts:
 
 ```bash
-curl -X POST "$API/orders/<number>/returns/payout" \
-  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-  -d '{"reference":"<UTR>"}'
+curl -X POST "https://api.siumora.com/admin/siumora/orders/<SIU-number>/returns/payout"   -H "authorization: Bearer $TOKEN" -H 'content-type: application/json'   -d '{"reference":"<UTR>"}'
 ```
 
 The recording is once-only — a second attempt answers `409 already_paid` with

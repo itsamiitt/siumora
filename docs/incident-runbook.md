@@ -10,45 +10,59 @@ systemic):
 
 - **Capture failures** — orders stuck `pending_payment` while customers say
   they paid; the recon log shows capture errors.
-- **AWB/booking failures** — `/orders/:number/ship` answering 502 repeatedly.
-- **Any invoice CHECK-constraint violation** in the API log. This is the
-  database refusing corrupted books; treat it as fire.
+- **AWB/booking failures** — **Create fulfillment** on orders failing
+  repeatedly (Shiprocket refusing or timing out).
+- **An invoice refusal or a `gst recon` finding** — `invoice refused:` or
+  `[money-alert] gst recon:` in the Medusa log (and Sentry). This is the
+  books refusing to drift; treat it as fire.
 
 ## Pulling it
 
-The switch is a settings row served by the API — no deploy, no restart,
+The switch is a settings row served by Medusa — no deploy, no restart,
 visible within the 30-second cache window (immediately on the instance that
-takes the write).
+takes the write). It needs an owner or operator with `settings:write`.
+
+**From the dashboard (the normal way):**
+
+1. Sign in at `https://api.siumora.com/app` (email, password, then your
+   authenticator code).
+2. **Settings → Store**, the **Checkout & COD** card → menu → **Pause
+   checkout** → confirm.
+3. The card's badge reads **Checkout paused**.
+
+**From a terminal (the dashboard is down but the API is up):** with a
+dashboard session token for a staff user (`$TOKEN`):
 
 ```bash
-# 1. Sign in as an owner (OTP arrives on the admin phone):
-curl -X POST "$API/auth/otp"    -H 'content-type: application/json' -d '{"phone":"<owner phone>"}'
-curl -X POST "$API/auth/verify" -H 'content-type: application/json' -d '{"phone":"<owner phone>","code":"<code>"}'
-# → { "token": "..." }
-
-# 2. Pause:
-curl -X PATCH "$API/admin/settings" \
-  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-  -d '{"key":"payments_enabled","value":false}'
+curl -X PATCH "https://api.siumora.com/admin/siumora/settings"   -H "authorization: Bearer $TOKEN" -H 'content-type: application/json'   -d '{"key":"payments_enabled","value":false}'
 ```
 
-Effect: `POST /checkout` refuses with `503 payments_paused` before any order
-is created; the storefront's checkout renders the paused page; browsing, bag
-and wishlist keep serving. Verify: `curl "$API/config"` →
-`"paymentsEnabled": false`.
+Effect: cart completion and payment preparation refuse with
+`503 payments_paused` before any order or Razorpay order is created; the
+storefront's checkout renders the paused page; browsing, bag and wishlist
+keep serving. Verify:
+
+```bash
+curl "https://api.siumora.com/store/siumora/config"   -H "x-publishable-api-key: $MEDUSA_PUBLISHABLE_KEY"
+# → "paymentsEnabled": false
+```
+
+**If Medusa itself is down:** set `SITE_PHASE=coming-soon` on the storefront
+and redeploy — the shop closes behind the coming-soon page until it is back.
 
 ## While it is off
 
 1. **Money first.** Razorpay dashboard → Payments → refund anything captured
    against an order that did not confirm. Customers who paid and got nothing
    are the only emergency in this building.
-2. Read the API log for the root cause. Fix forward — the switch buys time,
+2. Read Sentry and the Medusa log for the root cause. Fix forward — the switch buys time,
    it does not fix anything.
 3. Parcels already booked keep moving; the courier webhook keeps landing.
 
 ## Turning it back on
 
-Same PATCH with `"value": true`. Then place one real small order end-to-end
+**Resume checkout** on the same card (or the same PATCH with
+`"value": true`). Then place one real small order end-to-end
 before announcing anything.
 
 ## The drill (launch gate box 7)

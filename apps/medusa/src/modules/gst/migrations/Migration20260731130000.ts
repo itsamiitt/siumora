@@ -26,10 +26,8 @@ import { Migration } from "@medusajs/framework/mikro-orm/migrations";
  *   respect interstate; the write is REFUSED on drift) plus a daily
  *   reconciliation that proves books against Medusa's order totals and
  *   alarms.
- *   TODO(gst-recon-daily): the reconciliation job is M2's separate recon
- *   work-item — it extends the existing recon pattern over this table; this
- *   named hook is where it plugs in. Do not treat the write-time assertion
- *   as a substitute for it.
+ *   That reconciliation is jobs/gst-recon.ts (daily, over modules/gst/
+ *   recon.ts). Do not treat the write-time assertion as a substitute for it.
  */
 export class Migration20260731130000 extends Migration {
 

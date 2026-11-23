@@ -38,7 +38,34 @@ export interface MedusaBootEnv {
   ADMIN_USER_ROLES?: string;
   TURNSTILE_SECRET_KEY?: string;
   CLIENT_IP_SECRET?: string;
+  ADMIN_PHONES?: string;
+  SIUMORA_PHONE_OPERATORS?: string;
+  SELLER_STATE_CODE?: string;
 }
+
+/**
+ * Phone-OTP operators (ADMIN_PHONES) prove only a code on a listed number —
+ * no second factor (README "Not yet safe to publish"). Production runs its
+ * staff through the Medusa dashboard, which has MFA (plan 18 D2), so the
+ * phone path is off there unless SIUMORA_PHONE_OPERATORS=allow says, loudly,
+ * that someone has chosen the break-glass. Read by the boot guard below and
+ * again at sign-in and at the ops gate, so a runtime env change fails closed.
+ */
+export function phoneOperatorsAllowed(env: {
+  APP_ENV?: string | undefined;
+  SIUMORA_PHONE_OPERATORS?: string | undefined;
+}): boolean {
+  return env.APP_ENV !== "production" || env.SIUMORA_PHONE_OPERATORS === "allow";
+}
+
+/**
+ * The state the tax split is computed from. @siumora/core's isInterState
+ * compares against its ORIGIN_STATE_CODE constant ("27", Maharashtra); the
+ * invoice PDF prints SELLER_STATE_CODE. If the two ever differ, every
+ * invoice charges the wrong tax heads. boot-guards.test.ts pins this mirror
+ * against core.
+ */
+export const TAX_ORIGIN_STATE_CODE = "27";
 
 export type WorkerMode = "shared" | "worker" | "server";
 
@@ -141,6 +168,18 @@ export function assertMedusaBootSafety(env: MedusaBootEnv): {
     // misconfiguration worth refusing loudly rather than ignoring.
     if (env.COURIER_SIMULATION === "true") refuse("COURIER_SIMULATION must not be set");
     if (env.OTP_ECHO === "true") refuse("OTP_ECHO must not be set");
+    if (env.ADMIN_PHONES?.trim() && !phoneOperatorsAllowed(env)) {
+      refuse(
+        "ADMIN_PHONES is set — phone-OTP operators have no second factor; use dashboard users " +
+          "(ADMIN_USER_ROLES, with MFA), or set SIUMORA_PHONE_OPERATORS=allow to break glass",
+      );
+    }
+    if (env.SELLER_STATE_CODE && env.SELLER_STATE_CODE.trim() !== TAX_ORIGIN_STATE_CODE) {
+      refuse(
+        `SELLER_STATE_CODE is ${env.SELLER_STATE_CODE} but tax is split from state ${TAX_ORIGIN_STATE_CODE} ` +
+          "(@siumora/core ORIGIN_STATE_CODE) — every invoice would carry the wrong tax heads",
+      );
+    }
   }
 
   return { appEnv, jwtSecret, cookieSecret, workerMode };

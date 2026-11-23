@@ -25,6 +25,7 @@ import {
   phoneKey,
   type SessionKind,
 } from "../modules/customer-session/session";
+import { phoneOperatorsAllowed } from "../boot-guards";
 import { clientIp } from "./client-ip";
 import { emailVerified } from "./email-verification";
 import { guestEmail, realEmail } from "./guest-email";
@@ -61,11 +62,15 @@ export async function logAuthEvent(
   await recordAuthEvent(pgOf(req), { ...eventContext(req, phone), ...event });
 }
 
-/** ADMIN_PHONES decides operator sessions, read on every sign-in. */
+/**
+ * ADMIN_PHONES decides operator sessions, read on every sign-in — except in
+ * production, where phone operators are off (plan 18 D2, boot-guards.ts).
+ */
 export function sessionKindFor(
   phone: string,
   env: Record<string, string | undefined> = process.env,
 ): SessionKind {
+  if (!phoneOperatorsAllowed(env)) return "customer";
   return parseAdminRoles(env.ADMIN_PHONES).has(phone) ? "operator" : "customer";
 }
 

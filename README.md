@@ -164,9 +164,13 @@ choice. The OG cards set prices in Cormorant for that reason.
 
 ## Not yet safe to publish
 
-- `/admin` is behind sign-in, but operator access is a phone allow-list with no
-  second factor. Anyone who can receive a code on a listed number gets in.
+- Phone-OTP operator access (`ADMIN_PHONES`) has no second factor, so it is
+  off in production: Medusa refuses to boot with it set, and the storefront's
+  `/admin` redirects to the Medusa dashboard, which requires staff MFA.
 - The statutory disclosures — registered entity, GSTIN, CIN, grievance officer —
-  are unset. Any page carrying them renders a "not ready to publish" notice.
-  They are deliberately not invented; a plausible GSTIN is a false regulatory
+  are unset. Any page carrying them renders a "not ready to publish" notice,
+  and with `APP_ENV=production` the storefront refuses to build without the
+  contact block, or to open sale without the GSTIN and CIN/LLPIN. They are
+  deliberately not invented; a plausible GSTIN is a false regulatory
   disclosure.
+- The path to go-live is [`plan/18-production-launch.md`](plan/18-production-launch.md).

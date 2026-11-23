@@ -1,6 +1,8 @@
 // @ts-ignore -- TS1479 until @siumora/core ships require-condition types
 import { can, isRole, normalisePhone, parseAdminRoles, permissionsFor, roleFor, type Permission, type Role } from "@siumora/core";
 
+import { phoneOperatorsAllowed } from "../boot-guards.ts";
+
 export type { Permission, Role };
 
 /**
@@ -102,7 +104,7 @@ export function parseUserRoles(raw: string | undefined): Map<string, Role> | und
 
 export function decideRole(
   identity: ActorIdentity,
-  env: { ADMIN_PHONES?: string; ADMIN_USER_ROLES?: string; APP_ENV?: string },
+  env: { ADMIN_PHONES?: string; ADMIN_USER_ROLES?: string; APP_ENV?: string; SIUMORA_PHONE_OPERATORS?: string },
 ): RoleDecision {
   if (identity.actorType === "user") {
     const listed = parseUserRoles(env.ADMIN_USER_ROLES);
@@ -116,6 +118,9 @@ export function decideRole(
     return { ok: true, role, permissions: permissionsFor(role) };
   }
 
+  // Phone operators are off in production (plan 18 D2) — the boot guard
+  // refuses ADMIN_PHONES there; this keeps it closed if it is set later.
+  if (!phoneOperatorsAllowed(env)) return { ok: false, refusal: NOT_AN_OPERATOR };
   const phone = normalisePhone(identity.contact ?? "");
   const role = phone
     ? roleFor(phone, parseAdminRoles(env.ADMIN_PHONES))

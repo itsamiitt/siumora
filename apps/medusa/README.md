@@ -23,7 +23,12 @@ at `<backend>/app`.
 ```bash
 # one-time / after schema changes
 pnpm db:migrate
-npx medusa exec ./src/scripts/seed.ts              # prints the publishable key
+npx medusa exec ./src/scripts/seed.ts              # demo seed; prints the publishable key
+npx medusa exec ./src/scripts/seed-serviceability.ts
+
+# production (and any database that must not get the demo catalog):
+# the store setup alone — region, payment, shipping, publishable key
+npx medusa exec ./src/scripts/seed-store.ts
 npx medusa exec ./src/scripts/seed-serviceability.ts
 
 # build (backend dist + admin bundle; copies the bundle to public/admin,

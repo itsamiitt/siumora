@@ -2,6 +2,8 @@ import type { MedusaContainer } from "@medusajs/framework/types";
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 import { processPaymentWorkflow } from "@medusajs/medusa/core-flows";
 
+import { auditUnplacedRefund } from "../lib/payment-audit";
+import type { SqlClient as AuditSqlClient } from "../modules/audit/data";
 import { createRazorpayClient } from "../modules/razorpay-payment/client";
 import { razorpayCredentials } from "../modules/razorpay-payment/credentials";
 import { majorFromPaise, readPayments, reconAction } from "../modules/razorpay-payment/decide";
@@ -144,6 +146,15 @@ async function sweepLedger(
         notes: { reason: "order_not_placed", razorpay_order_id: row.razorpay_order_id },
       });
       await settleLedgerOrder(pg, row.razorpay_order_id, refund.ok ? "refunded" : "refund_failed");
+      await auditUnplacedRefund(pg as unknown as AuditSqlClient, {
+        source: "recon",
+        razorpayOrderId: row.razorpay_order_id,
+        paymentId: reading.paymentId,
+        amountPaise,
+        cartId: row.cart_id,
+        ok: refund.ok,
+        ...(refund.ok ? { refundId: refund.refundId } : { error: refund.error }),
+      });
       logger.error(
         refund.ok
           ? `[money-alert] auto-refund: razorpay ${row.razorpay_order_id} payment ${reading.paymentId} ` +

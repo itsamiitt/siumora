@@ -16,10 +16,9 @@ import { computeInvoice, toInvoiceLines, type GstInvoiceRow, type InvoiceLineWir
  * invoice back (allocate.ts ON CONFLICT per order), so replays and races
  * can never double-issue.
  *
- * TODO(gst-recon-daily): the daily reconciliation job that proves these
- * rows against Medusa's own order totals (the second half of the migration
- * header's disposition) is M2's separate recon work-item and plugs in over
- * this module's table. Not built here.
+ * The daily reconciliation that proves these rows against Medusa's own
+ * order totals (the second half of the migration header's disposition) is
+ * jobs/gst-recon.ts over the pure checks in recon.ts.
  */
 
 /** Structural slice of Medusa's query.graph so this file stays strippable. */

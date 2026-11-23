@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import Loading from "./loading";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import {
   hsnSummary,
@@ -38,6 +39,13 @@ export const metadata: Metadata = {
 
 
 async function AdminPageContents() {
+  // Production runs its staff through the Medusa dashboard, which has MFA;
+  // phone-OTP operators are off there (plan 18 D2, apps/medusa boot-guards).
+  // This readout stays for development and staging.
+  if (process.env.APP_ENV === "production" && process.env.MEDUSA_ADMIN_URL) {
+    redirect(`${process.env.MEDUSA_ADMIN_URL.replace(/\/+$/, "")}/app/siumora`);
+  }
+
   const viewer = await currentViewer();
 
   // Checked here so the page does not render, and again by the API before it
