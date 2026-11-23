@@ -25,6 +25,8 @@ function toDomain(row: Awaited<ReturnType<typeof listProducts>>[number]): Produc
     piercedJewellery: row.piercedJewellery,
     images: (row.images as Product["images"]) ?? [],
     collections: row.collections,
+    // Categories are a Medusa-only concept; the frozen Fastify schema has none.
+    categories: [],
     variants: row.variants.map((variant) => ({
       id: variant.id,
       sku: variant.sku,

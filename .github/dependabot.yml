@@ -19,6 +19,24 @@ updates:
       # them together by hand with the upgrade notes open.
       - dependency-name: "@medusajs/*"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # Launch freeze (plan 18, D6): no majors of the toolchain or of what
+      # Medusa 2.21 pins internally until launch + 30 days. MikroORM and
+      # awilix are resolved by Medusa's module loader; bumping them on their
+      # own breaks it. Security updates still open regardless of this list.
+      - dependency-name: "@mikro-orm/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "awilix"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "ioredis"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tsup"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /

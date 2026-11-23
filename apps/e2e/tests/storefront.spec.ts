@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 
 import { API_URL, BACKEND, MEDUSA_URL } from "../playwright.config.ts";
 import { medusaPublishableKey } from "../setup/backend.ts";
+import { phoneFor, readEchoedCode } from "./otp.ts";
 
 /**
  * Browser truth (plan 6A). The API integration suite already proves the
@@ -246,8 +247,8 @@ test("cookie choice can be reopened and withdrawn from the footer", async ({ pag
  * address — city and state fill from the pincode, the test types them
  * anyway, as a person might — then on to payment.
  */
-async function fillCheckout(page: Page, pincode: string) {
-  await page.locator("#phone").fill("9876543210");
+async function fillCheckout(page: Page, pincode: string, phone = "9876543210") {
+  await page.locator("#phone").fill(phone);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
   await page.locator("#pincode").fill(pincode);
@@ -258,9 +259,28 @@ async function fillCheckout(page: Page, pincode: string) {
   await page.getByRole("button", { name: "Continue to payment" }).click();
 }
 
+/**
+ * COD needs the delivery number verified (`cod_requires_otp`, on by default).
+ * Pressing Place order opens the "Verify your number" sheet with the number
+ * locked; once the code is in, the form carries on placing by itself. A
+ * number verified earlier skips the sheet, so it is answered only if it shows.
+ */
+async function verifyIfAsked(page: Page) {
+  const sendCode = page.getByRole("button", { name: "Send code" });
+  const asked = await Promise.race([
+    sendCode.waitFor({ timeout: 15_000 }).then(() => true),
+    page.waitForURL(/\/orders\/SIU-\d{5}/, { timeout: 15_000 }).then(() => false),
+  ]).catch(() => false);
+  if (!asked) return;
+  await sendCode.click();
+  const code = await readEchoedCode(page);
+  // The code field submits itself once all six digits are in.
+  await page.getByLabel("Enter the code").fill(code);
+}
+
 test("a person can buy the Petal Studs cash on delivery, end to end", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.goto("/products/petal-studs");
   await acceptConsent(page);
 
@@ -268,7 +288,9 @@ test("a person can buy the Petal Studs cash on delivery, end to end", async ({
   await page.goto("/cart");
   await page.getByRole("link", { name: "Checkout" }).click();
 
-  await fillCheckout(page, "400001");
+  // A number of its own per retry: the verify step below asks for a code,
+  // and the OTP route's resend cooldown would refuse a retry on the same one.
+  await fillCheckout(page, "400001", phoneFor("9876543210", testInfo));
 
   // The quote decides the terms before the method is picked — wait for it.
   const cod = page.getByRole("radio", { name: /Cash on delivery/ });
@@ -277,6 +299,7 @@ test("a person can buy the Petal Studs cash on delivery, end to end", async ({
 
   // The total on the button includes whatever the server says COD costs.
   await page.getByRole("button", { name: /Place order · ₹/ }).click();
+  await verifyIfAsked(page);
   await page.waitForURL(/\/orders\/SIU-\d{5}/, { timeout: 30_000 });
 
   const orderNumber = page.url().match(/SIU-\d{5}/)![0];
